@@ -1,0 +1,27 @@
+{
+  "name": "youtube-outlier-demo",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "node -e \"console.log('Local test files are intentionally not included in the repository.')\"",
+    "build": "npm run build:extension && npm run build:server",
+    "build:extension": "node build-extension.mjs",
+    "build:server": "esbuild server/server.ts --bundle --platform=node --target=node18 --format=cjs --external:express --external:dotenv --outfile=server/dist/server.js",
+    "start": "node server/dist/server.js",
+    "dev": "tsx server/server.ts"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.0.327",
+    "@types/express": "^5.0.3",
+    "@types/node": "^24.0.13",
+    "esbuild": "^0.25.6",
+    "tsx": "^4.20.3",
+    "typescript": "^5.8.3"
+  },
+  "engines": { "node": ">=18" }
+}

@@ -1,0 +1,58 @@
+# YouTube Outlier Demo
+
+Chrome MV3 extension and local Express backend for analyzing recent YouTube channel uploads. Project-owned source is TypeScript; browser and Node output is generated JavaScript.
+
+## Install and verify
+
+From this directory:
+
+```bash
+npm install
+npm run typecheck
+npm run build
+```
+
+Useful individual commands:
+
+```bash
+npm run build:extension
+npm run build:server
+npm run dev
+npm start
+```
+
+`npm run dev` runs the TypeScript backend directly. `npm start` runs the compiled backend at `server/dist/server.js`, so run `npm run build:server` first.
+
+Local `*.test.ts` files are intentionally ignored and are not distributed with the repository.
+
+## Configuration
+
+Create `server/.env` from `server/.env.example`:
+
+```text
+YOUTUBE_API_KEY=PASTE_KEY_HERE
+PORT=3000
+# EXTENSION_ID=abcdefghijklmnopqrstuvwxyzabcdef
+# SNAPSHOT_FILE=/optional/custom/snapshots.json
+```
+
+The YouTube API key is read only by the backend. `PORT` defaults to `3000`; `EXTENSION_ID` optionally restricts CORS to one unpacked extension; `SNAPSHOT_FILE` optionally changes the local snapshot file.
+
+## Load the extension
+
+1. Run `npm run build:extension`.
+2. Open `chrome://extensions` and enable Developer Mode.
+3. Choose **Load unpacked** and select `extension/dist`.
+4. Start the backend with `npm start`.
+5. Open a supported YouTube handle or `/channel/UC…` page and click **Scan Channel**.
+
+Successful scans are stored in `server/data/snapshots.json` by default. Growth comparisons require multiple scans at least 30 minutes apart.
+
+## Debugging
+
+- Content UI: the YouTube tab’s DevTools console.
+- Service worker: **Inspect views** on `chrome://extensions`.
+- Popup: right-click the extension popup and choose **Inspect**.
+- Backend: the terminal running `npm run dev` or `npm start`.
+- Compiled extension: `extension/dist`.
+- Compiled backend: `server/dist/server.js`.

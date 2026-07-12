@@ -1,0 +1,26 @@
+{
+  "manifest_version": 3,
+  "name": "YouTube Outlier Demo",
+  "version": "0.1.0",
+  "description": "Scan a YouTube channel and show recent long-form video outliers.",
+  "permissions": ["activeTab", "scripting"],
+  "host_permissions": ["http://localhost:3000/*", "https://*.youtube.com/*"],
+  "action": {
+    "default_title": "YouTube Outlier Demo",
+    "default_popup": "popup.html"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://*.youtube.com/*"],
+      "js": [
+        "vendor/chart.umd.min.js",
+        "content.js"
+      ],
+      "css": ["content.css"],
+      "run_at": "document_idle"
+    }
+  ]
+}

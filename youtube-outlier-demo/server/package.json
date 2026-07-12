@@ -1,0 +1,20 @@
+{
+  "name": "youtube-outlier-demo-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "start": "node dist/server.js",
+    "dev": "tsx server.ts",
+    "build": "npm --prefix .. run build:server",
+    "typecheck": "npm --prefix .. run typecheck",
+    "test": "npm --prefix .. test"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
