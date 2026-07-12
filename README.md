@@ -42,7 +42,7 @@ npm run test:e2e
 npm run build
 ```
 
-The Playwright suite runs 18 Chromium scenarios covering form validation, request payloads, loading and API failures, research evidence, copying, saved-title persistence, recent drafts, keyboard behavior, and mobile overflow. For interactive debugging, use `npm run test:e2e:ui`; for a visible browser run, use `npm run test:e2e:headed`.
+The Playwright suite runs 18 Chromium scenarios covering form validation, request payloads, loading and API failures, research evidence, copying, saved-title persistence, recent drafts, keyboard behavior, and mobile overflow. For interactive debugging, use `npm run test:e2e:ui`; for a visible browser run, use `npm run test:e2e:headed`. Set `PLAYWRIGHT_BASE_URL` and `SITES_BYPASS_TOKEN` to run the same suite against a private production deployment without changing the config.
 
 ## Cost and quota
 

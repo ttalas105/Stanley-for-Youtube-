@@ -1,9 +1,11 @@
 import { expect, test } from "@playwright/test";
 import { buildPayload, buildTitles, generate, mockGeneration, openApp, topics, waitForApp } from "./fixtures";
 
+const testOrigin = new URL(process.env.PLAYWRIGHT_BASE_URL || "http://localhost:3000").origin;
+
 test("copies one generated title to the clipboard", async ({ context, page }) => {
   await context.grantPermissions(["clipboard-read", "clipboard-write"], {
-    origin: "http://localhost:3000",
+    origin: testOrigin,
   });
   await mockGeneration(page);
   await openApp(page);
@@ -17,7 +19,7 @@ test("copies one generated title to the clipboard", async ({ context, page }) =>
 
 test("copies the numbered title list in one action", async ({ context, page }) => {
   await context.grantPermissions(["clipboard-read", "clipboard-write"], {
-    origin: "http://localhost:3000",
+    origin: testOrigin,
   });
   await mockGeneration(page);
   await openApp(page);
