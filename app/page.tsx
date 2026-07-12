@@ -79,16 +79,17 @@ type ApiPayload = {
 
 const DRAFTS_KEY = "stanley-title-drafts";
 const MAX_USER_TURNS = 9;
+const STANLEY_LOGO = "https://stanbrandhub.lovable.app/downloads/Stanley_Logo_Lockup_Dark.png";
 
 const NAV_ITEMS = [
-  { icon: "✦", label: "Create", active: true },
-  { icon: "10.4×", label: "Outliers", badge: true },
-  { icon: "✚", label: "Chrome extension" },
+  { icon: "spark", label: "Create", active: true },
+  { icon: "outlier", label: "Outliers", badge: true },
+  { icon: "extension", label: "Chrome extension" },
 ];
 
 const MODE_OPTIONS: Array<{ value: CreationMode; label: string; icon: string }> = [
   { value: "auto", label: "Auto", icon: "✦" },
-  { value: "idea", label: "Ideas", icon: "○" },
+  { value: "idea", label: "Ideas", icon: "◇" },
   { value: "title", label: "Titles", icon: "T" },
   { value: "thumbnail", label: "Thumbnails", icon: "▣" },
 ];
@@ -153,6 +154,18 @@ function ModePicker({ mode, onChange, disabled }: { mode: CreationMode; onChange
       ))}
     </div>
   );
+}
+
+function ToolIcon({ name }: { name: string }) {
+  if (name === "outlier") return <span className="outlier-mark">10.4×</span>;
+  if (name === "extension") {
+    return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h4.2a2.8 2.8 0 1 1 4.6 2.15V9H21v5h-3.2a2.8 2.8 0 1 0-4.6 2.85V21H8v-3.2a2.8 2.8 0 1 1-2.85-4.6H3V8h4V4a1 1 0 0 1 2-1Z" /></svg>;
+  }
+  return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 2 1.55 5.2L19 9l-5.45 1.8L12 16l-1.55-5.2L5 9l5.45-1.8L12 2Zm6 12 .9 3.1L22 18l-3.1.9L18 22l-.9-3.1L14 18l3.1-.9L18 14Z" /></svg>;
+}
+
+function NewChatIcon() {
+  return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.7 5.3 18.7 9.3M4 20l3.4-.7L19 7.7a1.4 1.4 0 0 0 0-2l-.7-.7a1.4 1.4 0 0 0-2 0L4.7 16.6 4 20Z" /><path d="M13 4H6a2 2 0 0 0-2 2v5" /></svg>;
 }
 
 export default function Home() {
@@ -341,18 +354,17 @@ export default function Home() {
       <aside className="sidebar">
         <a className="wordmark" href="#top" aria-label="Stanley home">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/stanley-mascot.png" alt="" width="48" height="48" />
-          <span>Stanley</span>
+          <img src={STANLEY_LOGO} alt="Stanley" width="174" height="52" />
         </a>
 
         <nav aria-label="Stanley tools">
           {NAV_ITEMS.map((item) => (
             <div className={item.active ? "nav-item active" : "nav-item"} key={item.label}>
               <button className="nav-tool-button" type="button" onClick={() => openTool(item.label, item.active)} aria-current={item.active ? "page" : undefined}>
-                <span className={item.badge ? "nav-badge" : "nav-icon"} aria-hidden="true">{item.icon}</span>
+                <span className={item.badge ? "nav-badge" : "nav-icon"} aria-hidden="true"><ToolIcon name={item.icon} /></span>
                 <span>{item.label}</span>
               </button>
-              {item.active && <button className="nav-new-chat" type="button" onClick={startNewChat} aria-label="Start new chat"><span aria-hidden="true">✎</span></button>}
+              {item.active && <button className="nav-new-chat" type="button" onClick={startNewChat} aria-label="Start new chat"><NewChatIcon /></button>}
             </div>
           ))}
         </nav>
@@ -369,7 +381,7 @@ export default function Home() {
 
       <section className="main-panel">
         <header className="main-header">
-          <span>Stanley</span>
+          <span>Create</span>
           <span className="mode-indicator"><i aria-hidden="true" /> {modeLabel} mode</span>
         </header>
 
@@ -377,8 +389,10 @@ export default function Home() {
           {!inConversation ? (
             <>
               <section className="welcome" aria-labelledby="welcome-title">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img className="hero-mascot" src="/stanley-mascot.png" alt="" width="112" height="112" />
                 <h1 id="welcome-title">What&apos;s on your mind today?</h1>
-                <p>Talk naturally and Stanley will detect what you need, or choose a creation mode below.</p>
+                <p>Tell Stanley what you&apos;re making. It will detect whether you need an idea, title, or thumbnail concept.</p>
               </section>
 
               <form className="brief-form unified-composer" id="composer" onSubmit={sendMessage}>

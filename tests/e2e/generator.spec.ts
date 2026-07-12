@@ -18,7 +18,7 @@ test("renders the unified ChatGPT-style Stanley composer", async ({ page }) => {
 
   await expect(page).toHaveTitle("Stanley — YouTube Creative AI");
   await expect(page.getByRole("heading", { name: "What's on your mind today?" })).toBeVisible();
-  await expect(page.getByText(/Talk naturally and Stanley will detect/)).toBeVisible();
+  await expect(page.getByText(/Tell Stanley what you're making/)).toBeVisible();
   await expect(page.getByLabel("Message Stanley")).toBeVisible();
   await expect(page.getByRole("button", { name: "Send message" })).toBeDisabled();
   await expect(page.locator(".generate-button .send-arrow")).toBeVisible();
@@ -109,7 +109,7 @@ test("uses Shift+Enter for a new line and grows automatically", async ({ page })
 });
 
 test("shows the spinning loader in the thread instead of the send arrow", async ({ page }) => {
-  await mockGeneration(page, { delayMs: 500 });
+  await mockGeneration(page, { delayMs: 1200 });
   await openApp(page);
   await fillRequiredBrief(page);
   await page.getByRole("button", { name: "Send message" }).click();

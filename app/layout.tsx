@@ -1,21 +1,10 @@
 import type { Metadata } from "next";
-import { DM_Mono, Libre_Franklin, Newsreader } from "next/font/google";
+import { Inter } from "next/font/google";
 import "./globals.css";
 
-const sans = Libre_Franklin({
+const sans = Inter({
   variable: "--font-sans",
   subsets: ["latin"],
-});
-
-const serif = Newsreader({
-  variable: "--font-serif",
-  subsets: ["latin"],
-});
-
-const mono = DM_Mono({
-  variable: "--font-mono",
-  subsets: ["latin"],
-  weight: ["300", "400", "500"],
 });
 
 export const metadata: Metadata = {
@@ -26,7 +15,7 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en">
-      <body className={`${sans.variable} ${serif.variable} ${mono.variable}`}>
+      <body className={sans.variable}>
         {children}
       </body>
     </html>
