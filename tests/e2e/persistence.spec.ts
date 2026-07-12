@@ -43,7 +43,7 @@ test("saves a title and restores it after a full reload", async ({ page }) => {
   await page.reload();
   await waitForApp(page);
   await expect(page.locator(".saved-shortcut strong")).toHaveText("1");
-  await page.getByRole("tab", { name: /Saved 1/ }).click();
+  await page.locator(".saved-shortcut").click();
   await expect(page.getByRole("heading", { name: title })).toBeVisible();
 });
 

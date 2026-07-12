@@ -9,13 +9,14 @@ import {
   topics,
 } from "./fixtures";
 
-test("renders the notebook title lab and its empty state", async ({ page }) => {
+test("renders the Stanley title composer and its empty state", async ({ page }) => {
   await openApp(page);
 
   await expect(page).toHaveTitle("Stanley — YouTube Title Lab");
-  await expect(page.getByRole("heading", { name: /Find the title/ })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Ask Stanley" })).toBeVisible();
+  await expect(page.getByAltText("Stanley, your AI YouTube strategist")).toBeVisible();
   await expect(page.getByText("Gemini 3.1 Flash-Lite")).toBeVisible();
-  await expect(page.getByRole("heading", { name: /Turn one rough idea/ })).toBeVisible();
+  await expect(page.getByText("Your AI YouTube title strategist")).toBeVisible();
   await expect(page.getByRole("button", { name: "Generate 12 titles" })).toBeEnabled();
   await expect(page.locator("article.title-card")).toHaveCount(0);
 });
@@ -49,9 +50,9 @@ test("sends the complete creator brief and shows a loading state", async ({ page
   });
   await openApp(page);
   await fillRequiredBrief(page);
+  await page.locator(".brief-options summary").click();
   await page.getByLabel(/Who is it for/).fill("Busy creators in their twenties");
   await page.getByRole("button", { name: "Bold" }).click();
-  await page.locator("summary").filter({ hasText: "Add title references" }).click();
   await page.getByLabel("Title references").fill("I tried this for 30 days");
   await page.getByRole("button", { name: "Generate 12 titles" }).click();
 
@@ -97,6 +98,7 @@ test("shows the real research evidence and safe YouTube source links", async ({ 
 
 test("lets the creator change tone without submitting the form", async ({ page }) => {
   await openApp(page);
+  await page.locator(".brief-options summary").click();
   const curious = page.getByRole("button", { name: "Curious" });
   const story = page.getByRole("button", { name: "Story-led" });
 
@@ -110,7 +112,7 @@ test("lets the creator change tone without submitting the form", async ({ page }
 
 test("opens optional references from the keyboard", async ({ page }) => {
   await openApp(page);
-  const summary = page.locator("summary").filter({ hasText: "Add title references" });
+  const summary = page.locator(".brief-options summary");
   await summary.focus();
   await expect(summary).toBeFocused();
   await summary.press("Enter");

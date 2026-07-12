@@ -23,7 +23,8 @@ test("server-renders the Stanley title lab", async () => {
 
   const html = await response.text();
   assert.match(html, /<title>Stanley — YouTube Title Lab<\/title>/i);
-  assert.match(html, /Find the title/);
+  assert.match(html, /Ask Stanley/);
+  assert.match(html, /stanley-mascot\.png/);
   assert.match(html, /Generate 12 titles/);
   assert.match(html, /Gemini 3\.1 Flash-Lite/);
   assert.doesNotMatch(html, /codex-preview|react-loading-skeleton/i);
