@@ -45,3 +45,8 @@ next-env.d.ts
 /.wrangler/
 /outputs/
 /work/
+
+# Playwright artifacts
+/playwright-report/
+/test-results/
+/blob-report/

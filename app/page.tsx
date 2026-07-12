@@ -73,24 +73,18 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  const [hasLoadedStorage, setHasLoadedStorage] = useState(false);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
       setSaved(readStorage<GeneratedTitle[]>(SAVED_KEY, []));
       setDrafts(readStorage<Draft[]>(DRAFTS_KEY, []));
-      setHasLoadedStorage(true);
+      document.documentElement.dataset.stanleyReady = "true";
     }, 0);
-    return () => window.clearTimeout(timer);
+    return () => {
+      window.clearTimeout(timer);
+      delete document.documentElement.dataset.stanleyReady;
+    };
   }, []);
-
-  useEffect(() => {
-    if (hasLoadedStorage) window.localStorage.setItem(SAVED_KEY, JSON.stringify(saved));
-  }, [saved, hasLoadedStorage]);
-
-  useEffect(() => {
-    if (hasLoadedStorage) window.localStorage.setItem(DRAFTS_KEY, JSON.stringify(drafts));
-  }, [drafts, hasLoadedStorage]);
 
   useEffect(() => {
     if (!notice) return;
@@ -144,7 +138,11 @@ export default function Home() {
         titles: payload.titles,
         research: payload.research,
       };
-      setDrafts((current) => [newDraft, ...current].slice(0, 6));
+      setDrafts((current) => {
+        const next = [newDraft, ...current].slice(0, 6);
+        window.localStorage.setItem(DRAFTS_KEY, JSON.stringify(next));
+        return next;
+      });
       setNotice("12 fresh titles drafted");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Something went wrong. Try again.");
@@ -164,10 +162,18 @@ export default function Home() {
 
   function toggleSaved(item: GeneratedTitle) {
     if (savedIds.has(item.id)) {
-      setSaved((current) => current.filter((savedTitle) => savedTitle.id !== item.id));
+      setSaved((current) => {
+        const next = current.filter((savedTitle) => savedTitle.id !== item.id);
+        window.localStorage.setItem(SAVED_KEY, JSON.stringify(next));
+        return next;
+      });
       setNotice("Removed from saved");
     } else {
-      setSaved((current) => [item, ...current]);
+      setSaved((current) => {
+        const next = [item, ...current];
+        window.localStorage.setItem(SAVED_KEY, JSON.stringify(next));
+        return next;
+      });
       setNotice("Saved for later");
     }
   }

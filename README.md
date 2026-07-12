@@ -38,8 +38,11 @@ The Gemini key needs access to the Gemini API. The YouTube key should be restric
 npm run dev
 npm run lint
 npm test
+npm run test:e2e
 npm run build
 ```
+
+The Playwright suite runs 18 Chromium scenarios covering form validation, request payloads, loading and API failures, research evidence, copying, saved-title persistence, recent drafts, keyboard behavior, and mobile overflow. For interactive debugging, use `npm run test:e2e:ui`; for a visible browser run, use `npm run test:e2e:headed`.
 
 ## Cost and quota
 
