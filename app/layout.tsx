@@ -19,8 +19,8 @@ const mono = DM_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Stanley — YouTube Title Lab",
-  description: "Turn one rough video idea into twelve sharp YouTube titles.",
+  title: "Stanley — YouTube Creative AI",
+  description: "One focused AI chat for YouTube video ideas, titles, and thumbnail concepts.",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

@@ -56,16 +56,57 @@ export function buildResearch(query = "5am morning routine experiment") {
 
 export function buildPayload(prefix = "5am") {
   return {
+    reply: "I reviewed the strongest comparable videos and built a varied set around the clearest promise in your experiment.",
     titles: buildTitles(prefix),
     research: buildResearch(`${prefix} morning routine experiment`),
+    mode: "title",
+    blocked: false,
     model: "gemini-3.1-flash-lite",
+  };
+}
+
+export function buildIdeas() {
+  return Array.from({ length: 8 }, (_, index) => ({
+    id: `idea-${index + 1}`,
+    idea: `A filmable creator experiment number ${index + 1}`,
+    hook: `Open with the surprising constraint behind experiment ${index + 1}.`,
+    whyItCouldWork: "It gives the viewer a clear question and a concrete outcome to anticipate.",
+  }));
+}
+
+export function buildIdeaPayload() {
+  return {
+    reply: "I found eight distinct directions grounded in what viewers already respond to.",
+    ideas: buildIdeas(),
+    research: buildResearch("creator productivity experiments"),
+    mode: "idea",
+    blocked: false,
+  };
+}
+
+export function buildThumbnails() {
+  return Array.from({ length: 6 }, (_, index) => ({
+    id: `thumbnail-${index + 1}`,
+    concept: `Visual direction ${index + 1}`,
+    visual: `Tight subject crop with one clear prop and a high-contrast background for concept ${index + 1}.`,
+    textOverlay: index % 2 ? "THE RESULT" : "NO WAY",
+    whyItWorks: "The single focal point creates immediate tension without repeating the title.",
+  }));
+}
+
+export function buildThumbnailPayload() {
+  return {
+    reply: "I built six clear visual directions that complement the video promise.",
+    thumbnails: buildThumbnails(),
+    mode: "thumbnail",
+    blocked: false,
   };
 }
 
 type MockOptions = {
   delayMs?: number;
   handler?: (route: Route) => Promise<void>;
-  payload?: ReturnType<typeof buildPayload> | { error: string };
+  payload?: Record<string, unknown>;
   status?: number;
 };
 
@@ -85,7 +126,7 @@ export async function mockGeneration(page: Page, options: MockOptions = {}) {
 }
 
 export async function fillRequiredBrief(page: Page, topic = topics.primary) {
-  await page.getByLabel(/What is the video about/).fill(topic);
+  await page.getByLabel("Message Stanley").fill(topic);
 }
 
 export async function waitForApp(page: Page) {
@@ -99,6 +140,6 @@ export async function openApp(page: Page) {
 
 export async function generate(page: Page, topic = topics.primary) {
   await fillRequiredBrief(page, topic);
-  await page.getByRole("button", { name: "Generate 12 titles" }).click();
+  await page.getByRole("button", { name: "Send message" }).click();
   await page.locator("article.title-card").first().waitFor({ state: "visible" });
 }
