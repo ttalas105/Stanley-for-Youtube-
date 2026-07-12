@@ -23,10 +23,10 @@ test("server-renders the Stanley title lab", async () => {
 
   const html = await response.text();
   assert.match(html, /<title>Stanley — YouTube Title Lab<\/title>/i);
-  assert.match(html, /Ask Stanley/);
+  assert.match(html, /What&#x27;s your video about\?/);
   assert.match(html, /stanley-mascot\.png/);
   assert.match(html, /Generate 12 titles/);
-  assert.match(html, /Gemini 3\.1 Flash-Lite/);
+  assert.match(html, /Title history/);
   assert.doesNotMatch(html, /codex-preview|react-loading-skeleton/i);
 });
 
@@ -42,6 +42,10 @@ test("keeps AI keys server-side and removes the disposable starter", async () =>
   assert.match(route, /process\.env\.GEMINI_API_KEY/);
   assert.match(route, /process\.env\.YOUTUBE_API_KEY/);
   assert.match(route, /youtube\/v3\/search/);
+  assert.match(route, /queries\.slice\(0, 2\)/);
+  assert.match(route, /coverage: research\.coverage/);
+  assert.doesNotMatch(route, /Not enough comparable long-form videos/);
+  assert.doesNotMatch(route, /topic\.length\s*<\s*8/);
   assert.match(gitignore, /\.env\*/);
   await assert.rejects(access(new URL("app/_sites-preview/SkeletonPreview.tsx", root)));
 });

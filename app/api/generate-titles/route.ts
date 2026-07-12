@@ -21,10 +21,17 @@ type ResearchVideo = {
   url: string;
 };
 
+type VideoCandidate = ResearchVideo & {
+  durationSeconds: number;
+};
+
+type ResearchCoverage = "strong" | "limited" | "none";
+
 type CachedResearch = {
   expiresAt: number;
   query: string;
   videos: ResearchVideo[];
+  coverage: ResearchCoverage;
 };
 
 const MODEL = "gemini-3.1-flash-lite";
@@ -35,12 +42,15 @@ const querySchema = {
   type: "object",
   additionalProperties: false,
   properties: {
-    query: {
-      type: "string",
-      description: "A concise natural YouTube search query, 2 to 7 words, with no punctuation.",
+    queries: {
+      type: "array",
+      minItems: 3,
+      maxItems: 3,
+      items: { type: "string" },
+      description: "Three concise YouTube search queries from specific to broad, each 2 to 7 words with no punctuation.",
     },
   },
-  required: ["query"],
+  required: ["queries"],
 } as const;
 
 const titleSchema = {
@@ -155,27 +165,13 @@ async function generateJson(
   return JSON.parse(output) as unknown;
 }
 
-async function researchYouTube(topic: string, geminiKey: string, youtubeKey: string) {
-  const queryResult = await generateJson(
-    geminiKey,
-    "Turn a creator's video brief into the most useful query for finding directly comparable successful videos on YouTube. Keep the central subject and format. Return only the requested JSON.",
-    topic,
-    querySchema,
-    80,
-  ) as { query?: unknown };
-  const query = cleanText(queryResult.query, 100) || topic.slice(0, 100);
-  const cacheKey = query.toLocaleLowerCase();
-  const cached = researchCache.get(cacheKey);
-  if (cached && cached.expiresAt > Date.now()) return cached;
-
-  const publishedAfter = new Date(Date.now() - 1000 * 60 * 60 * 24 * 365 * 3).toISOString();
+async function fetchYouTubeCandidates(query: string, youtubeKey: string) {
   const searchParams = new URLSearchParams({
     part: "snippet",
     type: "video",
-    maxResults: "30",
+    maxResults: "50",
     order: "viewCount",
     q: query,
-    publishedAfter,
     relevanceLanguage: "en",
     safeSearch: "moderate",
     key: youtubeKey,
@@ -188,7 +184,7 @@ async function researchYouTube(topic: string, geminiKey: string, youtubeKey: str
   if (!searchResponse.ok) throw new Error(`YouTube search ${searchResponse.status}: ${searchData.error?.message || "unknown error"}`);
 
   const ids = (searchData.items || []).map((item) => item.id?.videoId).filter((id): id is string => Boolean(id));
-  if (!ids.length) return { query, videos: [], expiresAt: Date.now() + 60 * 60 * 1000 };
+  if (!ids.length) return [];
 
   const videoParams = new URLSearchParams({
     part: "snippet,statistics,contentDetails",
@@ -208,23 +204,80 @@ async function researchYouTube(topic: string, geminiKey: string, youtubeKey: str
   if (!videoResponse.ok) throw new Error(`YouTube videos ${videoResponse.status}: ${videoData.error?.message || "unknown error"}`);
 
   const now = Date.now();
-  const videos = (videoData.items || [])
-    .map((item): ResearchVideo | null => {
-      const id = item.id || "";
-      const title = cleanText(item.snippet?.title, 180);
-      const channel = cleanText(item.snippet?.channelTitle, 120);
-      const publishedAt = item.snippet?.publishedAt || "";
-      const views = Number(item.statistics?.viewCount || 0);
-      const duration = parseDurationSeconds(item.contentDetails?.duration || "");
-      const ageDays = Math.max(1, (now - Date.parse(publishedAt)) / 86_400_000);
-      if (!id || !title || !publishedAt || views < 1_000 || duration < 120) return null;
-      return { id, title, channel, views, viewsPerDay: Math.round(views / ageDays), publishedAt, url: `https://www.youtube.com/watch?v=${id}` };
-    })
-    .filter((item): item is ResearchVideo => item !== null)
-    .sort((a, b) => b.viewsPerDay - a.viewsPerDay)
-    .slice(0, 14);
+  return (videoData.items || []).map((item): VideoCandidate | null => {
+    const id = item.id || "";
+    const title = cleanText(item.snippet?.title, 180);
+    const channel = cleanText(item.snippet?.channelTitle, 120);
+    const publishedAt = item.snippet?.publishedAt || "";
+    const views = Number(item.statistics?.viewCount || 0);
+    const durationSeconds = parseDurationSeconds(item.contentDetails?.duration || "");
+    const ageDays = Math.max(1, (now - Date.parse(publishedAt)) / 86_400_000);
+    if (!id || !title || !publishedAt || !durationSeconds) return null;
+    return { id, title, channel, views, viewsPerDay: Math.round(views / ageDays), publishedAt, durationSeconds, url: `https://www.youtube.com/watch?v=${id}` };
+  }).filter((item): item is VideoCandidate => item !== null);
+}
 
-  const research = { query, videos, expiresAt: Date.now() + 6 * 60 * 60 * 1000 };
+function selectResearchVideos(candidates: VideoCandidate[]) {
+  const strict = candidates.filter((video) => video.views >= 1_000 && video.durationSeconds >= 120);
+  const relaxed = candidates.filter((video) => video.views >= 250 && video.durationSeconds >= 90);
+  const broad = candidates.filter((video) => video.durationSeconds >= 60);
+  const pool = strict.length >= 4 ? strict : relaxed.length >= 4 ? relaxed : broad;
+  const coverage: ResearchCoverage = strict.length >= 4 ? "strong" : pool.length > 0 ? "limited" : "none";
+  const videos = pool
+    .sort((a, b) => b.viewsPerDay - a.viewsPerDay || b.views - a.views)
+    .slice(0, 14)
+    .map((video) => ({
+      id: video.id,
+      title: video.title,
+      channel: video.channel,
+      views: video.views,
+      viewsPerDay: video.viewsPerDay,
+      publishedAt: video.publishedAt,
+      url: video.url,
+    }));
+  return { videos, coverage };
+}
+
+async function researchYouTube(topic: string, geminiKey: string, youtubeKey: string) {
+  let queryCandidates: string[] = [];
+  try {
+    const queryResult = await generateJson(
+      geminiKey,
+      "Create three YouTube research queries for a creator's video brief. Start with the closest comparable-video query, then broaden the wording and category while preserving the central subject. Return only the requested JSON.",
+      topic,
+      querySchema,
+      160,
+    ) as { queries?: unknown };
+    if (Array.isArray(queryResult.queries)) {
+      queryCandidates = queryResult.queries.map((value) => cleanText(value, 100)).filter(Boolean);
+    }
+  } catch (error) {
+    console.warn("YouTube query planning failed; using the creator brief.", error);
+  }
+
+  const fallbackQuery = topic.split(/\s+/).slice(0, 7).join(" ");
+  const queries = Array.from(new Set([...queryCandidates, fallbackQuery].map((query) => query.toLocaleLowerCase()))).slice(0, 3);
+  const primaryQuery = queries[0] || fallbackQuery;
+  const cacheKey = primaryQuery.toLocaleLowerCase();
+  const cached = researchCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) return cached;
+
+  const collected = new Map<string, VideoCandidate>();
+  let selection = selectResearchVideos([]);
+  for (const query of queries.slice(0, 2)) {
+    try {
+      const candidates = await fetchYouTubeCandidates(query, youtubeKey);
+      for (const video of candidates) collected.set(video.id, video);
+      selection = selectResearchVideos(Array.from(collected.values()));
+      if (selection.videos.length >= 4) break;
+    } catch (error) {
+      console.warn(`YouTube research failed for query "${query}"; continuing without blocking generation.`, error);
+      break;
+    }
+  }
+
+  const cacheDuration = selection.coverage === "strong" ? 6 * 60 * 60 * 1000 : selection.coverage === "limited" ? 30 * 60 * 1000 : 10 * 60 * 1000;
+  const research: CachedResearch = { query: primaryQuery, videos: selection.videos, coverage: selection.coverage, expiresAt: Date.now() + cacheDuration };
   researchCache.set(cacheKey, research);
   return research;
 }
@@ -245,7 +298,7 @@ export async function POST(request: Request) {
   const audience = cleanText(body.audience, 180);
   const references = cleanText(body.references, 700);
   const tone = cleanText(body.tone, 30) || "Curious";
-  if (topic.length < 8) return Response.json({ error: "Add at least a sentence about the video." }, { status: 400 });
+  if (!topic) return Response.json({ error: "A video idea is required." }, { status: 400 });
 
   const geminiKey = process.env.GEMINI_API_KEY;
   const youtubeKey = process.env.YOUTUBE_API_KEY;
@@ -258,21 +311,25 @@ export async function POST(request: Request) {
 
   try {
     const research = await researchYouTube(topic, geminiKey, youtubeKey);
-    if (research.videos.length < 4) {
-      return Response.json({ error: "Not enough comparable long-form videos were found. Try describing the core topic more plainly." }, { status: 422 });
-    }
-
     const researchLines = research.videos.map((video, index) =>
       `${index + 1}. “${video.title}” — ${video.views.toLocaleString("en-US")} views, ~${video.viewsPerDay.toLocaleString("en-US")} views/day`,
     ).join("\n");
+    const evidenceSection = researchLines
+      ? `REAL COMPARABLE VIDEOS RANKED BY CURRENT VIEW VELOCITY:\n${researchLines}`
+      : "RESEARCH COVERAGE:\nNo close YouTube comparisons were available. Use established title-packaging principles and the creator's brief without inventing evidence or facts.";
+    const evidenceInstruction = research.coverage === "strong"
+      ? "Infer the useful patterns in the successful examples: framing, specificity, tension, promise, and syntax."
+      : research.coverage === "limited"
+        ? "Use the available comparisons as directional evidence only; rely primarily on the creator's actual idea and do not overstate what the examples prove."
+        : "Use sound YouTube packaging principles without claiming that a pattern was supported by comparison videos.";
     const referenceSection = references
       ? `\n\nCREATOR'S STYLE REFERENCES (borrow only rhythm—not facts or wording):\n${references}`
       : "";
-    const prompt = `VIDEO IDEA:\n${topic}\n\nTARGET VIEWER:\n${audience || "Infer the most likely viewer from the idea."}\n\nVOICE:\n${tone}\n\nREAL COMPARABLE VIDEOS RANKED BY CURRENT VIEW VELOCITY:\n${researchLines}${referenceSection}\n\nFirst infer the useful patterns in the successful examples: framing, specificity, tension, promise, and syntax. Then draft exactly 12 genuinely different titles for the creator's actual idea. Do not copy phrases or make every title resemble the same example. Cover a deliberate mix of curiosity, stakes, transformation, specificity, contrarian framing, personal story, useful promise, and surprising tension.`;
+    const prompt = `VIDEO IDEA:\n${topic}\n\nTARGET VIEWER:\n${audience || "Infer the most likely viewer from the idea."}\n\nVOICE:\n${tone}\n\n${evidenceSection}${referenceSection}\n\n${evidenceInstruction} Then draft exactly 12 genuinely different titles for the creator's actual idea. Do not copy phrases or make every title resemble the same example. Cover a deliberate mix of curiosity, stakes, transformation, specificity, contrarian framing, personal story, useful promise, and surprising tension.`;
 
     const titleResult = await generateJson(
       geminiKey,
-      `You are Stanley, a senior YouTube packaging strategist. You receive real high-performing comparison titles with performance data. Learn the underlying packaging patterns but never copy distinctive wording. Write credible titles a real creator would publish. Prioritize clarity, specificity, natural spoken language, and an honest curiosity gap. Avoid generic AI phrasing, ALL CAPS, fake quotes, fabricated numbers, repeated formulas, and words like “unleash”, “ultimate”, “game-changer”, or “you won't believe”. Never introduce facts not present in the creator's brief. Keep most titles under 70 characters and every title under 86 characters. Use sentence case unless a proper noun requires otherwise. Each explanation must name both the psychological angle and how it relates to a pattern supported by the comparison set.`,
+      `You are Stanley, a senior YouTube packaging strategist. When real comparison titles are provided, learn their underlying packaging patterns but never copy distinctive wording. When evidence is limited or absent, rely on established packaging principles and never pretend the research proved something it did not. Write credible titles a real creator would publish. Prioritize clarity, specificity, natural spoken language, and an honest curiosity gap. Avoid generic AI phrasing, ALL CAPS, fake quotes, fabricated numbers, repeated formulas, and words like “unleash”, “ultimate”, “game-changer”, or “you won't believe”. Never introduce facts not present in the creator's brief. Keep most titles under 70 characters and every title under 86 characters. Use sentence case unless a proper noun requires otherwise. Each explanation must name the psychological angle and explain its relevance to the creator's idea.`,
       prompt,
       titleSchema,
       2200,
@@ -286,6 +343,7 @@ export async function POST(request: Request) {
         query: research.query,
         analyzed: research.videos.length,
         examples: research.videos.slice(0, 6),
+        coverage: research.coverage,
       },
       model: MODEL,
     });

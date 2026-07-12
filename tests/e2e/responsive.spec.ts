@@ -6,8 +6,7 @@ test("keeps the mobile Stanley layout inside the viewport", async ({ page }) => 
   await mockGeneration(page);
   await openApp(page);
 
-  await expect(page.getByText("Gemini 3.1 Flash-Lite")).toBeHidden();
-  await expect(page.getByRole("heading", { name: "Ask Stanley" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "What's your video about?" })).toBeVisible();
   await generate(page);
   await expect(page.locator("article.title-card")).toHaveCount(12);
   const hasHorizontalOverflow = await page.evaluate(
@@ -21,18 +20,21 @@ test("keeps primary controls keyboard reachable with visible focus", async ({ pa
   await page.keyboard.press("Tab");
   await expect(page.getByRole("link", { name: "Stanley title lab home" })).toBeFocused();
   await page.keyboard.press("Tab");
-  await expect(page.getByRole("link", { name: "Title generator" })).toBeFocused();
+  await expect(page.getByRole("button", { name: "Idea generator" })).toBeFocused();
   await page.keyboard.press("Tab");
-  await expect(page.locator(".saved-shortcut")).toBeFocused();
+  await expect(page.getByRole("button", { name: "Title generator" })).toBeFocused();
   await page.keyboard.press("Tab");
+  await expect(page.getByRole("button", { name: "Start new title chat" })).toBeFocused();
+  await page.getByLabel(/What is the video about/).focus();
   await expect(page.getByLabel(/What is the video about/)).toBeFocused();
+  await page.getByLabel(/What is the video about/).fill("Short");
+  await page.keyboard.press("Tab");
+  await expect(page.getByRole("button", { name: "Generate 12 titles" })).toBeFocused();
 });
 
-test("provides descriptive labels for every creator input", async ({ page }) => {
+test("keeps the composer focused on one clearly labelled input", async ({ page }) => {
   await openApp(page);
   await expect(page.getByLabel(/What is the video about/)).toBeVisible();
-  await page.locator(".brief-options summary").click();
-  await expect(page.getByLabel(/Who is it for/)).toBeVisible();
-  await expect(page.getByRole("button", { name: "Curious" })).toHaveAttribute("aria-pressed", "true");
-  await expect(page.getByLabel("Title references")).toBeVisible();
+  await expect(page.getByText("Add context", { exact: true })).toHaveCount(0);
+  await expect(page.locator(".composer textarea")).toHaveCount(1);
 });
