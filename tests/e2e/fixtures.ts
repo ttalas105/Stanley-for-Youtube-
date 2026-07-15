@@ -66,11 +66,16 @@ export function buildPayload(prefix = "5am") {
 }
 
 export function buildIdeas() {
-  return Array.from({ length: 8 }, (_, index) => ({
+  return Array.from({ length: 3 }, (_, index) => ({
     id: `idea-${index + 1}`,
     idea: `A filmable creator experiment number ${index + 1}`,
+    suggestedTitle: `I Tried Creator Experiment ${index + 1} for 30 Days`,
+    format: index === 0 ? "Experiment" : index === 1 ? "Challenge" : "Story",
+    difficulty: index === 0 ? "Easy" : index === 1 ? "Moderate" : "Ambitious",
+    recommended: index === 0,
     hook: `Open with the surprising constraint behind experiment ${index + 1}.`,
     whyItCouldWork: "It gives the viewer a clear question and a concrete outcome to anticipate.",
+    channelFit: "It extends the creator's existing experiment format with a clearer visible payoff.",
     researchBasis: "Fast-moving experiment videos in the comparison set pair a visible constraint with a measurable payoff.",
     sourceNumbers: [index % 6 + 1],
     scriptOutline: {
@@ -88,9 +93,18 @@ export function buildIdeas() {
 
 export function buildIdeaPayload() {
   return {
-    reply: "I found eight distinct directions grounded in what viewers already respond to.",
+    reply: "I found three distinct directions and ranked the strongest fit first.",
     ideas: buildIdeas(),
     research: buildResearch("creator productivity experiments"),
+    agent: {
+      runId: "idea-run-1",
+      modelRounds: 3,
+      durationMs: 4820,
+      toolCalls: [
+        { name: "youtube_channel_snapshot", status: "complete", memoHit: false },
+        { name: "youtube_search_reference_videos", status: "complete", memoHit: false },
+      ],
+    },
     mode: "idea",
     blocked: false,
   };
@@ -174,10 +188,14 @@ export async function openApp(page: Page) {
   await page.addInitScript(() => window.localStorage.setItem("stanley-onboarding-v1", "skipped"));
   await page.goto("/");
   await waitForApp(page);
+  if (!await page.getByLabel("Message Stanley").isVisible()) {
+    const create = page.getByRole("button", { name: "Create", exact: true });
+    if (await create.isVisible()) await create.click();
+  }
 }
 
 export async function generate(page: Page, topic = topics.primary) {
   await fillRequiredBrief(page, topic);
   await page.getByRole("button", { name: "Send message" }).click();
-  await page.locator("article.title-card").first().waitFor({ state: "visible" });
+  await page.getByRole("button", { name: "Copy all titles" }).waitFor({ state: "visible" });
 }

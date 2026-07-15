@@ -124,6 +124,19 @@ test("runs a model-selected tool and returns the final structured response", asy
   assert.equal("functionResponse" in provider.requests[1]!.contents.at(-1)!.parts[0]!, true);
 });
 
+test("emits live activity from the actual model and tool lifecycle", async () => {
+  const provider = new MockProvider([functionCall("youtube_search_reference_videos", { query: "dog challenge" }), finalReply()]);
+  const events: Array<{ id: string; label: string; detail?: string; status: string }> = [];
+  await run(provider, new ToolRegistry([readTool()]), { onEvent: (event) => { events.push(event); } });
+
+  const toolEvents = events.filter((event) => event.id.includes("youtube_search_reference_videos"));
+  assert.deepEqual(toolEvents.map((event) => event.status), ["active", "complete"]);
+  assert.match(toolEvents[1]?.detail || "", /Evidence returned/);
+  assert.ok(events.some((event) => event.id === "model" && event.status === "active"));
+  assert.ok(events.some((event) => event.id === "model" && event.status === "complete"));
+  assert.ok(events.some((event) => event.id === "answer" && event.status === "active"));
+});
+
 test("answers directly without forcing a research call", async () => {
   const provider = new MockProvider([finalReply("Howdy. What are you making?")]);
   const result = await run(provider, new ToolRegistry([readTool()]));

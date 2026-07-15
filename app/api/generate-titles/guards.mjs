@@ -40,3 +40,17 @@ export function looksLikeCreatorMemoryRequest(value) {
   if (looksLikePromptAttack(message) || mixedMemoryTask.test(message) || sensitiveMemory.test(message)) return false;
   return creatorMemoryPatterns.some((pattern) => pattern.test(message));
 }
+
+const creativeIntents = new Set(["idea_work", "script_work", "title_work", "thumbnail_work"]);
+const directCreationRequest = /\b(?:give|generate|create|make|list|brainstorm|suggest|write|draft|rewrite|improve|rank|come\s+up\s+with|show\s+me|find)\b/i;
+
+export function shouldGenerateImmediately(value, intent, resolvedBrief = "", hasConnectedChannel = false) {
+  const message = typeof value === "string" ? value.trim() : "";
+  if (!message || !creativeIntents.has(intent)) return false;
+  if (looksLikePromptAttack(message) || looksLikeCreatorMemoryRequest(message)) return false;
+  if (!directCreationRequest.test(message)) return false;
+
+  const brief = typeof resolvedBrief === "string" && resolvedBrief.trim() ? resolvedBrief.trim() : message;
+  const meaningfulWords = brief.match(/[A-Za-z0-9][A-Za-z0-9'’-]*/g) || [];
+  return hasConnectedChannel || meaningfulWords.length >= 5;
+}

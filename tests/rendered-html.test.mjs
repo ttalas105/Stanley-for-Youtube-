@@ -62,6 +62,8 @@ test("keeps AI keys server-side and removes the disposable starter", async () =>
   assert.match(provider, /functionDeclarations/);
   assert.match(route, /looksLikePromptAttack/);
   assert.match(route, /looksLikeCreatorMemoryRequest/);
+  assert.match(route, /shouldGenerateImmediately/);
+  assert.match(route, /sanitizeChannelFit/);
   assert.match(route, /Mixed-intent requests are always blocked/);
   assert.match(route, /fail-closed intent and security classifier/);
   assert.match(route, /Choose intent=social only for brief non-task conversation/);
@@ -69,6 +71,8 @@ test("keeps AI keys server-side and removes the disposable starter", async () =>
   assert.match(route, /idea_work/);
   assert.match(route, /thumbnail_work/);
   assert.match(route, /ideaSchema/);
+  assert.match(route, /Generate exactly 3 ranked/);
+  assert.doesNotMatch(route, /Generate exactly 8 distinct/);
   assert.match(route, /fullScriptSchema/);
   assert.match(route, /script_work/);
   assert.match(route, /researchBasis/);
@@ -88,6 +92,10 @@ test("keeps AI keys server-side and removes the disposable starter", async () =>
   assert.match(route, /readYouTubeSession/);
   assert.doesNotMatch(route, /PRIVATE_CHANNEL_CONTEXT_START/);
   assert.match(route, /Call youtube_channel_snapshot before using its private metrics/);
+  assert.match(page, /Live steps from this request/);
+  assert.match(page, /Worked through/);
+  assert.match(page, /application\/x-ndjson/);
+  assert.doesNotMatch(page, /Stanley is working through four layers/);
   assert.match(oauth, /AES-GCM/);
   assert.match(oauthConnect, /youtube\.readonly/);
   assert.match(oauthConnect, /yt-analytics\.readonly/);

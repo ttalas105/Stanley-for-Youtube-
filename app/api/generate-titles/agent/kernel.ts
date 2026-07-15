@@ -24,7 +24,28 @@ type RunAgentInput = {
   deadlineMs?: number;
   toolTimeoutMs?: number;
   toolsEnabled?: boolean;
+  onEvent?: (event: AgentActivityEvent) => void | Promise<void>;
 };
+
+export type AgentActivityEvent = {
+  id: string;
+  label: string;
+  detail?: string;
+  status: "active" | "complete" | "limited";
+  kind: "thinking" | "context" | "tool" | "answer";
+};
+
+function toolLabel(name: string) {
+  if (name === "youtube_channel_snapshot") return "Reading your YouTube channel";
+  if (name === "youtube_search_reference_videos") return "Searching comparable videos";
+  if (name === "youtube_get_video_evidence") return "Inspecting a reference video";
+  return "Checking supporting evidence";
+}
+
+function conciseDetail(value: string, maxLength = 150) {
+  const cleaned = value.replace(/\s+/g, " ").trim();
+  return cleaned.length > maxLength ? `${cleaned.slice(0, maxLength - 1).trimEnd()}…` : cleaned;
+}
 
 function stable(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stable).join(",")}]`;
@@ -75,6 +96,13 @@ export async function runAgent(input: RunAgentInput): Promise<AgentResult> {
   const started = Date.now();
   let toolsEnabled = input.toolsEnabled !== false;
   let attemptedToolCalls = 0;
+  const emit = async (event: AgentActivityEvent) => {
+    try {
+      await input.onEvent?.(event);
+    } catch {
+      // Progress reporting must never interrupt the actual model run.
+    }
+  };
 
   const trace: AgentTrace = {
     runId: crypto.randomUUID(),
@@ -96,6 +124,14 @@ export async function runAgent(input: RunAgentInput): Promise<AgentResult> {
       toolsEnabled = false;
     }
 
+    const modelEventId = "model";
+    await emit({
+      id: modelEventId,
+      label: round === 1 ? "Planning the response" : "Reviewing the evidence",
+      detail: round === 1 ? "Deciding what context and research this request needs" : "Turning the gathered evidence into a useful answer",
+      status: "active",
+      kind: "thinking",
+    });
     const response = await input.provider.complete({
       systemInstruction: input.systemInstruction,
       contents,
@@ -111,9 +147,25 @@ export async function runAgent(input: RunAgentInput): Promise<AgentResult> {
     trace.cachedTokens += response.usage.cachedTokens || 0;
 
     if (!response.toolCalls.length) {
+      await emit({
+        id: modelEventId,
+        label: round === 1 ? "Planning the response" : "Reviewing the evidence",
+        detail: "The answer is ready to write",
+        status: "complete",
+        kind: "thinking",
+      });
+      await emit({ id: "answer", label: "Writing the answer", detail: "Responding in the conversation", status: "active", kind: "answer" });
       trace.durationMs = Date.now() - started;
       return { output: parseStructuredText(response.text), text: response.text, toolResults, trace };
     }
+
+    await emit({
+      id: modelEventId,
+      label: round === 1 ? "Planning the response" : "Reviewing the evidence",
+      detail: `Opened ${response.toolCalls.length} research ${response.toolCalls.length === 1 ? "step" : "steps"}`,
+      status: "complete",
+      kind: "thinking",
+    });
 
     contents.push(response.rawContent);
     const remainingToolCalls = Math.max(0, maxToolCallsPerTurn - attemptedToolCalls);
@@ -121,13 +173,21 @@ export async function runAgent(input: RunAgentInput): Promise<AgentResult> {
     const calls = response.toolCalls.slice(0, permittedThisRound);
     const overflow = response.toolCalls.slice(permittedThisRound);
     attemptedToolCalls += calls.length;
-    const roundResults = await Promise.all(calls.map(async (call) => {
+    const roundResults = await Promise.all(calls.map(async (call, callIndex) => {
       const signature = `${call.name}:${stable(call.args)}`;
       const repeats = (repeatCounts.get(signature) || 0) + 1;
       repeatCounts.set(signature, repeats);
       const startedTool = Date.now();
       let result: ToolResult;
       let memoHit = false;
+      const eventId = `tool-${round}-${callIndex}-${call.name}`;
+      await emit({
+        id: eventId,
+        label: toolLabel(call.name),
+        detail: "Opening this layer now",
+        status: "active",
+        kind: "tool",
+      });
 
       if (repeats >= 3) {
         result = limitedResult(call.name, "REPEATED_NO_PROGRESS", "The same tool request repeated without new information.");
@@ -154,6 +214,13 @@ export async function runAgent(input: RunAgentInput): Promise<AgentResult> {
         status: result.status,
         memoHit,
         errorCode: result.error?.code,
+      });
+      await emit({
+        id: eventId,
+        label: toolLabel(call.name),
+        detail: conciseDetail(memoHit ? `Reused recent evidence. ${result.summary}` : result.summary),
+        status: result.status === "complete" || result.status === "partial" ? "complete" : "limited",
+        kind: "tool",
       });
       return { call, result };
     }));

@@ -9,7 +9,7 @@ test("keeps the mobile unified chat inside the viewport", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Where should we start?" })).toBeVisible();
   await expect(page.getByLabel("Creation mode")).toHaveCount(0);
   await generate(page);
-  await expect(page.locator("article.title-card")).toHaveCount(12);
+  await expect(page.locator(".assistant-option")).toHaveCount(12);
   expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false);
 });
 
@@ -20,9 +20,9 @@ test("keeps primary controls keyboard reachable with visible focus", async ({ pa
   await page.keyboard.press("Tab");
   await expect(page.getByRole("button", { name: "New chat", exact: true })).toBeFocused();
   await page.keyboard.press("Tab");
-  await expect(page.getByRole("button", { name: "Create" })).toBeFocused();
+  await expect(page.getByRole("button", { name: "Dashboard" })).toBeFocused();
   await page.keyboard.press("Tab");
-  await expect(page.getByRole("button", { name: "Start new chat" })).toBeFocused();
+  await expect(page.getByRole("button", { name: "Create" })).toBeFocused();
 
   await page.getByLabel("Message Stanley").focus();
   await expect(page.getByLabel("Message Stanley")).toBeFocused();

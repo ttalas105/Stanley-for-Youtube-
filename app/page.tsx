@@ -1,8 +1,10 @@
 "use client";
 
 import { ChangeEvent, FormEvent, KeyboardEvent, useEffect, useRef, useState } from "react";
+import { ArrowUpRight, Eye, LayoutDashboard, MessageCircle, PanelLeftClose, PanelLeftOpen, Puzzle, RefreshCw, Sparkles, SquarePen, TrendingUp, Users, Video, WandSparkles } from "lucide-react";
 
 type CreationMode = "auto" | "idea" | "title" | "thumbnail";
+type WorkspaceView = "dashboard" | "create";
 
 type GeneratedTitle = {
   id: string;
@@ -15,8 +17,13 @@ type GeneratedTitle = {
 type GeneratedIdea = {
   id: string;
   idea: string;
+  suggestedTitle?: string;
+  format?: string;
+  difficulty?: "Easy" | "Moderate" | "Ambitious";
+  recommended?: boolean;
   hook: string;
   whyItCouldWork: string;
+  channelFit?: string;
   researchBasis?: string;
   sourceNumbers?: number[];
   scriptOutline?: {
@@ -69,9 +76,31 @@ type ChatMessage = {
   script?: GeneratedScript;
   thumbnails?: ThumbnailConcept[];
   research?: Research;
+  agent?: AgentRun;
+  activity?: AgentActivity[];
   blocked?: boolean;
   streaming?: boolean;
   attachments?: MessageAttachment[];
+};
+
+type AgentActivity = {
+  id: string;
+  label: string;
+  detail?: string;
+  status: "active" | "complete" | "limited";
+  kind: "thinking" | "context" | "tool" | "answer";
+};
+
+type AgentRun = {
+  runId: string;
+  modelRounds: number;
+  durationMs: number;
+  toolCalls: Array<{
+    name: string;
+    status: "complete" | "partial" | "empty" | "error";
+    memoHit: boolean;
+    errorCode?: string;
+  }>;
 };
 
 type Draft = {
@@ -91,10 +120,15 @@ type ApiPayload = {
   script?: GeneratedScript;
   thumbnails?: ThumbnailConcept[];
   research?: Research;
+  agent?: AgentRun;
   conversationTopic?: string;
   blocked?: boolean;
   error?: string;
 };
+
+type StreamEvent =
+  | { type: "activity"; activity: AgentActivity }
+  | { type: "result"; status: number; payload: ApiPayload };
 
 type OnboardingStep = "loading" | "welcome" | "features" | "connect" | "analyzing" | "done";
 type OnboardingDirection = "forward" | "back";
@@ -148,25 +182,46 @@ type MessageAttachment = Pick<ComposerAttachment, "id" | "kind" | "name" | "prev
 
 const DRAFTS_KEY = "stanley-title-drafts";
 const ONBOARDING_KEY = "stanley-onboarding-v1";
+const SIDEBAR_KEY = "stanley-sidebar-collapsed";
 const MAX_USER_TURNS = 9;
 const STANLEY_LOGO = "https://stanbrandhub.lovable.app/downloads/Stanley_Logo_Lockup_Dark.png";
 
-const NAV_ITEMS = [
-  { icon: "spark", label: "Create", active: true },
-  { icon: "outlier", label: "Outliers", badge: true },
+const NAV_ITEMS: Array<{ icon: string; label: string; view?: WorkspaceView }> = [
+  { icon: "dashboard", label: "Dashboard", view: "dashboard" },
+  { icon: "outlier", label: "Outliers" },
   { icon: "extension", label: "Chrome extension" },
 ];
 
 const MODE_PLACEHOLDERS: Record<CreationMode, string[]> = {
-  auto: ["How can I help you grow?", "Give me ideas for my next video", "Make this title impossible to ignore", "Plan a thumbnail people will notice"],
-  idea: ["What kind of videos do you want to make?", "Find my next breakout video idea", "Turn this rough thought into a video", "What should I film next?"],
-  title: ["What is the video about?", "Rewrite this title with a stronger hook", "Give me titles based on what already works", "Help me package this video"],
-  thumbnail: ["Describe the video you need a thumbnail for", "Plan a thumbnail with one clear focal point", "Make me a thumbnail concept for", "What should the thumbnail show?"],
+  auto: [
+    "Help me get more views on my next video",
+    "Analyze my channel and tell me what to make next",
+    "Find a video idea that fits my channel",
+    "Improve the title and thumbnail for my next upload",
+  ],
+  idea: [
+    "Give me three video ideas based on my channel",
+    "Find a follow-up idea to my best-performing video",
+    "Research my niche and find an idea worth filming",
+    "What topic should I cover next to reach more viewers?",
+  ],
+  title: [
+    "Give me better titles for my most recent upload",
+    "Rewrite this title with a clearer reason to click",
+    "Make this title more clickable without using clickbait",
+    "Give me five title options based on what works in my niche",
+  ],
+  thumbnail: [
+    "Create three thumbnail concepts for my next video",
+    "Plan a thumbnail with one clear focal point",
+    "Improve the thumbnail idea for my most recent upload",
+    "Match this title with a stronger thumbnail concept",
+  ],
 };
 
-const PLACEHOLDER_TYPE_DELAY = 42;
-const PLACEHOLDER_HOLD_DELAY = 5600;
-const PLACEHOLDER_ERASE_DELAY = 22;
+const PLACEHOLDER_TYPE_DELAY = 38;
+const PLACEHOLDER_HOLD_DELAY = 4400;
+const PLACEHOLDER_ERASE_DELAY = 20;
 const PLACEHOLDER_BETWEEN_DELAY = 420;
 
 function isCreationMode(value: unknown): value is CreationMode {
@@ -201,6 +256,72 @@ function formatTime(value: string) {
 
 function formatViews(value: number) {
   return new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 }).format(value || 0);
+}
+
+function AgentActivityTimeline({ activity, live, durationMs }: { activity: AgentActivity[]; live?: boolean; durationMs?: number }) {
+  if (!activity.length) return live ? <div className="assistant-thinking" role="status" aria-label="Stanley is thinking"><span className="thinking-spinner" /></div> : null;
+
+  const rows = <ol>{activity.map((item) => <li key={item.id} className={item.status}>
+    <span className="activity-state" aria-hidden="true">{item.status === "complete" ? "✓" : item.status === "limited" ? "!" : ""}</span>
+    <div><strong>{item.label}</strong>{item.detail ? <small>{item.detail}</small> : null}</div>
+  </li>)}</ol>;
+
+  if (live) return <section className="agent-activity live" role="status" aria-label="Stanley is working">
+    <header><span className="thinking-spinner" /><div><strong>Working through it</strong><small>Live steps from this request</small></div></header>
+    {rows}
+  </section>;
+
+  return <details className="agent-activity complete">
+    <summary><span className="activity-summary-icon" aria-hidden="true">✓</span><strong>Worked through {activity.length} {activity.length === 1 ? "step" : "steps"}</strong>{durationMs ? <small>{(durationMs / 1000).toFixed(1)}s</small> : null}<span className="research-open">Show</span></summary>
+    {rows}
+  </details>;
+}
+
+function compactSentences(value: string, maxLength = 280) {
+  const clean = value.replace(/\s+/g, " ").trim();
+  if (clean.length <= maxLength) return clean;
+  const excerpt = clean.slice(0, maxLength + 1);
+  const sentenceEnd = Math.max(excerpt.lastIndexOf(". "), excerpt.lastIndexOf("! "), excerpt.lastIndexOf("? "));
+  return `${excerpt.slice(0, sentenceEnd > 110 ? sentenceEnd + 1 : maxLength).trim()}…`;
+}
+
+function formatAssistantAnswer(payload: ApiPayload) {
+  const reply = payload.reply?.trim() || "";
+  if (payload.ideas?.length) {
+    const options = payload.ideas.map((item, index) => {
+      const title = item.suggestedTitle || item.idea;
+      const premise = item.suggestedTitle ? item.idea : item.hook;
+      const format = [item.format, item.difficulty].filter(Boolean).join(" · ");
+      return `${index + 1}. ${title}${item.recommended ? "  ·  Top pick" : ""}\n${premise}\nWhy it works: ${compactSentences(item.whyItCouldWork)}${format ? `\nFormat: ${format}` : ""}`;
+    });
+    return [reply, ...options].filter(Boolean).join("\n\n");
+  }
+  if (payload.titles?.length) return [reply, ...payload.titles.map((item, index) => `${index + 1}. ${item.title}`)].filter(Boolean).join("\n\n");
+  if (payload.thumbnails?.length) {
+    const concepts = payload.thumbnails.map((item, index) => `${index + 1}. ${item.concept}\n${item.visual}${item.textOverlay && item.textOverlay !== "No text" ? `\nOn-screen text: ${item.textOverlay}` : ""}`);
+    return [reply, ...concepts].filter(Boolean).join("\n\n");
+  }
+  if (payload.script) return [reply, `${payload.script.title}\n${payload.script.targetLength}`, `Cold open: ${payload.script.coldOpen}`, ...payload.script.sections.map((section) => `${section.heading}\n${section.narration}`), `Ending: ${payload.script.ending}`].filter(Boolean).join("\n\n");
+  return reply;
+}
+
+function ConversationalAnswer({ text, streaming }: { text: string; streaming?: boolean }) {
+  const blocks = text.split(/\n\n/);
+  return <div className="assistant-answer">{blocks.map((block, index) => {
+    const lines = block.split("\n").filter(Boolean);
+    if (!lines.length) return null;
+    if (/^\d+\.\s/.test(lines[0])) return <section className="assistant-option" key={`${index}-${lines[0]}`}>
+      <strong>{lines[0]}</strong>
+      {lines.slice(1).map((line, lineIndex) => {
+        const label = line.match(/^(Why it works|Format|On-screen text):\s*(.*)$/);
+        return <p key={`${lineIndex}-${line}`}>{label ? <><b>{label[1]}:</b> {label[2]}</> : line}</p>;
+      })}
+    </section>;
+    const labeled = lines[0].match(/^(Cold open|Ending):\s*(.*)$/);
+    return <section className="assistant-paragraph" key={`${index}-${lines[0]}`}>
+      {labeled ? <p><b>{labeled[1]}:</b> {labeled[2]}</p> : lines.length > 1 ? <><h2>{lines[0]}</h2>{lines.slice(1).map((line) => <p key={line}>{line}</p>)}</> : <p>{lines[0]}</p>}
+    </section>;
+  })}{streaming ? <span className="assistant-typing-cursor" aria-hidden="true" /> : null}</div>;
 }
 
 function fileToDataUrl(file: File) {
@@ -244,7 +365,7 @@ function serializeMessage(message: ChatMessage) {
     : message.ideas?.length
       ? `Idea options:\n${message.ideas.map((item, index) => {
         const outline = item.scriptOutline ? `\nOpening: ${item.scriptOutline.opening}\nBeats: ${item.scriptOutline.beats.join(" | ")}\nPayoff: ${item.scriptOutline.payoff}` : "";
-        return `${index + 1}. ${item.idea}\nHook: ${item.hook}\nResearch basis: ${item.researchBasis || "Not recorded"}${outline}`;
+        return `${index + 1}. ${item.idea}${item.recommended ? " [RECOMMENDED]" : ""}\nWorking title: ${item.suggestedTitle || "Not recorded"}\nFormat: ${item.format || "Not recorded"} · Difficulty: ${item.difficulty || "Not recorded"}\nHook: ${item.hook}\nChannel fit: ${item.channelFit || "Not recorded"}\nResearch basis: ${item.researchBasis || "Not recorded"}${outline}`;
       }).join("\n\n")}`
       : message.thumbnails?.length
         ? `Thumbnail concepts:\n${message.thumbnails.map((item, index) => `${index + 1}. ${item.concept}: ${item.visual}`).join("\n")}`
@@ -254,16 +375,50 @@ function serializeMessage(message: ChatMessage) {
   return { role: message.role, content: artifactLines ? `${message.content}\n${artifactLines}` : message.content };
 }
 
-function ToolIcon({ name }: { name: string }) {
-  if (name === "outlier") return <span className="outlier-mark">10.4×</span>;
-  if (name === "extension") {
-    return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h4.2a2.8 2.8 0 1 1 4.6 2.15V9H21v5h-3.2a2.8 2.8 0 1 0-4.6 2.85V21H8v-3.2a2.8 2.8 0 1 1-2.85-4.6H3V8h4V4a1 1 0 0 1 2-1Z" /></svg>;
+function isAgentActivity(value: unknown): value is AgentActivity {
+  if (!value || typeof value !== "object") return false;
+  const item = value as Partial<AgentActivity>;
+  return typeof item.id === "string" && typeof item.label === "string" && (item.status === "active" || item.status === "complete" || item.status === "limited");
+}
+
+async function readApiResponse(response: Response, onActivity: (activity: AgentActivity) => void) {
+  if (!response.headers.get("content-type")?.includes("application/x-ndjson") || !response.body) {
+    return { status: response.status, payload: await response.json() as ApiPayload };
   }
-  return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 2 1.55 5.2L19 9l-5.45 1.8L12 16l-1.55-5.2L5 9l5.45-1.8L12 2Zm6 12 .9 3.1L22 18l-3.1.9L18 22l-.9-3.1L14 18l3.1-.9L18 14Z" /></svg>;
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let result: { status: number; payload: ApiPayload } | null = null;
+  const consumeLine = (line: string) => {
+    if (!line.trim()) return;
+    const event = JSON.parse(line) as StreamEvent;
+    if (event.type === "activity" && isAgentActivity(event.activity)) onActivity(event.activity);
+    if (event.type === "result") result = { status: event.status, payload: event.payload };
+  };
+
+  while (true) {
+    const { done, value } = await reader.read();
+    buffer += decoder.decode(value, { stream: !done });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() || "";
+    lines.forEach(consumeLine);
+    if (done) break;
+  }
+  if (buffer.trim()) consumeLine(buffer);
+  if (!result) throw new Error("Stanley ended the response before returning an answer.");
+  return result;
+}
+
+function ToolIcon({ name }: { name: string }) {
+  if (name === "dashboard") return <LayoutDashboard aria-hidden="true" />;
+  if (name === "outlier") return <TrendingUp aria-hidden="true" />;
+  if (name === "extension") return <Puzzle aria-hidden="true" />;
+  return <Sparkles aria-hidden="true" />;
 }
 
 function NewChatIcon() {
-  return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.7 5.3 18.7 9.3M4 20l3.4-.7L19 7.7a1.4 1.4 0 0 0 0-2l-.7-.7a1.4 1.4 0 0 0-2 0L4.7 16.6 4 20Z" /><path d="M13 4H6a2 2 0 0 0-2 2v5" /></svg>;
+  return <SquarePen aria-hidden="true" />;
 }
 
 function DebugIcon() {
@@ -279,7 +434,7 @@ function YouTubeIcon() {
 }
 
 function DisconnectIcon() {
-  return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 14.5 14.5 9.5M7.2 16.8l-1.4 1.4a2.8 2.8 0 0 1-4-4l3.4-3.4a2.8 2.8 0 0 1 4 0M16.8 7.2l1.4-1.4a2.8 2.8 0 0 1 4 4l-3.4 3.4a2.8 2.8 0 0 1-4 0" /></svg>;
+  return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6H5v12h4M14 8l4 4-4 4M18 12H8" /></svg>;
 }
 
 function PlusIcon() {
@@ -455,6 +610,136 @@ function Onboarding({
   );
 }
 
+function AnimatedMetric({ value }: { value: number }) {
+  const [displayed, setDisplayed] = useState(0);
+
+  useEffect(() => {
+    let frame = 0;
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const duration = reducedMotion ? 1 : 850;
+    const startedAt = performance.now();
+    const tick = (now: number) => {
+      const progress = Math.min(1, (now - startedAt) / duration);
+      const eased = 1 - Math.pow(1 - progress, 4);
+      setDisplayed(Math.round(value * eased));
+      if (progress < 1) frame = window.requestAnimationFrame(tick);
+    };
+    frame = window.requestAnimationFrame(tick);
+    return () => window.cancelAnimationFrame(frame);
+  }, [value]);
+
+  return <>{formatViews(displayed)}</>;
+}
+
+function ChannelDashboard({
+  status,
+  videos,
+  loading,
+  error,
+  onConnect,
+  onCreate,
+  onUseVideo,
+  onRefresh,
+}: {
+  status: YouTubeStatus;
+  videos: YouTubeVideoOption[];
+  loading: boolean;
+  error: string;
+  onConnect: () => void;
+  onCreate: () => void;
+  onUseVideo: (video: YouTubeVideoOption) => void;
+  onRefresh: () => void;
+}) {
+  const profile = status.profile;
+  if (!status.connected || !profile) {
+    return <section className="dashboard-shell dashboard-empty">
+      <div className="dashboard-empty-mark"><YouTubeIcon /></div>
+      <p>Channel dashboard</p>
+      <h1>Put your YouTube signals to work.</h1>
+      <span>Connect your channel to see real performance stats, recent uploads, and smarter starting points for your next video.</span>
+      <button type="button" onClick={onConnect}><YouTubeIcon /> Connect YouTube</button>
+    </section>;
+  }
+
+  const recentVideos = [...videos]
+    .filter((video) => video.privacyStatus === "public")
+    .sort((a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime())
+    .slice(0, 6);
+  const topVideo = [...recentVideos].sort((a, b) => b.views - a.views)[0];
+  const maxViews = Math.max(1, ...recentVideos.map((video) => video.views));
+  const averageRecentViews = recentVideos.length
+    ? Math.round(recentVideos.reduce((sum, video) => sum + video.views, 0) / recentVideos.length)
+    : 0;
+
+  return <section className="dashboard-scroll-region">
+    <div className="dashboard-shell">
+      <header className="dashboard-hero">
+        <div className="dashboard-identity">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={profile.thumbnailUrl} alt="" />
+          <span><i /> Live channel data</span>
+        </div>
+        <div className="dashboard-hero-copy">
+          <p>{profile.title}</p>
+          <h1>Your channel, at a glance.</h1>
+          <span>See what is getting attention, then turn the signal into your next upload.</span>
+        </div>
+        <div className="dashboard-hero-actions">
+          <button className="dashboard-refresh" type="button" onClick={onRefresh} disabled={loading}><RefreshCw aria-hidden="true" /> Refresh</button>
+          <button className="dashboard-create" type="button" onClick={onCreate}><WandSparkles aria-hidden="true" /> Create from my channel</button>
+        </div>
+      </header>
+
+      <div className="dashboard-metrics" aria-label="Channel totals">
+        <article><span><Users aria-hidden="true" /> Subscribers</span><strong><AnimatedMetric value={profile.subscriberCount} /></strong><small>Current total</small></article>
+        <article><span><Eye aria-hidden="true" /> Channel views</span><strong><AnimatedMetric value={profile.totalViews} /></strong><small>Lifetime total</small></article>
+        <article><span><Video aria-hidden="true" /> Videos</span><strong><AnimatedMetric value={profile.videoCount} /></strong><small>Published uploads</small></article>
+        <article><span><TrendingUp aria-hidden="true" /> Recent average</span><strong>{loading ? "—" : <AnimatedMetric value={averageRecentViews} />}</strong><small>Views across the latest {recentVideos.length || 0}</small></article>
+      </div>
+
+      {error && !loading ? <div className="dashboard-data-error"><span>{error}</span><button type="button" onClick={onRefresh}>Try again</button></div> : null}
+
+      <div className="dashboard-insight-grid">
+        <section className="dashboard-performance" aria-labelledby="performance-heading">
+          <div className="dashboard-panel-heading"><div><h2 id="performance-heading">Recent performance</h2><p>Views across your latest public uploads</p></div><span>{loading ? "Loading" : `${recentVideos.length} videos`}</span></div>
+          {loading ? <div className="dashboard-chart-loading"><i /><i /><i /><i /><i /></div> : recentVideos.length ? <div className="dashboard-bars">
+            {recentVideos.map((video, index) => <button type="button" onClick={() => onUseVideo(video)} key={video.id} title={`Build from ${video.title}`}>
+              <span className="dashboard-bar-label"><b>{video.title}</b><small>{formatViews(video.views)}</small></span>
+              <span className="dashboard-bar-track"><i style={{ "--bar-size": `${Math.max(6, (video.views / maxViews) * 100)}%`, "--bar-delay": `${index * 70}ms` } as CSSProperties} /></span>
+            </button>)}
+          </div> : <p className="dashboard-no-data">No public uploads were returned yet.</p>}
+        </section>
+
+        <aside className="dashboard-standout">
+          <div className="dashboard-panel-heading"><div><h2>Standout upload</h2><p>Best recent view count</p></div><TrendingUp aria-hidden="true" /></div>
+          {topVideo ? <>
+            <div className="dashboard-standout-thumb">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={topVideo.thumbnailUrl} alt="" />
+              <span>{formatViews(topVideo.views)} views</span>
+            </div>
+            <h3>{topVideo.title}</h3>
+            <button type="button" onClick={() => onUseVideo(topVideo)}>Build a follow-up <ArrowUpRight aria-hidden="true" /></button>
+          </> : <p className="dashboard-no-data">Your standout will appear when videos load.</p>}
+        </aside>
+      </div>
+
+      <section className="dashboard-uploads" aria-labelledby="uploads-heading">
+        <div className="dashboard-panel-heading"><div><h2 id="uploads-heading">Latest uploads</h2><p>Use any video as context for a new creative direction</p></div></div>
+        <div className="dashboard-upload-list">
+          {recentVideos.slice(0, 5).map((video) => <article key={video.id}>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={video.thumbnailUrl} alt="" />
+            <div><strong>{video.title}</strong><span>{formatViews(video.views)} views · {formatTime(video.publishedAt)}</span></div>
+            <a href={video.url} target="_blank" rel="noreferrer" aria-label={`Open ${video.title} on YouTube`}><ArrowUpRight aria-hidden="true" /></a>
+            <button type="button" onClick={() => onUseVideo(video)}>Create from this</button>
+          </article>)}
+        </div>
+      </section>
+    </div>
+  </section>;
+}
+
 export default function Home() {
   const topicRef = useRef<HTMLTextAreaElement>(null);
   const conversationEndRef = useRef<HTMLDivElement>(null);
@@ -464,6 +749,7 @@ export default function Home() {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const recordingTimerRef = useRef<number | null>(null);
+  const dashboardVideosRequestedRef = useRef(false);
   const [topic, setTopic] = useState("");
   const [mode, setMode] = useState<CreationMode>("auto");
   const [originalTopic, setOriginalTopic] = useState("");
@@ -471,6 +757,7 @@ export default function Home() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [drafts, setDrafts] = useState<Draft[]>([]);
   const [loading, setLoading] = useState(false);
+  const [activeActivity, setActiveActivity] = useState<AgentActivity[]>([]);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [feedback, setFeedback] = useState<Record<string, "up" | "down">>({});
@@ -491,11 +778,14 @@ export default function Home() {
   const [recording, setRecording] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const [transcribing, setTranscribing] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [activeView, setActiveView] = useState<WorkspaceView>("create");
 
   useEffect(() => {
     let active = true;
     let analysisTimer: number | undefined;
     const draftsTimer = window.setTimeout(() => setDrafts(readDrafts()), 0);
+    const sidebarTimer = window.setTimeout(() => setSidebarCollapsed(window.localStorage.getItem(SIDEBAR_KEY) === "true"), 0);
 
     async function initialize() {
       const params = new URLSearchParams(window.location.search);
@@ -515,6 +805,7 @@ export default function Home() {
       if (replayOnboarding) {
         setOnboardingStep("welcome");
       } else if (result === "connected" && status.connected && status.profile) {
+        setActiveView("create");
         setOnboardingStep("analyzing");
         window.localStorage.setItem(ONBOARDING_KEY, "complete");
         window.history.replaceState({}, "", window.location.pathname);
@@ -557,13 +848,39 @@ export default function Home() {
     return () => {
       active = false;
       window.clearTimeout(draftsTimer);
+      window.clearTimeout(sidebarTimer);
       if (analysisTimer) window.clearTimeout(analysisTimer);
       delete document.documentElement.dataset.stanleyReady;
     };
   }, []);
 
   useEffect(() => {
-    if (topic || loading || recording || transcribing) return;
+    if (onboardingStep !== "done" || activeView !== "dashboard" || !youtubeStatus.connected || dashboardVideosRequestedRef.current) return;
+    dashboardVideosRequestedRef.current = true;
+    const controller = new AbortController();
+
+    async function loadDashboardVideos() {
+      setVideosLoading(true);
+      setVideosError("");
+      try {
+        const response = await fetch("/api/youtube/videos", { cache: "no-store", signal: controller.signal });
+        const payload = await response.json() as { videos?: YouTubeVideoOption[]; error?: string };
+        if (!response.ok) throw new Error(payload.error || "Your videos could not be loaded.");
+        setYouTubeVideos(payload.videos || []);
+      } catch (caught) {
+        if (controller.signal.aborted) return;
+        setVideosError(caught instanceof Error ? caught.message : "Your videos could not be loaded.");
+      } finally {
+        if (!controller.signal.aborted) setVideosLoading(false);
+      }
+    }
+
+    void loadDashboardVideos();
+    return () => controller.abort();
+  }, [activeView, onboardingStep, youtubeStatus.connected]);
+
+  useEffect(() => {
+    if (messages.length > 0 || topic || loading || recording || transcribing) return;
     const suggestions = getModePlaceholders(mode);
     const phrase = suggestions[placeholderIndex % suggestions.length] || suggestions[0];
     const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -600,10 +917,10 @@ export default function Home() {
 
     timer = window.setTimeout(() => {
       setTypedPlaceholder("");
-      timer = window.setTimeout(typeCharacter, 220);
+      timer = window.setTimeout(typeCharacter, 180);
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [mode, placeholderIndex, topic, loading, recording, transcribing]);
+  }, [messages.length, mode, placeholderIndex, topic, loading, recording, transcribing]);
 
   useEffect(() => () => {
     if (recordingTimerRef.current) window.clearInterval(recordingTimerRef.current);
@@ -686,6 +1003,7 @@ export default function Home() {
     const pendingMessages = [...messages, userMessage];
 
     setLoading(true);
+    setActiveActivity([]);
     setError("");
     setTopic("");
     setAttachments([]);
@@ -695,9 +1013,16 @@ export default function Home() {
     if (!sessionId) setSessionId(activeSessionId);
 
     try {
+      const activityLog: AgentActivity[] = [];
+      const updateActivity = (activity: AgentActivity) => {
+        const existingIndex = activityLog.findIndex((item) => item.id === activity.id);
+        if (existingIndex >= 0) activityLog[existingIndex] = activity;
+        else activityLog.push(activity);
+        setActiveActivity([...activityLog]);
+      };
       const response = await fetch("/api/generate-titles", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", Accept: "application/x-ndjson" },
         body: JSON.stringify({
           topic: rootTopic,
           mode,
@@ -717,40 +1042,47 @@ export default function Home() {
           ...(isFirstMessage ? {} : { messages: pendingMessages.map(serializeMessage) }),
         }),
       });
-      const payload = (await response.json()) as ApiPayload;
-      if (!response.ok || !payload.reply) throw new Error(payload.error || "Stanley could not finish that response. Try again.");
+      const streamed = await readApiResponse(response, updateActivity);
+      const payload = streamed.payload;
+      if (streamed.status >= 400 || !payload.reply) throw new Error(payload.error || "Stanley could not finish that response. Try again.");
 
       const responseMode = isCreationMode(payload.mode) && payload.mode !== "auto" ? payload.mode : undefined;
+      const presentedAnswer = formatAssistantAnswer(payload);
       const assistantMessage: ChatMessage = {
         id: crypto.randomUUID(),
         role: "assistant",
-        content: payload.reply,
+        content: presentedAnswer,
         mode: responseMode,
         titles: payload.titles,
         ideas: payload.ideas,
         script: payload.script,
         thumbnails: payload.thumbnails,
         research: payload.research,
+        agent: payload.agent,
+        activity: [...activityLog],
         blocked: payload.blocked,
       };
       const completedMessages = [...pendingMessages, assistantMessage];
       const completedTopic = payload.conversationTopic?.trim() || rootTopic;
       const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
       if (!reduceMotion) {
-        const chunkSize = Math.max(1, Math.ceil(assistantMessage.content.length / 72));
+        const targetTicks = Math.min(450, Math.max(80, Math.ceil(assistantMessage.content.length / 4)));
+        const chunkSize = Math.max(1, Math.ceil(assistantMessage.content.length / targetTicks));
         for (let end = chunkSize; end < assistantMessage.content.length; end += chunkSize) {
           if (replyRunRef.current !== runId) return;
           setMessages([...pendingMessages, {
             id: assistantMessage.id,
             role: "assistant",
             content: assistantMessage.content.slice(0, end),
+            activity: [...activityLog],
             streaming: true,
           }]);
-          await new Promise<void>((resolve) => window.setTimeout(resolve, 14));
+          await new Promise<void>((resolve) => window.setTimeout(resolve, 12));
         }
       }
       if (replyRunRef.current !== runId) return;
       setMessages(completedMessages);
+      setActiveActivity([]);
       setLoading(false);
       if (completedTopic !== originalTopic) setOriginalTopic(completedTopic);
       persistConversation(activeSessionId, completedTopic, completedMessages);
@@ -761,6 +1093,7 @@ export default function Home() {
       setMessages(messages);
       setTopic(cleanMessage);
       setAttachments(currentAttachments);
+      setActiveActivity([]);
       if (isFirstMessage) {
         setOriginalTopic("");
         setSessionId("");
@@ -808,9 +1141,12 @@ export default function Home() {
 
   function openDraft(draft: Draft) {
     replyRunRef.current += 1;
+    setActiveView("create");
     setSessionId(draft.id);
     setOriginalTopic(draft.topic);
     setMessages(restoreMessages(draft));
+    setActiveActivity([]);
+    setLoading(false);
     setTopic("");
     setAttachments([]);
     setAttachmentMenuOpen(false);
@@ -821,11 +1157,14 @@ export default function Home() {
 
   function startNewChat() {
     replyRunRef.current += 1;
+    setActiveView("create");
     setTopic("");
     setMode("auto");
     setOriginalTopic("");
     setSessionId("");
     setMessages([]);
+    setActiveActivity([]);
+    setLoading(false);
     setAttachments([]);
     setAttachmentMenuOpen(false);
     setError("");
@@ -850,21 +1189,23 @@ export default function Home() {
     window.location.assign("/api/youtube/connect?returnTo=/");
   }
 
-  function skipOnboarding() {
-    window.localStorage.setItem(ONBOARDING_KEY, "skipped");
-    setOnboardingStep("done");
-    window.setTimeout(() => topicRef.current?.focus(), 0);
-  }
-
   async function disconnectYouTube() {
     try {
       const response = await fetch("/api/youtube/disconnect", { method: "POST" });
-      if (!response.ok) throw new Error("Disconnect failed");
-      setYouTubeStatus((current) => ({ ...current, connected: false, profile: null }));
+      if (!response.ok) throw new Error("YouTube could not be disconnected.");
+      setYouTubeStatus({ configured: true, connected: false, profile: null });
+      setYouTubeVideos([]);
       setNotice("YouTube disconnected");
-    } catch {
-      setNotice("YouTube could not be disconnected");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "YouTube could not be disconnected.");
     }
+  }
+
+  function skipOnboarding() {
+    window.localStorage.setItem(ONBOARDING_KEY, "skipped");
+    setActiveView("create");
+    setOnboardingStep("done");
+    window.setTimeout(() => topicRef.current?.focus(), 0);
   }
 
   function removeAttachment(id: string) {
@@ -928,6 +1269,10 @@ export default function Home() {
     setVideoSearch("");
     if (!youtubeStatus.connected) {
       setVideosError("Connect your YouTube channel to choose from your uploads.");
+      return;
+    }
+    if (youtubeVideos.length > 0) {
+      setVideosError("");
       return;
     }
     setVideosLoading(true);
@@ -1041,20 +1386,73 @@ export default function Home() {
     }
   }
 
+  const promptSuggestions = getModePlaceholders(mode);
+  const promptSuggestion = promptSuggestions[placeholderIndex % promptSuggestions.length] || promptSuggestions[0];
+
   function handleComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key === "Tab" && messages.length === 0 && !event.currentTarget.value && typedPlaceholder) {
+      event.preventDefault();
+      const textarea = event.currentTarget;
+      setTopic(promptSuggestion);
+      window.requestAnimationFrame(() => {
+        textarea.setSelectionRange(promptSuggestion.length, promptSuggestion.length);
+      });
+      return;
+    }
     if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
     event.preventDefault();
     if (!event.currentTarget.value.trim() || loading || recording || transcribing) return;
     event.currentTarget.form?.requestSubmit();
   }
 
-  function openTool(label: string, active?: boolean) {
-    if (active) {
-      document.querySelector("#composer")?.scrollIntoView({ behavior: "smooth", block: "center" });
-      window.setTimeout(() => topicRef.current?.focus(), 250);
+  function openTool(item: (typeof NAV_ITEMS)[number]) {
+    if (item.view) {
+      setActiveView(item.view);
+      if (item.view === "create") window.setTimeout(() => topicRef.current?.focus(), 0);
       return;
     }
-    setNotice(`${label} is coming soon`);
+    setNotice(`${item.label} is coming soon`);
+  }
+
+  function startDashboardPrompt(prompt: string, video?: YouTubeVideoOption) {
+    startNewChat();
+    setMode("idea");
+    setTopic(prompt);
+    if (video) {
+      setAttachments([{
+        id: crypto.randomUUID(),
+        kind: "youtube",
+        name: video.title,
+        title: video.title,
+        videoId: video.id,
+        thumbnailUrl: video.thumbnailUrl,
+        url: video.url,
+        views: video.views,
+        publishedAt: video.publishedAt,
+        privacyStatus: video.privacyStatus,
+      }]);
+    }
+    window.setTimeout(() => {
+      topicRef.current?.focus();
+      topicRef.current?.setSelectionRange(prompt.length, prompt.length);
+    }, 0);
+  }
+
+  async function refreshDashboard() {
+    if (!youtubeStatus.connected) return;
+    dashboardVideosRequestedRef.current = true;
+    setVideosLoading(true);
+    setVideosError("");
+    try {
+      const response = await fetch("/api/youtube/videos", { cache: "no-store" });
+      const payload = await response.json() as { videos?: YouTubeVideoOption[]; error?: string };
+      if (!response.ok) throw new Error(payload.error || "Your videos could not be loaded.");
+      setYouTubeVideos(payload.videos || []);
+    } catch (caught) {
+      setVideosError(caught instanceof Error ? caught.message : "Your videos could not be loaded.");
+    } finally {
+      setVideosLoading(false);
+    }
   }
 
   const inConversation = messages.length > 0;
@@ -1067,6 +1465,22 @@ export default function Home() {
       ? "Transcribing your voice message…"
       : "";
   const filteredYoutubeVideos = youtubeVideos.filter((video) => video.title.toLocaleLowerCase().includes(videoSearch.trim().toLocaleLowerCase()));
+
+  function applyPromptSuggestion() {
+    if (!promptSuggestion) return;
+    setTopic(promptSuggestion);
+    window.requestAnimationFrame(() => {
+      topicRef.current?.focus();
+      topicRef.current?.setSelectionRange(promptSuggestion.length, promptSuggestion.length);
+    });
+  }
+
+  function handleComposerChange(event: ChangeEvent<HTMLTextAreaElement>) {
+    const textarea = event.currentTarget;
+    setTopic(textarea.value);
+    textarea.style.height = "0px";
+    textarea.style.height = `${Math.min(textarea.scrollHeight, 150)}px`;
+  }
 
   function renderComposer(large: boolean) {
     return (
@@ -1094,16 +1508,17 @@ export default function Home() {
                   ref={topicRef}
                   id={large ? "topic" : "chat-topic"}
                   value={topic}
-                  onChange={(event) => setTopic(event.target.value)}
+                  onChange={handleComposerChange}
                   onKeyDown={handleComposerKeyDown}
                   disabled={chatLimitReached}
                   placeholder={composerPlaceholder}
                   maxLength={1200}
                   rows={large ? 2 : 1}
                 />
-                {!topic && !composerPlaceholder && typedPlaceholder && <span className="typewriter-placeholder" aria-hidden="true">
-                  {typedPlaceholder}<i />
-                </span>}
+                {large && !topic && !composerPlaceholder && typedPlaceholder && <>
+                  <span className="typewriter-placeholder" aria-hidden="true">{typedPlaceholder}</span>
+                  <button className="suggestion-apply" type="button" onClick={applyPromptSuggestion} aria-label={`Use suggestion: ${promptSuggestion}`} title="Use this suggestion"><span aria-hidden="true">↹</span><kbd>Tab</kbd></button>
+                </>}
               </div>
 
               <div className="composer-toolbar">
@@ -1129,7 +1544,7 @@ export default function Home() {
 
           <input className="sr-only" ref={imageInputRef} type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple onChange={(event) => void handleFileSelection("image", event)} aria-label="Upload images" />
           <input className="sr-only" ref={videoInputRef} type="file" accept="video/mp4,video/webm,video/quicktime,video/mpeg" onChange={(event) => void handleFileSelection("video", event)} aria-label="Upload video" />
-          {large ? <p className="composer-hint">Ask for ideas, scripts, titles, or thumbnails. Stanley will work out what you need.</p> : <div className="composer-meta">{error ? <p className="form-error" role="alert">{error}</p> : <p>Stanley can only help build your YouTube video.</p>}<span>{userTurns}/{MAX_USER_TURNS}</span></div>}
+          {!large && <div className="composer-meta">{error && <p className="form-error" role="alert">{error}</p>}<span>{userTurns}/{MAX_USER_TURNS}</span></div>}
           {large && error && <p className="form-error" role="alert">{error}</p>}
         </div>
       </form>
@@ -1152,33 +1567,52 @@ export default function Home() {
   }
 
   return (
-    <main className="app-shell" id="top" data-session-id={sessionId || undefined}>
+    <main className={sidebarCollapsed ? "app-shell sidebar-is-collapsed" : "app-shell"} id="top" data-session-id={sessionId || undefined}>
       <aside className="sidebar">
-        <a className="sidebar-brand" href="#top" aria-label="Stanley home">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/stanley-mascot.png" alt="" width="34" height="34" />
-          <span><strong>Stanley</strong><small><YouTubeIcon /> for YouTube</small></span>
-        </a>
+        <div className="sidebar-head">
+          <a className="sidebar-brand" href="#top" aria-label="Stanley home">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/stanley-mascot.png" alt="" width="36" height="36" />
+            <span><strong>Stanley</strong><small><YouTubeIcon /> for YouTube</small></span>
+          </a>
+        </div>
 
-        <button className="sidebar-new-chat-button" type="button" onClick={startNewChat}><NewChatIcon /><span>New chat</span></button>
+        <button className="sidebar-new-chat-button" type="button" onClick={startNewChat} title={sidebarCollapsed ? "New chat" : undefined}><NewChatIcon /><span>New chat</span></button>
 
         <nav aria-label="Stanley tools">
-          {NAV_ITEMS.map((item) => (
-            <div className={item.active ? "nav-item active" : "nav-item"} key={item.label}>
-              <button className="nav-tool-button" type="button" onClick={() => openTool(item.label, item.active)} aria-current={item.active ? "page" : undefined}>
-                <span className={item.badge ? "nav-badge" : "nav-icon"} aria-hidden="true"><ToolIcon name={item.icon} /></span>
+          {NAV_ITEMS.map((item) => {
+            const active = item.view === activeView;
+            return (
+            <div className={active ? "nav-item active" : "nav-item"} data-label={item.label} key={item.label}>
+              <button className="nav-tool-button" type="button" onClick={() => openTool(item)} aria-current={active ? "page" : undefined}>
+                <span className="nav-icon" aria-hidden="true"><ToolIcon name={item.icon} /></span>
                 <span>{item.label}</span>
               </button>
-              {item.active && <button className="nav-new-chat" type="button" onClick={startNewChat} aria-label="Start new chat"><NewChatIcon /></button>}
             </div>
-          ))}
+          )})}
         </nav>
+
+        <button
+          className="sidebar-collapse"
+          type="button"
+            onClick={(event) => {
+              event.currentTarget.blur();
+              setSidebarCollapsed((current) => {
+                window.localStorage.setItem(SIDEBAR_KEY, String(!current));
+                return !current;
+              });
+            }}
+          aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+          title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+        >
+          {sidebarCollapsed ? <PanelLeftOpen aria-hidden="true" /> : <PanelLeftClose aria-hidden="true" />}
+        </button>
 
         <section className="title-history" aria-labelledby="history-heading">
           <h2 id="history-heading">Chats</h2>
           {drafts.length > 0 ? drafts.slice(0, 6).map((draft) => (
             <button type="button" key={draft.id} onClick={() => openDraft(draft)} aria-current={draft.id === sessionId ? "true" : undefined}>
-              <span>{draft.topic}</span><small>{formatTime(draft.createdAt)}</small>
+              <MessageCircle aria-hidden="true" /><span>{draft.topic}</span><small>{formatTime(draft.createdAt)}</small>
             </button>
           )) : <p>Your creation chats will appear here.</p>}
         </section>
@@ -1201,14 +1635,23 @@ export default function Home() {
               <img src={youtubeStatus.profile.thumbnailUrl} alt="" width="28" height="28" />
             </> : <span className="channel-fallback" aria-hidden="true"><YouTubeIcon /></span>}
             <span className="channel-copy"><strong>{youtubeStatus.profile.title}</strong><small>Connected channel</small></span>
-            <button className="channel-disconnect" type="button" onClick={() => void disconnectYouTube()} aria-label={`Disconnect ${youtubeStatus.profile.title}`}><DisconnectIcon /><span>Disconnect</span></button>
+            <button className="channel-disconnect" type="button" onClick={() => void disconnectYouTube()} aria-label={`Disconnect ${youtubeStatus.profile.title}`} title="Disconnect YouTube"><DisconnectIcon /></button>
           </div> : <button className="youtube-connect-header" type="button" onClick={connectYouTube}><YouTubeIcon /><span>Connect YouTube</span></button>}
           <div className="header-actions">
-            {sessionId && <button className="debug-session" type="button" onClick={copySessionId} title={`Copy session ID: ${sessionId}`} aria-label="Copy session ID"><DebugIcon /><span>Debug</span><code>{sessionId.slice(0, 8)}</code></button>}
-            <button className="header-new-chat" type="button" onClick={startNewChat} aria-label="New conversation"><NewChatIcon /></button>
+            {activeView === "create" && sessionId && <button className="debug-session" type="button" onClick={copySessionId} title={`Copy session ID: ${sessionId}`} aria-label="Copy session ID"><DebugIcon /><span>Debug</span><code>{sessionId.slice(0, 8)}</code></button>}
           </div>
         </header>
 
+        {activeView === "dashboard" ? <ChannelDashboard
+          status={youtubeStatus}
+          videos={youtubeVideos}
+          loading={videosLoading}
+          error={videosError}
+          onConnect={connectYouTube}
+          onCreate={() => startDashboardPrompt("Analyze my channel and give me three strong video ideas for my next upload")}
+          onUseVideo={(video) => startDashboardPrompt(`Analyze this upload and help me build a stronger follow-up video: ${video.title}`, video)}
+          onRefresh={() => void refreshDashboard()}
+        /> : <>
         <div className={inConversation ? "content conversation-mode" : "content"}>
           {!inConversation ? (
             <>
@@ -1240,55 +1683,32 @@ export default function Home() {
                   <div className="assistant-lead">
                     <div>
                       {message.blocked && <span className="boundary-label">Creation boundary</span>}
-                      {message.ideas?.length ? <h1>Video ideas</h1> : null}
-                      {message.script ? <h1>Full video script</h1> : null}
-                      {message.titles?.length ? <h1>Title directions</h1> : null}
-                      {message.thumbnails?.length ? <h1>Thumbnail concepts</h1> : null}
-                      <p>{message.content}{message.streaming && <span className="assistant-typing-cursor" aria-hidden="true" />}</p>
+                      {message.activity?.length && !message.streaming ? <AgentActivityTimeline activity={message.activity} durationMs={message.agent?.durationMs} /> : null}
+                      <ConversationalAnswer text={message.content} streaming={message.streaming} />
                     </div>
                   </div>
 
-                  {message.ideas?.length ? <div className="creation-list idea-list">{message.ideas.map((item, index) => {
-                    const evidenceSources = (item.sourceNumbers || []).map((sourceNumber) => message.research?.examples[sourceNumber - 1]).filter((video): video is ResearchVideo => Boolean(video));
-                    return (
-                      <article className="creation-item idea-item" key={item.id}>
-                        <span className="card-number">{String(index + 1).padStart(2, "0")}</span>
-                        <div>
-                          <h2>{item.idea}</h2>
-                          <p><strong>Hook:</strong> {item.hook}</p>
-                          <p>{item.whyItCouldWork}</p>
-                          {item.researchBasis ? <div className="idea-evidence"><strong>Data signal</strong><p>{item.researchBasis}</p>{evidenceSources.length > 0 ? <div>{evidenceSources.map((video) => <a href={video.url} target="_blank" rel="noreferrer" key={video.id}>{video.title}</a>)}</div> : null}</div> : null}
-                          {item.scriptOutline ? <details className="idea-script">
-                            <summary><span>Script blueprint</span><small>Opening + {item.scriptOutline.beats.length} beats + payoff</small></summary>
-                            <div className="script-outline-body">
-                              <section><h3>Cold open</h3><p>{item.scriptOutline.opening}</p></section>
-                              <section><h3>Story beats</h3><ol>{item.scriptOutline.beats.map((beat, beatIndex) => <li key={`${item.id}-beat-${beatIndex}`}>{beat}</li>)}</ol></section>
-                              <section><h3>Payoff</h3><p>{item.scriptOutline.payoff}</p></section>
-                              <button className="write-script-button" type="button" disabled={loading || chatLimitReached} onClick={() => void submitMessage(`Write the full YouTube script for idea ${index + 1}: "${item.idea}". Follow its hook and script blueprint, and keep every factual claim honest.`)} aria-label={`Write full script for idea ${index + 1}`}>Write full script</button>
-                            </div>
-                          </details> : null}
-                        </div>
-                      </article>
-                    );
-                  })}</div> : null}
-
-                  {message.titles?.length ? <div className="creation-list title-list">{message.titles.map((item, index) => (
-                    <article className="creation-item title-card" key={item.id}><span className="card-number">{String(index + 1).padStart(2, "0")}</span><div className="card-content"><span className="angle-tag">{item.angle}</span><h2>{item.title}</h2><p>{item.whyItWorks}</p></div></article>
-                  ))}</div> : null}
-
-                  {message.thumbnails?.length ? <div className="thumbnail-list">{message.thumbnails.map((item, index) => (
-                    <article className="thumbnail-item" key={item.id}>
-                      <div className="thumbnail-preview"><span>{item.textOverlay === "No text" ? "" : item.textOverlay}</span></div>
-                      <div><span className="angle-tag">Concept {String(index + 1).padStart(2, "0")}</span><h2>{item.concept}</h2><p>{item.visual}</p><p><strong>Why it works:</strong> {item.whyItWorks}</p></div>
-                    </article>
-                  ))}</div> : null}
-
-                  {message.script ? <section className="full-script" aria-label={`Script for ${message.script.title}`}>
-                    <header><div><h2>{message.script.title}</h2><p>{message.script.targetLength}</p></div></header>
-                    <section><h3>Cold open</h3><p>{message.script.coldOpen}</p></section>
-                    {message.script.sections.map((section, index) => <section key={`${message.id}-section-${index}`}><h3>{section.heading}</h3><p>{section.narration}</p></section>)}
-                    <section><h3>Ending</h3><p>{message.script.ending}</p></section>
-                  </section> : null}
+                  {message.ideas?.length ? (() => {
+                    const recommendedIdea = message.ideas.find((item) => item.recommended) || message.ideas[0];
+                    return <>
+                      <details className="response-details">
+                        <summary>Research and script notes <span>Open</span></summary>
+                        <div>{message.ideas.map((item, index) => <section key={item.id}>
+                          <h3>{index + 1}. {item.suggestedTitle || item.idea}</h3>
+                          <p><strong>Opening:</strong> {item.scriptOutline?.opening || item.hook}</p>
+                          {item.channelFit ? <p><strong>Fit:</strong> {item.channelFit}</p> : null}
+                          {item.researchBasis ? <p><strong>Evidence:</strong> {item.researchBasis}</p> : null}
+                          {item.scriptOutline ? <ol>{item.scriptOutline.beats.map((beat, beatIndex) => <li key={`${item.id}-beat-${beatIndex}`}>{beat}</li>)}</ol> : null}
+                          {item.scriptOutline?.payoff ? <p><strong>Payoff:</strong> {item.scriptOutline.payoff}</p> : null}
+                        </section>)}</div>
+                      </details>
+                      <div className="idea-next-actions compact" aria-label="Keep building the top idea">
+                        <button type="button" disabled={loading || chatLimitReached} onClick={() => void submitMessage(`Write the complete YouTube script for the recommended idea: "${recommendedIdea.idea}".`)}>Write the script</button>
+                        <button type="button" disabled={loading || chatLimitReached} onClick={() => void submitMessage(`Give me five strong YouTube title options for the recommended idea: "${recommendedIdea.idea}".`)}>Make titles</button>
+                        <button type="button" disabled={loading || chatLimitReached} onClick={() => void submitMessage(`Create three thumbnail concepts for the recommended idea: "${recommendedIdea.idea}".`)}>Plan thumbnail</button>
+                      </div>
+                    </>;
+                  })() : null}
 
                   {message.research && (
                     <details className="research-card">
@@ -1302,20 +1722,21 @@ export default function Home() {
                     <button className={feedback[message.id] === "down" ? "feedback-response selected" : "feedback-response"} type="button" aria-label="Mark response as not helpful" aria-pressed={feedback[message.id] === "down"} onClick={() => rateResponse(message.id, "down")}><FeedbackIcon down /></button>
                     <button className="copy-response" type="button" onClick={() => copyText(message.content, "Response copied")} aria-label="Copy response"><span className="copy-icon" aria-hidden="true" /> Copy</button>
                     {message.titles?.length ? <button className="copy-response" type="button" onClick={() => copyText(message.titles!.map((item, index) => `${index + 1}. ${item.title}`).join("\n"), "Titles copied")} aria-label="Copy all titles"><span className="copy-icon" aria-hidden="true" /> Copy titles</button> : null}
-                    {message.ideas?.length ? <button className="copy-response" type="button" onClick={() => copyText(message.ideas!.map((item, index) => `${index + 1}. ${item.idea}\nHook: ${item.hook}\nWhy it could work: ${item.whyItCouldWork}\nData signal: ${item.researchBasis || "Broad format guidance"}${item.scriptOutline ? `\n\nSCRIPT BLUEPRINT\nCold open: ${item.scriptOutline.opening}\n${item.scriptOutline.beats.map((beat, beatIndex) => `${beatIndex + 1}. ${beat}`).join("\n")}\nPayoff: ${item.scriptOutline.payoff}` : ""}`).join("\n\n---\n\n"), "Ideas and scripts copied")} aria-label="Copy all ideas and script blueprints"><span className="copy-icon" aria-hidden="true" /> Copy ideas + scripts</button> : null}
+                    {message.ideas?.length ? <button className="copy-response" type="button" onClick={() => copyText(message.ideas!.map((item, index) => `${index + 1}. ${item.idea}${item.recommended ? " [TOP PICK]" : ""}\nWorking title: ${item.suggestedTitle || "Not set"}\nFormat: ${item.format || "Not set"} · Difficulty: ${item.difficulty || "Not set"}\nHook: ${item.hook}\nWhy it could work: ${item.whyItCouldWork}\nChannel fit: ${item.channelFit || "Based on the supplied brief"}\nComparable signal: ${item.researchBasis || "Broad format guidance"}${item.scriptOutline ? `\n\nSCRIPT BLUEPRINT\nCold open: ${item.scriptOutline.opening}\n${item.scriptOutline.beats.map((beat, beatIndex) => `${beatIndex + 1}. ${beat}`).join("\n")}\nPayoff: ${item.scriptOutline.payoff}` : ""}`).join("\n\n---\n\n"), "Ideas and scripts copied")} aria-label="Copy all ideas and script blueprints"><span className="copy-icon" aria-hidden="true" /> Copy ideas + scripts</button> : null}
                     {message.script ? <button className="copy-response" type="button" onClick={() => copyText(`${message.script!.title} (${message.script!.targetLength})\n\nCOLD OPEN\n${message.script!.coldOpen}\n\n${message.script!.sections.map((section) => `${section.heading.toUpperCase()}\n${section.narration}`).join("\n\n")}\n\nENDING\n${message.script!.ending}`, "Full script copied")} aria-label="Copy full script"><span className="copy-icon" aria-hidden="true" /> Copy full script</button> : null}
                     {message.thumbnails?.length ? <button className="copy-response" type="button" onClick={() => copyText(message.thumbnails!.map((item, index) => `${index + 1}. ${item.concept}\nVisual: ${item.visual}\nText: ${item.textOverlay}`).join("\n\n"), "Thumbnail concepts copied")} aria-label="Copy all thumbnail concepts"><span className="copy-icon" aria-hidden="true" /> Copy concepts</button> : null}
                   </div>}
                 </article>
               ))}
 
-              {loading && !streamingReply && <div className="assistant-thinking" role="status" aria-label="Stanley is thinking"><span className="thinking-spinner" /></div>}
+              {loading && !streamingReply ? <AgentActivityTimeline activity={activeActivity} live /> : null}
               <div ref={conversationEndRef} aria-hidden="true" />
             </section>
           )}
         </div>
 
         {inConversation && renderComposer(false)}
+        </>}
       </section>
 
       {videoPickerOpen && <div className="video-picker-backdrop" role="presentation" onMouseDown={(event) => {

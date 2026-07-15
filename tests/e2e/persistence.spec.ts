@@ -44,7 +44,7 @@ test("renders the submitted message and Stanley response as one conversation", a
   await generate(page);
 
   await expect(page.locator(".user-message")).toHaveText(topics.primary);
-  await expect(page.getByRole("heading", { name: "Title directions" })).toBeVisible();
+  await expect(page.locator(".assistant-option")).toHaveCount(12);
   await expect(page.locator(".assistant-message")).toContainText("I reviewed the strongest comparable videos");
   await expect(page.getByRole("button", { name: "Copy all titles" })).toHaveCount(1);
   await expect(page.getByRole("button", { name: "Copy response" })).toHaveCount(1);
@@ -59,7 +59,6 @@ test("keeps the unified composer active without exposing internal creation modes
   await expect(page.getByRole("button", { name: "Send message" })).toBeDisabled();
   await expect(page.getByLabel("Creation mode")).toHaveCount(0);
   await expect(page.locator(".mode-option")).toHaveCount(0);
-  await expect(page.getByText(/only help build your YouTube video/)).toBeVisible();
 });
 
 test("greets naturally and transitions into detected title work", async ({ page }) => {
@@ -89,7 +88,7 @@ test("greets naturally and transitions into detected title work", async ({ page 
 
   await composer.fill(topics.primary);
   await composer.press("Enter");
-  await expect(page.locator("article.title-card")).toHaveCount(12);
+  await expect(page.locator(".assistant-option")).toHaveCount(12);
 
   await composer.fill("Which one is strongest?");
   await composer.press("Enter");
@@ -210,8 +209,7 @@ test("starts a new unified chat without deleting history", async ({ page }) => {
   await openApp(page);
   await generate(page);
 
-  await page.locator(".nav-item.active").hover();
-  await page.getByRole("button", { name: "Start new chat" }).click();
+  await page.getByRole("button", { name: "New chat", exact: true }).click();
   await expect(page.getByLabel("Message Stanley")).toHaveValue("");
   await expect(page.getByLabel("Message Stanley")).toBeFocused();
   await expect(page.getByRole("heading", { name: "Where should we start?" })).toBeVisible();
@@ -229,14 +227,14 @@ test("reopens an earlier result set from chat history", async ({ page }) => {
   });
   await openApp(page);
   await generate(page, topics.primary);
-  await page.locator(".nav-item.active").hover();
-  await page.getByRole("button", { name: "Start new chat" }).click();
+  await page.getByRole("button", { name: "New chat", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Copy session ID" })).toHaveCount(0);
   await page.getByLabel("Message Stanley").fill(topics.secondary);
   await page.getByRole("button", { name: "Send message" }).click();
-  await expect(page.getByRole("heading", { name: buildTitles("phone-free")[0].title })).toBeVisible();
+  await expect(page.locator(".assistant-option").first()).toContainText(buildTitles("phone-free")[0].title);
 
   await page.locator(".title-history button").filter({ hasText: topics.primary }).click();
-  await expect(page.getByRole("heading", { name: buildTitles()[0].title })).toBeVisible();
+  await expect(page.locator(".assistant-option").first()).toContainText(buildTitles()[0].title);
   await expect(page.locator(".user-message")).toHaveText(topics.primary);
 });
 
@@ -247,12 +245,12 @@ test("caps stored chat history at eight sessions and shows the latest six", asyn
 
   for (let index = 1; index <= 9; index += 1) {
     if (index > 1) {
-      await page.locator(".nav-item.active").hover();
-      await page.getByRole("button", { name: "Start new chat" }).click();
+      await page.getByRole("button", { name: "New chat", exact: true }).click();
+      await expect(page.getByRole("button", { name: "Copy session ID" })).toHaveCount(0);
     }
     await page.getByLabel("Message Stanley").fill(`A sufficiently detailed creator test topic number ${index}`);
     await page.getByRole("button", { name: "Send message" }).click();
-    await expect(page.locator("article.title-card")).toHaveCount(12);
+    await expect(page.locator(".assistant-option")).toHaveCount(12);
   }
 
   const historyLength = await page.evaluate(() => JSON.parse(window.localStorage.getItem("stanley-title-drafts") || "[]").length);

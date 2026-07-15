@@ -147,7 +147,7 @@ test("records a voice message and places the transcript in the composer", async 
 test("types prompt ideas and leaves enough time to read each one", async ({ page }) => {
   await openApp(page);
   const prompt = page.locator(".typewriter-placeholder");
-  const firstSuggestion = "How can I help you grow?";
+  const firstSuggestion = "Help me get more views on my next video";
 
   await expect(prompt).toBeVisible();
   await expect.poll(async () => (await prompt.textContent())?.length || 0, { timeout: 2200 }).toBeGreaterThan(8);

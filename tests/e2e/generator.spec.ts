@@ -24,7 +24,6 @@ test("renders the unified ChatGPT-style Stanley composer", async ({ page }) => {
   await expect(page.getByLabel("Message Stanley")).toBeVisible();
   await expect(page.getByRole("button", { name: "Send message" })).toBeDisabled();
   await expect(page.locator(".generate-button .send-arrow")).toBeVisible();
-  await expect(page.getByText(/Ask for ideas, scripts, titles, or thumbnails/)).toBeVisible();
   await expect(page.locator(".main-header .mode-indicator")).toHaveCount(0);
   await expect(page.locator(".sidebar-brand")).toContainText("for YouTube");
   await expect(page.locator(".sidebar-brand svg")).toHaveCount(1);
@@ -41,7 +40,8 @@ test("offers Stanley-style quick starts that prepare the composer", async ({ pag
 test("shows one creation chat in the sidebar", async ({ page }) => {
   await openApp(page);
   const navigation = page.getByRole("navigation", { name: "Stanley tools" });
-  await expect(navigation.locator(".nav-item")).toHaveCount(3);
+  await expect(navigation.locator(".nav-item")).toHaveCount(4);
+  await expect(navigation.getByText("Dashboard", { exact: true })).toBeVisible();
   await expect(navigation.getByText("Create", { exact: true })).toBeVisible();
   await expect(navigation.getByText("Outliers")).toBeVisible();
   await expect(navigation.getByText("Chrome extension")).toBeVisible();
@@ -81,7 +81,7 @@ test("keeps blank submission quiet and accepts a short message", async ({ page }
   await page.getByLabel("Message Stanley").fill("Short");
   await expect(sendButton).toBeEnabled();
   await sendButton.click();
-  await expect(page.locator("article.title-card")).toHaveCount(12);
+  await expect(page.locator(".assistant-option")).toHaveCount(12);
   expect(requests).toBe(1);
 });
 
@@ -97,7 +97,7 @@ test("submits with Enter and sends the selected mode and stable memory session",
   await page.getByLabel("Message Stanley").fill(topics.primary);
   await page.getByLabel("Message Stanley").press("Enter");
 
-  await expect(page.locator("article.title-card")).toHaveCount(12);
+  await expect(page.locator(".assistant-option")).toHaveCount(12);
   expect(submitted?.topic).toBe(topics.primary);
   expect(submitted?.mode).toBe("auto");
   expect(submitted?.sessionId).toMatch(/^[0-9a-f-]{36}$/i);
@@ -132,8 +132,29 @@ test("shows the spinning loader in the thread instead of the send arrow", async 
   await expect(sendButton).toBeDisabled();
   await expect(sendButton.locator(".send-arrow")).toBeVisible();
   await expect(sendButton).not.toHaveClass(/loading/);
-  await expect(page.locator("article.title-card")).toHaveCount(12);
+  await expect(page.locator(".assistant-option")).toHaveCount(12);
   await expect(thinking).toHaveCount(0);
+});
+
+test("shows real streamed activity for creative requests", async ({ page }) => {
+  await mockGeneration(page, { handler: async (route) => {
+    const events = [
+      { type: "activity", activity: { id: "intent", label: "Understanding your request", detail: "This needs idea help", status: "complete", kind: "thinking" } },
+      { type: "activity", activity: { id: "search", label: "Searching comparable videos", detail: "Found useful current examples", status: "complete", kind: "tool" } },
+      { type: "activity", activity: { id: "answer", label: "Writing the answer", detail: "Ready", status: "complete", kind: "answer" } },
+      { type: "result", status: 200, payload: buildIdeaPayload() },
+    ];
+    await route.fulfill({ status: 200, contentType: "application/x-ndjson", body: events.map((event) => JSON.stringify(event)).join("\n") });
+  } });
+  await openApp(page);
+  await page.getByLabel("Message Stanley").fill("Give me a video idea about my dog Rudy");
+  await page.getByRole("button", { name: "Send message" }).click();
+
+  await expect(page.getByText("Worked through 3 steps")).toBeVisible();
+  await page.locator(".agent-activity.complete summary").click();
+  await expect(page.locator(".agent-activity.complete")).toContainText("Searching comparable videos");
+  await expect(page.locator(".research-progress")).toHaveCount(0);
+  await expect(page.locator(".assistant-option")).toHaveCount(3);
 });
 
 test("renders researched title directions", async ({ page }) => {
@@ -142,10 +163,8 @@ test("renders researched title directions", async ({ page }) => {
   await generate(page);
 
   const expected = buildTitles();
-  await expect(page.locator("article.title-card")).toHaveCount(12);
-  await expect(page.locator("article.title-card").first()).toContainText(expected[0].title);
-  await expect(page.locator("article.title-card").first()).toContainText(expected[0].whyItWorks);
-  await expect(page.getByRole("heading", { name: "Title directions" })).toBeVisible();
+  await expect(page.locator(".assistant-option")).toHaveCount(12);
+  await expect(page.locator(".assistant-option").first()).toContainText(expected[0].title);
   await expect(page.getByRole("status")).toHaveText("12 options ready");
 });
 
@@ -158,13 +177,12 @@ test("reveals a new Stanley reply progressively before showing its artifacts", a
   await page.getByLabel("Message Stanley").press("Enter");
 
   await expect(page.locator(".assistant-typing-cursor")).toHaveCount(1);
-  await expect(page.locator("article.title-card")).toHaveCount(0);
-  const partialReply = await page.locator(".assistant-lead p").innerText();
+  const partialReply = await page.locator(".assistant-answer").innerText();
   expect(partialReply.length).toBeLessThan(reply.length);
 
-  await expect(page.locator(".assistant-lead p")).toHaveText(reply);
   await expect(page.locator(".assistant-typing-cursor")).toHaveCount(0);
-  await expect(page.locator("article.title-card")).toHaveCount(12);
+  await expect(page.locator(".assistant-answer")).toContainText(reply);
+  await expect(page.locator(".assistant-option")).toHaveCount(12);
 });
 
 test("collects feedback under Stanley replies", async ({ page }) => {
@@ -183,7 +201,7 @@ test("keeps research sources below generated work", async ({ page }) => {
   await generate(page);
 
   expect(await page.evaluate(() => {
-    const artifacts = document.querySelector(".creation-list");
+    const artifacts = document.querySelector(".assistant-answer");
     const sources = document.querySelector(".research-card");
     return Boolean(artifacts && sources && (artifacts.compareDocumentPosition(sources) & Node.DOCUMENT_POSITION_FOLLOWING));
   })).toBe(true);
@@ -198,13 +216,13 @@ test("generates video ideas from the Ideas mode", async ({ page }) => {
   await page.getByLabel("Message Stanley").fill("Productivity experiments for remote workers");
   await page.getByRole("button", { name: "Send message" }).click();
 
-  await expect(page.getByRole("heading", { name: "Video ideas" })).toBeVisible();
-  await expect(page.locator(".idea-list .creation-item")).toHaveCount(8);
-  await expect(page.locator(".idea-list .creation-item").first()).toContainText(buildIdeas()[0].hook);
-  await expect(page.locator(".idea-evidence")).toHaveCount(8);
-  await expect(page.locator(".idea-evidence a")).toHaveCount(8);
-  await page.locator(".idea-script summary").first().click();
-  await expect(page.locator(".script-outline-body").first()).toContainText(buildIdeas()[0].scriptOutline.opening);
+  await expect(page.locator(".assistant-option")).toHaveCount(3);
+  await expect(page.locator(".assistant-option").first()).toContainText("Top pick");
+  await expect(page.locator(".assistant-option").first()).toContainText(buildIdeas()[0].suggestedTitle);
+  await expect(page.getByRole("button", { name: "Make titles" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Plan thumbnail" })).toBeVisible();
+  await page.locator(".response-details summary").click();
+  await expect(page.locator(".response-details")).toContainText(buildIdeas()[0].scriptOutline.opening);
   await expect(page.getByRole("button", { name: "Copy all ideas and script blueprints" })).toBeVisible();
 });
 
@@ -220,12 +238,10 @@ test("expands a researched idea into a complete YouTube script", async ({ page }
   await page.getByRole("button", { name: "Video ideas" }).click();
   await page.getByLabel("Message Stanley").fill("Productivity experiments for remote workers");
   await page.getByRole("button", { name: "Send message" }).click();
-  await page.locator(".idea-script summary").first().click();
-  await page.getByRole("button", { name: "Write full script for idea 1" }).click();
+  await page.getByRole("button", { name: "Write the script" }).click();
 
-  await expect(page.getByRole("heading", { name: "Full video script" })).toBeVisible();
-  await expect(page.locator(".full-script")).toContainText(buildScript().coldOpen);
-  await expect(page.locator(".full-script > section")).toHaveCount(6);
+  await expect(page.locator(".assistant-answer").last()).toContainText(buildScript().coldOpen);
+  await expect(page.locator(".assistant-answer").last()).toContainText(buildScript().ending);
   await expect(page.getByRole("button", { name: "Copy full script" })).toBeVisible();
 });
 
@@ -236,20 +252,14 @@ test("generates visual thumbnail concepts from the Thumbnails mode", async ({ pa
   await page.getByLabel("Message Stanley").fill("I tested waking up at 5am for 30 days");
   await page.getByRole("button", { name: "Send message" }).click();
 
-  await expect(page.getByRole("heading", { name: "Thumbnail concepts" })).toBeVisible();
-  await expect(page.locator(".thumbnail-item")).toHaveCount(6);
-  await expect(page.locator(".thumbnail-item").first()).toContainText(buildThumbnails()[0].visual);
+  await expect(page.locator(".assistant-option")).toHaveCount(6);
+  await expect(page.locator(".assistant-option").first()).toContainText(buildThumbnails()[0].visual);
   await expect(page.getByRole("button", { name: "Copy all thumbnail concepts" })).toBeVisible();
 });
 
-test("places the New chat icon inside the unified Create row", async ({ page }) => {
+test("keeps a prominent new-chat control in the sidebar", async ({ page }) => {
   await openApp(page);
-  const activeItem = page.getByRole("navigation", { name: "Stanley tools" }).locator(".nav-item.active");
-  const newChat = activeItem.getByRole("button", { name: "Start new chat" });
-  await expect(activeItem).toContainText("Create");
-  expect(await newChat.evaluate((element) => getComputedStyle(element).opacity)).toBe("0");
-  await activeItem.hover();
-  await expect.poll(() => newChat.evaluate((element) => getComputedStyle(element).opacity)).toBe("1");
+  await expect(page.getByRole("button", { name: "New chat", exact: true })).toBeVisible();
 });
 
 test("surfaces an API error and keeps the message intact", async ({ page }) => {

@@ -104,7 +104,7 @@ test("sends the first creator message after the personalized channel greeting", 
   await page.getByLabel("Message Stanley").fill(prompt);
   await page.getByLabel("Message Stanley").press("Enter");
 
-  await expect(page.locator("article.title-card")).toHaveCount(12);
+  await expect(page.locator(".assistant-option")).toHaveCount(12);
   expect(submitted?.topic).toBe(prompt);
   expect(submitted?.mode).toBe("auto");
   expect(submitted?.sessionId).toMatch(/^[0-9a-f-]{36}$/i);
