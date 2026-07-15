@@ -71,6 +71,18 @@ export function buildIdeas() {
     idea: `A filmable creator experiment number ${index + 1}`,
     hook: `Open with the surprising constraint behind experiment ${index + 1}.`,
     whyItCouldWork: "It gives the viewer a clear question and a concrete outcome to anticipate.",
+    researchBasis: "Fast-moving experiment videos in the comparison set pair a visible constraint with a measurable payoff.",
+    sourceNumbers: [index % 6 + 1],
+    scriptOutline: {
+      opening: `I gave myself one rule for experiment ${index + 1}, and the result was not what I expected.`,
+      beats: [
+        "Establish the rule, personal stakes, and what will be measured.",
+        "Show the first attempt and the earliest point of friction.",
+        "Reveal the adjustment that changes the experiment.",
+        "Compare the final outcome with the starting expectation.",
+      ],
+      payoff: "The constraint mattered less than the system it forced me to build.",
+    },
   }));
 }
 
@@ -79,6 +91,31 @@ export function buildIdeaPayload() {
     reply: "I found eight distinct directions grounded in what viewers already respond to.",
     ideas: buildIdeas(),
     research: buildResearch("creator productivity experiments"),
+    mode: "idea",
+    blocked: false,
+  };
+}
+
+export function buildScript() {
+  return {
+    title: "I tried one rule for 30 days",
+    targetLength: "7-9 minutes",
+    coldOpen: "For the next 30 days, I followed one rule every morning. I expected better focus. What changed was much stranger.",
+    sections: [
+      { heading: "The rule", narration: "Here is the constraint I chose, why it felt difficult, and the baseline I recorded before starting." },
+      { heading: "The first week", narration: "The first few days exposed the gap between what I thought would happen and what actually happened." },
+      { heading: "The adjustment", narration: "Halfway through, I changed one part of the system without changing the rule itself." },
+      { heading: "The result", narration: "At the end, I compared the final measurements with the baseline and found the clearest difference." },
+    ],
+    ending: "The rule was useful, but not for the reason I expected. If you try it, measure the part that matters to you before you begin.",
+  };
+}
+
+export function buildScriptPayload() {
+  return {
+    reply: "I turned that direction into a complete, speakable script.",
+    script: buildScript(),
+    research: buildResearch("creator experiment script"),
     mode: "idea",
     blocked: false,
   };
@@ -134,6 +171,7 @@ export async function waitForApp(page: Page) {
 }
 
 export async function openApp(page: Page) {
+  await page.addInitScript(() => window.localStorage.setItem("stanley-onboarding-v1", "skipped"));
   await page.goto("/");
   await waitForApp(page);
 }

@@ -16,6 +16,28 @@ test("copies all titles from one ChatGPT-style response action", async ({ contex
   expect(clipboard).toContain(`1. ${buildTitles()[0].title}`);
 });
 
+test("copies a session ID that resolves to the stored debug conversation", async ({ context, page }) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"], { origin: testOrigin });
+  await mockGeneration(page);
+  await openApp(page);
+  await expect(page.getByRole("button", { name: "Copy session ID" })).toHaveCount(0);
+
+  await generate(page);
+  const debugButton = page.getByRole("button", { name: "Copy session ID" });
+  await expect(debugButton).toBeVisible();
+  await debugButton.click();
+  await expect(page.getByRole("status")).toHaveText("Session ID copied");
+
+  const sessionId = await page.evaluate(() => navigator.clipboard.readText());
+  expect(sessionId).toMatch(/^[0-9a-f-]{36}$/i);
+  await expect(page.locator("main[data-session-id]")).toHaveAttribute("data-session-id", sessionId);
+  const savedSession = await page.evaluate((id) => {
+    const sessions = JSON.parse(window.localStorage.getItem("stanley-title-drafts") || "[]") as Array<{ id: string; messages?: unknown[] }>;
+    return sessions.find((session) => session.id === id);
+  }, sessionId);
+  expect(savedSession?.messages).toHaveLength(2);
+});
+
 test("renders the submitted message and Stanley response as one conversation", async ({ page }) => {
   await mockGeneration(page);
   await openApp(page);
@@ -28,15 +50,16 @@ test("renders the submitted message and Stanley response as one conversation", a
   await expect(page.getByRole("button", { name: "Copy response" })).toHaveCount(1);
 });
 
-test("keeps the unified composer active with all creation modes", async ({ page }) => {
+test("keeps the unified composer active without exposing internal creation modes", async ({ page }) => {
   await mockGeneration(page);
   await openApp(page);
   await generate(page);
 
   await expect(page.getByLabel("Message Stanley")).toBeEnabled();
   await expect(page.getByRole("button", { name: "Send message" })).toBeDisabled();
-  await expect(page.getByLabel("Creation mode").getByRole("button")).toHaveCount(4);
-  await expect(page.getByText(/create ideas, titles, and thumbnail concepts/)).toBeVisible();
+  await expect(page.getByLabel("Creation mode")).toHaveCount(0);
+  await expect(page.locator(".mode-option")).toHaveCount(0);
+  await expect(page.getByText(/only help build your YouTube video/)).toBeVisible();
 });
 
 test("greets naturally and transitions into detected title work", async ({ page }) => {
@@ -72,6 +95,51 @@ test("greets naturally and transitions into detected title work", async ({ page 
   await composer.press("Enter");
   await expect(page.getByText("The documented-results option is strongest.")).toBeVisible();
   expect(finalTopic).toBe(topics.primary);
+});
+
+test("stays usable if an older API response returns the legacy social mode", async ({ page }) => {
+  await mockGeneration(page, {
+    payload: { reply: "Hey! Good to see you. What are we making?", blocked: false, mode: "social" },
+  });
+  await openApp(page);
+
+  const composer = page.getByLabel("Message Stanley");
+  await composer.fill("hello");
+  await composer.press("Enter");
+
+  await expect(page.getByText("Hey! Good to see you. What are we making?")).toBeVisible();
+  await expect(page.getByText(/Cannot read properties of undefined/)).toHaveCount(0);
+  await expect(composer).toBeEnabled();
+});
+
+test("preserves a named subject while the creator chooses a direction", async ({ page }) => {
+  const originalBrief = "I want a YouTube video idea about my pet dog Rudy";
+  let shapedRequest: { topic: string; messages: Array<{ role: string; content: string }> } | undefined;
+  await mockGeneration(page, {
+    handler: async (route) => {
+      const body = route.request().postDataJSON() as { topic: string; messages?: Array<{ role: string; content: string }> };
+      if (!body.messages) {
+        await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ reply: "Rudy sounds like a great subject. Should this feel prank-style, story-driven, or challenge-based?", blocked: false, mode: "idea" }) });
+        return;
+      }
+      shapedRequest = body as typeof shapedRequest;
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ...buildPayload(), mode: "idea" }) });
+    },
+  });
+  await openApp(page);
+
+  const composer = page.getByLabel("Message Stanley");
+  await composer.fill(originalBrief);
+  await composer.press("Enter");
+  await expect(page.getByText(/Rudy sounds like a great subject/)).toBeVisible();
+  await expect(page.locator(".assistant-typing-cursor")).toHaveCount(0);
+  await composer.fill("prank style");
+  await composer.press("Enter");
+  await expect(page.locator(".assistant-message")).toHaveCount(2);
+
+  expect(shapedRequest?.topic).toBe(originalBrief);
+  expect(shapedRequest?.messages[0].content).toContain("Rudy");
+  expect(shapedRequest?.messages.at(-1)?.content).toBe("prank style");
 });
 
 test("sends prior artifacts as multi-turn context", async ({ page }) => {
@@ -146,8 +214,8 @@ test("starts a new unified chat without deleting history", async ({ page }) => {
   await page.getByRole("button", { name: "Start new chat" }).click();
   await expect(page.getByLabel("Message Stanley")).toHaveValue("");
   await expect(page.getByLabel("Message Stanley")).toBeFocused();
-  await expect(page.getByRole("heading", { name: "What's on your mind today?" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Auto" })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("heading", { name: "Where should we start?" })).toBeVisible();
+  await expect(page.getByLabel("Start with a YouTube task")).toBeVisible();
   await expect(page.locator(".title-history button").filter({ hasText: topics.primary })).toBeVisible();
 });
 
@@ -173,6 +241,7 @@ test("reopens an earlier result set from chat history", async ({ page }) => {
 });
 
 test("caps stored chat history at eight sessions and shows the latest six", async ({ page }) => {
+  test.setTimeout(60_000);
   await mockGeneration(page, { delayMs: 40 });
   await openApp(page);
 

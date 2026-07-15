@@ -35,6 +35,7 @@ yarn-error.log*
 # local development logs
 dev.out.log
 dev.err.log
+.stanley-*.log
 
 # vercel
 .vercel

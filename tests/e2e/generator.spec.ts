@@ -3,6 +3,8 @@ import {
   buildIdeaPayload,
   buildIdeas,
   buildPayload,
+  buildScript,
+  buildScriptPayload,
   buildThumbnailPayload,
   buildThumbnails,
   buildTitles,
@@ -17,12 +19,23 @@ test("renders the unified ChatGPT-style Stanley composer", async ({ page }) => {
   await openApp(page);
 
   await expect(page).toHaveTitle("Stanley — YouTube Creative AI");
-  await expect(page.getByRole("heading", { name: "What's on your mind today?" })).toBeVisible();
-  await expect(page.getByText(/Tell Stanley what you're making/)).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Where should we start?" })).toBeVisible();
+  await expect(page.getByText("Ideas, titles, scripts, and thumbnails in one conversation.")).toBeVisible();
   await expect(page.getByLabel("Message Stanley")).toBeVisible();
   await expect(page.getByRole("button", { name: "Send message" })).toBeDisabled();
   await expect(page.locator(".generate-button .send-arrow")).toBeVisible();
-  await expect(page.getByText(/ideas, titles, and thumbnail concepts/)).toBeVisible();
+  await expect(page.getByText(/Ask for ideas, scripts, titles, or thumbnails/)).toBeVisible();
+  await expect(page.locator(".main-header .mode-indicator")).toHaveCount(0);
+  await expect(page.locator(".sidebar-brand")).toContainText("for YouTube");
+  await expect(page.locator(".sidebar-brand svg")).toHaveCount(1);
+});
+
+test("offers Stanley-style quick starts that prepare the composer", async ({ page }) => {
+  await openApp(page);
+  await expect(page.getByLabel("Start with a YouTube task").getByRole("button")).toHaveCount(6);
+  await page.getByRole("button", { name: "Video ideas" }).click();
+  await expect(page.getByLabel("Message Stanley")).toHaveValue(/Help me find a data-backed idea/);
+  await expect(page.getByLabel("Message Stanley")).toBeFocused();
 });
 
 test("shows one creation chat in the sidebar", async ({ page }) => {
@@ -38,15 +51,11 @@ test("shows one creation chat in the sidebar", async ({ page }) => {
   await expect(page.getByText("Thumbnail generator")).toHaveCount(0);
 });
 
-test("offers Auto, Ideas, Titles, and Thumbnails inside the composer", async ({ page }) => {
+test("keeps creation-mode controls out of the composer", async ({ page }) => {
   await openApp(page);
-  const picker = page.getByLabel("Creation mode");
-  await expect(picker.getByRole("button")).toHaveCount(4);
-  await expect(picker.getByRole("button", { name: "Auto" })).toHaveAttribute("aria-pressed", "true");
-
-  await picker.getByRole("button", { name: "Ideas" }).click();
-  await expect(picker.getByRole("button", { name: "Ideas" })).toHaveAttribute("aria-pressed", "true");
-  await expect(page.getByLabel("Message Stanley")).toHaveAttribute("placeholder", "What kind of videos do you want to make?");
+  await expect(page.getByLabel("Creation mode")).toHaveCount(0);
+  await expect(page.locator(".mode-picker, .mode-option")).toHaveCount(0);
+  await expect(page.getByLabel("Start with a YouTube task")).toBeVisible();
 });
 
 test("unfinished sidebar tools respond without pretending they exist", async ({ page }) => {
@@ -76,11 +85,11 @@ test("keeps blank submission quiet and accepts a short message", async ({ page }
   expect(requests).toBe(1);
 });
 
-test("submits with Enter and sends the selected mode", async ({ page }) => {
-  let submitted: { topic: string; mode: string } | undefined;
+test("submits with Enter and sends the selected mode and stable memory session", async ({ page }) => {
+  let submitted: { topic: string; mode: string; sessionId: string } | undefined;
   await mockGeneration(page, {
     handler: async (route) => {
-      submitted = route.request().postDataJSON() as { topic: string; mode: string };
+      submitted = route.request().postDataJSON() as { topic: string; mode: string; sessionId: string };
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(buildPayload()) });
     },
   });
@@ -89,7 +98,9 @@ test("submits with Enter and sends the selected mode", async ({ page }) => {
   await page.getByLabel("Message Stanley").press("Enter");
 
   await expect(page.locator("article.title-card")).toHaveCount(12);
-  expect(submitted).toEqual({ topic: topics.primary, mode: "auto" });
+  expect(submitted?.topic).toBe(topics.primary);
+  expect(submitted?.mode).toBe("auto");
+  expect(submitted?.sessionId).toMatch(/^[0-9a-f-]{36}$/i);
 });
 
 test("uses Shift+Enter for a new line and grows automatically", async ({ page }) => {
@@ -138,6 +149,34 @@ test("renders researched title directions", async ({ page }) => {
   await expect(page.getByRole("status")).toHaveText("12 options ready");
 });
 
+test("reveals a new Stanley reply progressively before showing its artifacts", async ({ page }) => {
+  const reply = "I found a focused set of title directions that make the video's promise clear while keeping the strongest curiosity gap honest and easy to understand.";
+  await mockGeneration(page, { payload: { ...buildPayload(), reply } });
+  await openApp(page);
+
+  await page.getByLabel("Message Stanley").fill(topics.primary);
+  await page.getByLabel("Message Stanley").press("Enter");
+
+  await expect(page.locator(".assistant-typing-cursor")).toHaveCount(1);
+  await expect(page.locator("article.title-card")).toHaveCount(0);
+  const partialReply = await page.locator(".assistant-lead p").innerText();
+  expect(partialReply.length).toBeLessThan(reply.length);
+
+  await expect(page.locator(".assistant-lead p")).toHaveText(reply);
+  await expect(page.locator(".assistant-typing-cursor")).toHaveCount(0);
+  await expect(page.locator("article.title-card")).toHaveCount(12);
+});
+
+test("collects feedback under Stanley replies", async ({ page }) => {
+  await mockGeneration(page);
+  await openApp(page);
+  await generate(page);
+  const helpful = page.getByRole("button", { name: "Mark response as helpful" });
+  await helpful.click();
+  await expect(helpful).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("status")).toHaveText("Marked as helpful");
+});
+
 test("keeps research sources below generated work", async ({ page }) => {
   await mockGeneration(page);
   await openApp(page);
@@ -155,20 +194,45 @@ test("keeps research sources below generated work", async ({ page }) => {
 test("generates video ideas from the Ideas mode", async ({ page }) => {
   await mockGeneration(page, { payload: buildIdeaPayload() });
   await openApp(page);
-  await page.getByRole("button", { name: "Ideas" }).click();
+  await page.getByRole("button", { name: "Video ideas" }).click();
   await page.getByLabel("Message Stanley").fill("Productivity experiments for remote workers");
   await page.getByRole("button", { name: "Send message" }).click();
 
   await expect(page.getByRole("heading", { name: "Video ideas" })).toBeVisible();
   await expect(page.locator(".idea-list .creation-item")).toHaveCount(8);
   await expect(page.locator(".idea-list .creation-item").first()).toContainText(buildIdeas()[0].hook);
-  await expect(page.getByRole("button", { name: "Copy all ideas" })).toBeVisible();
+  await expect(page.locator(".idea-evidence")).toHaveCount(8);
+  await expect(page.locator(".idea-evidence a")).toHaveCount(8);
+  await page.locator(".idea-script summary").first().click();
+  await expect(page.locator(".script-outline-body").first()).toContainText(buildIdeas()[0].scriptOutline.opening);
+  await expect(page.getByRole("button", { name: "Copy all ideas and script blueprints" })).toBeVisible();
+});
+
+test("expands a researched idea into a complete YouTube script", async ({ page }) => {
+  let requestCount = 0;
+  await mockGeneration(page, {
+    handler: async (route) => {
+      requestCount += 1;
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(requestCount === 1 ? buildIdeaPayload() : buildScriptPayload()) });
+    },
+  });
+  await openApp(page);
+  await page.getByRole("button", { name: "Video ideas" }).click();
+  await page.getByLabel("Message Stanley").fill("Productivity experiments for remote workers");
+  await page.getByRole("button", { name: "Send message" }).click();
+  await page.locator(".idea-script summary").first().click();
+  await page.getByRole("button", { name: "Write full script for idea 1" }).click();
+
+  await expect(page.getByRole("heading", { name: "Full video script" })).toBeVisible();
+  await expect(page.locator(".full-script")).toContainText(buildScript().coldOpen);
+  await expect(page.locator(".full-script > section")).toHaveCount(6);
+  await expect(page.getByRole("button", { name: "Copy full script" })).toBeVisible();
 });
 
 test("generates visual thumbnail concepts from the Thumbnails mode", async ({ page }) => {
   await mockGeneration(page, { payload: buildThumbnailPayload() });
   await openApp(page);
-  await page.getByRole("button", { name: "Thumbnails" }).click();
+  await page.getByRole("button", { name: "New thumbnail" }).click();
   await page.getByLabel("Message Stanley").fill("I tested waking up at 5am for 30 days");
   await page.getByRole("button", { name: "Send message" }).click();
 
