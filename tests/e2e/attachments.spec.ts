@@ -86,10 +86,10 @@ test("chooses a video from the connected YouTube channel", async ({ page }) => {
       url: "https://www.youtube.com/watch?v=video-abc123",
     }] }),
   }));
-  let submitted: { attachments?: Array<{ kind: string; videoId: string; title: string }> } | undefined;
+  const submissions: Array<{ attachments?: Array<{ kind: string; videoId: string; title: string; thumbnailUrl: string }> }> = [];
   await mockGeneration(page, {
     handler: async (route) => {
-      submitted = route.request().postDataJSON() as typeof submitted;
+      submissions.push(route.request().postDataJSON() as typeof submissions[number]);
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(buildPayload()) });
     },
   });
@@ -105,7 +105,84 @@ test("chooses a video from the connected YouTube channel", async ({ page }) => {
 
   await page.getByLabel("Message Stanley").fill("Give me three follow-up video ideas based on this upload.");
   await page.getByRole("button", { name: "Send message" }).click();
-  expect(submitted?.attachments?.[0]).toMatchObject({ kind: "youtube", videoId: "video-abc123", title: "My 30 day creator experiment" });
+  expect(submissions[0]?.attachments?.[0]).toMatchObject({
+    kind: "youtube",
+    videoId: "video-abc123",
+    title: "My 30 day creator experiment",
+    thumbnailUrl: "https://i.ytimg.com/vi/video-abc123/mqdefault.jpg",
+  });
+
+  await expect(page.locator(".assistant-option")).toHaveCount(12);
+  await page.getByLabel("Message Stanley").fill("What else stands out about that same video?");
+  await page.getByRole("button", { name: "Send message" }).click();
+  await expect(page.locator(".user-message")).toHaveCount(2);
+  expect(submissions[1]?.attachments?.[0]).toMatchObject({
+    kind: "youtube",
+    videoId: "video-abc123",
+    title: "My 30 day creator experiment",
+    thumbnailUrl: "https://i.ytimg.com/vi/video-abc123/mqdefault.jpg",
+  });
+});
+
+test("keeps owner-visible private and unlisted uploads in the YouTube picker", async ({ page }) => {
+  const profile = {
+    id: "channel-1",
+    title: "Thomas Tests",
+    thumbnailUrl: "",
+    subscriberCount: 25,
+    videoCount: 4,
+    totalViews: 1200,
+    analyzedAt: new Date().toISOString(),
+  };
+  await page.route("**/api/youtube/status", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({ configured: true, connected: true, captionAccess: true, profile }),
+  }));
+  await page.route("**/api/youtube/videos", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({ videos: [
+      {
+        id: "private-abc123",
+        title: "My private movie",
+        thumbnailUrl: "https://i.ytimg.com/vi/private-abc123/mqdefault.jpg",
+        publishedAt: "2026-07-01T12:00:00Z",
+        views: 8,
+        duration: "PT1M54S",
+        privacyStatus: "private",
+        url: "https://www.youtube.com/watch?v=private-abc123",
+      },
+      {
+        id: "unlisted-abc123",
+        title: "My unlisted movie",
+        thumbnailUrl: "https://i.ytimg.com/vi/unlisted-abc123/mqdefault.jpg",
+        publishedAt: "2026-07-02T12:00:00Z",
+        views: 17,
+        duration: "PT2M10S",
+        privacyStatus: "unlisted",
+        url: "https://www.youtube.com/watch?v=unlisted-abc123",
+      },
+      {
+        id: "public-abc123",
+        title: "My public movie",
+        thumbnailUrl: "https://i.ytimg.com/vi/public-abc123/mqdefault.jpg",
+        publishedAt: "2026-07-03T12:00:00Z",
+        views: 21,
+        duration: "PT2M30S",
+        privacyStatus: "public",
+        url: "https://www.youtube.com/watch?v=public-abc123",
+      },
+    ] }),
+  }));
+  await openApp(page);
+
+  await page.getByRole("button", { name: "Add attachment" }).click();
+  await page.getByRole("menuitem", { name: /Add from YouTube/ }).click();
+  const picker = page.getByRole("dialog", { name: "Select a reference video" });
+  await expect(picker.getByRole("button", { name: /My private movie/ })).toBeVisible();
+  await expect(picker.getByRole("button", { name: /My unlisted movie/ })).toBeVisible();
+  await expect(picker.getByRole("button", { name: /My public movie/ })).toBeVisible();
 });
 
 test("records a voice message and places the transcript in the composer", async ({ page }) => {

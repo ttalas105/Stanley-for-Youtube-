@@ -22,7 +22,7 @@ test("keeps primary controls keyboard reachable with visible focus", async ({ pa
   await page.keyboard.press("Tab");
   await expect(page.getByRole("button", { name: "Dashboard" })).toBeFocused();
   await page.keyboard.press("Tab");
-  await expect(page.getByRole("button", { name: "Create" })).toBeFocused();
+  await expect(page.getByRole("button", { name: "Outliers" })).toBeFocused();
 
   await page.getByLabel("Message Stanley").focus();
   await expect(page.getByLabel("Message Stanley")).toBeFocused();

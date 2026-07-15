@@ -1,4 +1,4 @@
-import { deleteAllMemory, deleteProjectMemory, readSemanticMemory } from "@/db/memory";
+import { deleteAllMemory, deleteProjectMemory, readDebugConversation, readSemanticMemory } from "@/db/memory";
 import { readYouTubeSession } from "../youtube/oauth";
 import { resolveMemoryOwner } from "./identity";
 
@@ -13,7 +13,11 @@ export async function GET(request: Request) {
   try {
     const session = await readYouTubeSession();
     const ownerId = await resolveMemoryOwner(request.url, session);
-    return Response.json({ memory: await readSemanticMemory(ownerId, projectId) });
+    const [memory, debugConversation] = await Promise.all([
+      readSemanticMemory(ownerId, projectId),
+      readDebugConversation(ownerId, projectId),
+    ]);
+    return Response.json({ memory, debugConversation });
   } catch (error) {
     console.error("Semantic memory could not be read:", error);
     return Response.json({ error: "Semantic memory is temporarily unavailable." }, { status: 503 });

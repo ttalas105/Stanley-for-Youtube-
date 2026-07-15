@@ -36,6 +36,7 @@ export async function GET(request: Request) {
     scope: [
       "https://www.googleapis.com/auth/youtube.readonly",
       "https://www.googleapis.com/auth/yt-analytics.readonly",
+      "https://www.googleapis.com/auth/youtube.force-ssl",
     ].join(" "),
     access_type: "offline",
     include_granted_scopes: "true",

@@ -1,7 +1,7 @@
 "use client";
 
 import { ChangeEvent, FormEvent, KeyboardEvent, useEffect, useRef, useState } from "react";
-import { ArrowUpRight, Eye, LayoutDashboard, MessageCircle, PanelLeftClose, PanelLeftOpen, Puzzle, RefreshCw, Sparkles, SquarePen, TrendingUp, Users, Video, WandSparkles } from "lucide-react";
+import { ArrowUpRight, ChevronDown, ChevronRight, Eye, FileText, LayoutDashboard, LogOut, MessageCircle, PanelLeftClose, PanelLeftOpen, Puzzle, RefreshCw, Sparkles, SquarePen, TrendingUp, Users, Video, WandSparkles } from "lucide-react";
 
 type CreationMode = "auto" | "idea" | "title" | "thumbnail";
 type WorkspaceView = "dashboard" | "create";
@@ -36,8 +36,10 @@ type GeneratedIdea = {
 type GeneratedScript = {
   title: string;
   targetLength: string;
+  viewerPromise?: string;
+  voiceDirection?: string;
   coldOpen: string;
-  sections: Array<{ heading: string; narration: string }>;
+  sections: Array<{ heading: string; narration: string; visualDirection?: string }>;
   ending: string;
 };
 
@@ -147,6 +149,7 @@ type YouTubeProfile = {
 type YouTubeStatus = {
   configured: boolean;
   connected: boolean;
+  captionAccess?: boolean;
   profile: YouTubeProfile | null;
 };
 
@@ -160,6 +163,10 @@ type YouTubeVideoOption = {
   privacyStatus: string;
   url: string;
 };
+
+function selectableYouTubeVideos(videos: YouTubeVideoOption[]) {
+  return videos.filter((video) => ["public", "private", "unlisted"].includes(video.privacyStatus));
+}
 
 type ComposerAttachment = {
   id: string;
@@ -178,12 +185,11 @@ type ComposerAttachment = {
   privacyStatus?: string;
 };
 
-type MessageAttachment = Pick<ComposerAttachment, "id" | "kind" | "name" | "previewUrl" | "thumbnailUrl" | "videoId" | "url">;
+type MessageAttachment = Pick<ComposerAttachment, "id" | "kind" | "name" | "previewUrl" | "thumbnailUrl" | "videoId" | "url" | "title" | "views" | "publishedAt" | "privacyStatus">;
 
 const DRAFTS_KEY = "stanley-title-drafts";
 const ONBOARDING_KEY = "stanley-onboarding-v1";
 const SIDEBAR_KEY = "stanley-sidebar-collapsed";
-const MAX_USER_TURNS = 9;
 const STANLEY_LOGO = "https://stanbrandhub.lovable.app/downloads/Stanley_Logo_Lockup_Dark.png";
 
 const NAV_ITEMS: Array<{ icon: string; label: string; view?: WorkspaceView }> = [
@@ -272,7 +278,7 @@ function AgentActivityTimeline({ activity, live, durationMs }: { activity: Agent
   </section>;
 
   return <details className="agent-activity complete">
-    <summary><span className="activity-summary-icon" aria-hidden="true">✓</span><strong>Worked through {activity.length} {activity.length === 1 ? "step" : "steps"}</strong>{durationMs ? <small>{(durationMs / 1000).toFixed(1)}s</small> : null}<span className="research-open">Show</span></summary>
+    <summary><span className="activity-summary-icon" aria-hidden="true">✓</span><strong>Worked through {activity.length} {activity.length === 1 ? "step" : "steps"}</strong>{durationMs ? <small>{(durationMs / 1000).toFixed(1)}s</small> : null}<ChevronRight className="activity-chevron" aria-hidden="true" /></summary>
     {rows}
   </details>;
 }
@@ -287,21 +293,12 @@ function compactSentences(value: string, maxLength = 280) {
 
 function formatAssistantAnswer(payload: ApiPayload) {
   const reply = payload.reply?.trim() || "";
-  if (payload.ideas?.length) {
-    const options = payload.ideas.map((item, index) => {
-      const title = item.suggestedTitle || item.idea;
-      const premise = item.suggestedTitle ? item.idea : item.hook;
-      const format = [item.format, item.difficulty].filter(Boolean).join(" · ");
-      return `${index + 1}. ${title}${item.recommended ? "  ·  Top pick" : ""}\n${premise}\nWhy it works: ${compactSentences(item.whyItCouldWork)}${format ? `\nFormat: ${format}` : ""}`;
-    });
-    return [reply, ...options].filter(Boolean).join("\n\n");
-  }
+  if (payload.ideas?.length || payload.script) return reply;
   if (payload.titles?.length) return [reply, ...payload.titles.map((item, index) => `${index + 1}. ${item.title}`)].filter(Boolean).join("\n\n");
   if (payload.thumbnails?.length) {
     const concepts = payload.thumbnails.map((item, index) => `${index + 1}. ${item.concept}\n${item.visual}${item.textOverlay && item.textOverlay !== "No text" ? `\nOn-screen text: ${item.textOverlay}` : ""}`);
     return [reply, ...concepts].filter(Boolean).join("\n\n");
   }
-  if (payload.script) return [reply, `${payload.script.title}\n${payload.script.targetLength}`, `Cold open: ${payload.script.coldOpen}`, ...payload.script.sections.map((section) => `${section.heading}\n${section.narration}`), `Ending: ${payload.script.ending}`].filter(Boolean).join("\n\n");
   return reply;
 }
 
@@ -322,6 +319,120 @@ function ConversationalAnswer({ text, streaming }: { text: string; streaming?: b
       {labeled ? <p><b>{labeled[1]}:</b> {labeled[2]}</p> : lines.length > 1 ? <><h2>{lines[0]}</h2>{lines.slice(1).map((line) => <p key={line}>{line}</p>)}</> : <p>{lines[0]}</p>}
     </section>;
   })}{streaming ? <span className="assistant-typing-cursor" aria-hidden="true" /> : null}</div>;
+}
+
+function structuredLeadText(message: ChatMessage) {
+  if (message.ideas?.length) {
+    const ideaListStart = message.content.search(/\n\n1\.\s/);
+    return ideaListStart >= 0 ? message.content.slice(0, ideaListStart).trim() : message.content;
+  }
+  if (message.script) {
+    const scriptStart = message.content.indexOf(`\n\n${message.script.title}\n`);
+    return scriptStart >= 0 ? message.content.slice(0, scriptStart).trim() : message.content;
+  }
+  return message.content;
+}
+
+function ideaClipboardText(ideas: GeneratedIdea[]) {
+  return ideas.map((item, index) => `${index + 1}. ${item.idea}${item.recommended ? " [TOP PICK]" : ""}\nWorking title: ${item.suggestedTitle || "Not set"}\nFormat: ${item.format || "Not set"} · Difficulty: ${item.difficulty || "Not set"}\nHook: ${item.hook}\nWhy it could work: ${item.whyItCouldWork}\nChannel fit: ${item.channelFit || "Based on the supplied brief"}\nComparable signal: ${item.researchBasis || "Broad format guidance"}${item.scriptOutline ? `\n\nSCRIPT BLUEPRINT\nCold open: ${item.scriptOutline.opening}\n${item.scriptOutline.beats.map((beat, beatIndex) => `${beatIndex + 1}. ${beat}`).join("\n")}\nPayoff: ${item.scriptOutline.payoff}` : ""}`).join("\n\n---\n\n");
+}
+
+function scriptClipboardText(script: GeneratedScript) {
+  const brief = [
+    script.viewerPromise ? `VIEWER PROMISE\n${script.viewerPromise}` : "",
+    script.voiceDirection ? `VOICE\n${script.voiceDirection}` : "",
+  ].filter(Boolean).join("\n\n");
+  return `${script.title} (${script.targetLength})${brief ? `\n\n${brief}` : ""}\n\nCOLD OPEN\n${script.coldOpen}\n\n${script.sections.map((section) => `${section.heading.toUpperCase()}\n${section.narration}${section.visualDirection ? `\n\nVisual: ${section.visualDirection}` : ""}`).join("\n\n")}\n\nENDING\n${script.ending}`;
+}
+
+function assistantClipboardText(message: ChatMessage) {
+  if (message.ideas?.length) return ideaClipboardText(message.ideas);
+  if (message.script) return scriptClipboardText(message.script);
+  if (message.titles?.length) return message.titles.map((item, index) => `${index + 1}. ${item.title}`).join("\n");
+  if (message.thumbnails?.length) return message.thumbnails.map((item, index) => `${index + 1}. ${item.concept}\nVisual: ${item.visual}\nText: ${item.textOverlay}`).join("\n\n");
+  return message.content;
+}
+
+function assistantCopyLabel(message: ChatMessage) {
+  if (message.ideas?.length) return "Copy all ideas and script blueprints";
+  if (message.script) return "Copy full script";
+  if (message.titles?.length) return "Copy all titles";
+  if (message.thumbnails?.length) return "Copy all thumbnail concepts";
+  return "Copy response";
+}
+
+function IdeaWorkspace({ ideas }: { ideas: GeneratedIdea[] }) {
+  return <section className="idea-workspace" aria-label={`${ideas.length} video ideas`}>
+    <div className="idea-results">
+      {ideas.map((item, index) => <article className={item.recommended ? "assistant-option idea-result recommended" : "assistant-option idea-result"} key={item.id}>
+        <div className="idea-result-body">
+          <div className="idea-title-line">
+            <h3><span aria-hidden="true">{index + 1}.</span> {item.suggestedTitle || item.idea}</h3>
+            {item.recommended ? <span className="top-pick">Top pick</span> : null}
+          </div>
+          {item.suggestedTitle ? <p className="idea-premise">{item.idea}</p> : null}
+          <p className="idea-why"><strong>Why it could work:</strong> {compactSentences(item.whyItCouldWork, 360)}</p>
+          {item.format || item.difficulty ? <p className="idea-meta-line">{[item.format, item.difficulty].filter(Boolean).join(" · ")}</p> : null}
+        </div>
+      </article>)}
+    </div>
+
+    <details className="response-details">
+      <summary><strong>See the thinking behind these ideas</strong><ChevronDown aria-hidden="true" /></summary>
+      <div className="idea-plans">{ideas.map((item, index) => <section key={item.id}>
+        <h3>{index + 1}. {item.suggestedTitle || item.idea}</h3>
+        <p><strong>Opening hook:</strong> {item.scriptOutline?.opening || item.hook}</p>
+        {item.channelFit ? <p><strong>Why it fits:</strong> {item.channelFit}</p> : null}
+        {item.researchBasis ? <p><strong>Evidence:</strong> {item.researchBasis}</p> : null}
+        {item.scriptOutline ? <div className="story-beats"><strong>Story beats</strong><ol>{item.scriptOutline.beats.map((beat, beatIndex) => <li key={`${item.id}-beat-${beatIndex}`}>{beat}</li>)}</ol></div> : null}
+        {item.scriptOutline?.payoff ? <p className="idea-payoff"><strong>Payoff:</strong> {item.scriptOutline.payoff}</p> : null}
+      </section>)}</div>
+    </details>
+  </section>;
+}
+
+function IdeaNextSteps({ ideas, disabled, onPrompt }: { ideas: GeneratedIdea[]; disabled: boolean; onPrompt: (prompt: string) => void }) {
+  const recommendedIdea = ideas.find((item) => item.recommended) || ideas[0];
+  return <section className="idea-next-actions compact" aria-label="Next steps for the top idea">
+      <div><strong>What do you want to do next?</strong><small>Continue with “{recommendedIdea.suggestedTitle || recommendedIdea.idea}”</small></div>
+      <div>
+        <button className="primary" type="button" disabled={disabled} onClick={() => onPrompt(`Write the complete YouTube script for the recommended idea: "${recommendedIdea.idea}".`)}><FileText /> Write the script</button>
+        <button type="button" disabled={disabled} onClick={() => onPrompt(`Give me five strong YouTube title options for the recommended idea: "${recommendedIdea.idea}".`)}>Make titles</button>
+        <button type="button" disabled={disabled} onClick={() => onPrompt(`Create three thumbnail concepts for the recommended idea: "${recommendedIdea.idea}".`)}>Plan thumbnail</button>
+      </div>
+    </section>;
+}
+
+function ScriptWorkspace({ script }: { script: GeneratedScript }) {
+  return <section className="script-workspace assistant-answer" aria-label={`Script: ${script.title}`}>
+    <header className="artifact-header script-header">
+      <div className="artifact-heading">
+        <span className="artifact-icon" aria-hidden="true"><FileText /></span>
+        <div><h2>{script.title}</h2><p>{script.targetLength} · {script.sections.length + 2} script beats</p></div>
+      </div>
+    </header>
+
+    {script.viewerPromise || script.voiceDirection ? <div className="script-brief" aria-label="Script strategy">
+      {script.viewerPromise ? <p><strong>Viewer promise</strong><span>{script.viewerPromise}</span></p> : null}
+      {script.voiceDirection ? <p><strong>Delivery</strong><span>{script.voiceDirection}</span></p> : null}
+    </div> : null}
+
+    <div className="script-flow">
+      <section className="script-block script-hook">
+        <header><span className="script-block-index">Hook</span><h3>Cold open</h3></header>
+        <p>{script.coldOpen}</p>
+      </section>
+      {script.sections.map((section, index) => <section className="script-block" key={`${section.heading}-${index}`}>
+        <header><span className="script-block-index">{String(index + 1).padStart(2, "0")}</span><h3>{section.heading}</h3></header>
+        <p>{section.narration}</p>
+        {section.visualDirection ? <small className="script-visual"><strong>On screen:</strong> {section.visualDirection}</small> : null}
+      </section>)}
+      <section className="script-block script-ending">
+        <header><span className="script-block-index">End</span><h3>Ending</h3></header>
+        <p>{script.ending}</p>
+      </section>
+    </div>
+  </section>;
 }
 
 function fileToDataUrl(file: File) {
@@ -370,7 +481,7 @@ function serializeMessage(message: ChatMessage) {
       : message.thumbnails?.length
         ? `Thumbnail concepts:\n${message.thumbnails.map((item, index) => `${index + 1}. ${item.concept}: ${item.visual}`).join("\n")}`
         : message.script
-          ? `Full script: ${message.script.title}\nCold open: ${message.script.coldOpen}\n${message.script.sections.map((section) => `${section.heading}: ${section.narration}`).join("\n")}\nEnding: ${message.script.ending}`
+          ? `Full script: ${message.script.title}${message.script.viewerPromise ? `\nViewer promise: ${message.script.viewerPromise}` : ""}${message.script.voiceDirection ? `\nVoice: ${message.script.voiceDirection}` : ""}\nCold open: ${message.script.coldOpen}\n${message.script.sections.map((section) => `${section.heading}: ${section.narration}${section.visualDirection ? `\nOn screen: ${section.visualDirection}` : ""}`).join("\n")}\nEnding: ${message.script.ending}`
           : "";
   return { role: message.role, content: artifactLines ? `${message.content}\n${artifactLines}` : message.content };
 }
@@ -431,10 +542,6 @@ function FeedbackIcon({ down = false }: { down?: boolean }) {
 
 function YouTubeIcon() {
   return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21.6 7.2a3 3 0 0 0-2.1-2.1C17.7 4.6 12 4.6 12 4.6s-5.7 0-7.5.5a3 3 0 0 0-2.1 2.1A31 31 0 0 0 2 12a31 31 0 0 0 .4 4.8 3 3 0 0 0 2.1 2.1c1.8.5 7.5.5 7.5.5s5.7 0 7.5-.5a3 3 0 0 0 2.1-2.1A31 31 0 0 0 22 12a31 31 0 0 0-.4-4.8Z" /><path className="youtube-play" d="m10 15.2 5-3.2-5-3.2v6.4Z" /></svg>;
-}
-
-function DisconnectIcon() {
-  return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6H5v12h4M14 8l4 4-4 4M18 12H8" /></svg>;
 }
 
 function PlusIcon() {
@@ -517,7 +624,7 @@ function OnboardingVisual({ step, profile }: { step: Exclude<OnboardingStep, "lo
         <article><span>02</span><p><strong>Videos that stand out</strong><small>Compare views across your recent uploads.</small></p><i style={{ "--signal": "68%" } as React.CSSProperties} /></article>
         <article><span>03</span><p><strong>Patterns in your titles</strong><small>See which formats worked before.</small></p><i style={{ "--signal": "78%" } as React.CSSProperties} /></article>
       </div>
-      <div className="channel-trust"><span>✓</span><p><strong>Read-only access</strong><small>Stanley cannot upload, edit, or delete videos.</small></p></div>
+      <div className="channel-trust"><span>✓</span><p><strong>Private analysis, without publishing</strong><small>Stanley uses captions and channel data only. It never uploads, edits, or deletes videos.</small></p></div>
     </div>
   );
 }
@@ -746,6 +853,8 @@ export default function Home() {
   const replyRunRef = useRef(0);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
+  const attachmentButtonRef = useRef<HTMLButtonElement>(null);
+  const attachmentMenuRef = useRef<HTMLDivElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const recordingTimerRef = useRef<number | null>(null);
@@ -768,6 +877,7 @@ export default function Home() {
   const [placeholderIndex, setPlaceholderIndex] = useState(0);
   const [typedPlaceholder, setTypedPlaceholder] = useState("");
   const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
+  const [uploadedVideoCache, setUploadedVideoCache] = useState<Map<string, ComposerAttachment>>(() => new Map());
   const [attachmentMenuOpen, setAttachmentMenuOpen] = useState(false);
   const [videoPickerOpen, setVideoPickerOpen] = useState(false);
   const [youtubeVideos, setYouTubeVideos] = useState<YouTubeVideoOption[]>([]);
@@ -781,6 +891,28 @@ export default function Home() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [activeView, setActiveView] = useState<WorkspaceView>("create");
 
+  useEffect(() => {
+    if (!attachmentMenuOpen) return;
+
+    function closeAttachmentMenu(event: PointerEvent) {
+      if (!(event.target instanceof Node)) return;
+      if (attachmentButtonRef.current?.contains(event.target) || attachmentMenuRef.current?.contains(event.target)) return;
+      setAttachmentMenuOpen(false);
+    }
+
+    function closeAttachmentMenuWithKeyboard(event: globalThis.KeyboardEvent) {
+      if (event.key !== "Escape") return;
+      setAttachmentMenuOpen(false);
+      attachmentButtonRef.current?.focus();
+    }
+
+    document.addEventListener("pointerdown", closeAttachmentMenu);
+    document.addEventListener("keydown", closeAttachmentMenuWithKeyboard);
+    return () => {
+      document.removeEventListener("pointerdown", closeAttachmentMenu);
+      document.removeEventListener("keydown", closeAttachmentMenuWithKeyboard);
+    };
+  }, [attachmentMenuOpen]);
   useEffect(() => {
     let active = true;
     let analysisTimer: number | undefined;
@@ -866,7 +998,7 @@ export default function Home() {
         const response = await fetch("/api/youtube/videos", { cache: "no-store", signal: controller.signal });
         const payload = await response.json() as { videos?: YouTubeVideoOption[]; error?: string };
         if (!response.ok) throw new Error(payload.error || "Your videos could not be loaded.");
-        setYouTubeVideos(payload.videos || []);
+        setYouTubeVideos(selectableYouTubeVideos(payload.videos || []));
       } catch (caught) {
         if (controller.signal.aborted) return;
         setVideosError(caught instanceof Error ? caught.message : "Your videos could not be loaded.");
@@ -954,29 +1086,35 @@ export default function Home() {
 
   function persistConversation(id: string, rootTopic: string, nextMessages: ChatMessage[]) {
     const firstTitleResponse = nextMessages.find((message) => message.role === "assistant" && message.titles?.length);
-    setDrafts((current) => {
-      const existing = current.find((draft) => draft.id === id);
-      const updated: Draft = {
-        id,
-        createdAt: existing?.createdAt || new Date().toISOString(),
-        topic: rootTopic,
-        messages: nextMessages.map((message) => ({
-          ...message,
-          attachments: message.attachments?.map((attachment) => ({ ...attachment, previewUrl: undefined })),
-        })),
-        titles: firstTitleResponse?.titles,
-        research: firstTitleResponse?.research,
-      };
-      const next = [updated, ...current.filter((draft) => draft.id !== id)].slice(0, 8);
-      window.localStorage.setItem(DRAFTS_KEY, JSON.stringify(next));
-      return next;
-    });
+    const current = readDrafts();
+    const existing = current.find((draft) => draft.id === id);
+    const updated: Draft = {
+      id,
+      createdAt: existing?.createdAt || new Date().toISOString(),
+      topic: rootTopic,
+      messages: nextMessages.map((message) => ({
+        ...message,
+        attachments: message.attachments?.map((attachment) => ({ ...attachment, previewUrl: undefined })),
+      })),
+      titles: firstTitleResponse?.titles,
+      research: firstTitleResponse?.research,
+    };
+    const next = [updated, ...current.filter((draft) => draft.id !== id)].slice(0, 8);
+    window.localStorage.setItem(DRAFTS_KEY, JSON.stringify(next));
+    setDrafts(next);
   }
 
   async function submitMessage(rawMessage: string) {
     const cleanMessage = rawMessage.trim();
     const userTurns = messages.filter((message) => message.role === "user").length;
-    if (!cleanMessage || loading || userTurns >= MAX_USER_TURNS) return;
+    if (!cleanMessage || loading) return;
+    const ownerOnlyYouTubeAttachment = attachments.find((attachment) =>
+      attachment.kind === "youtube" && attachment.privacyStatus !== "public",
+    );
+    if (ownerOnlyYouTubeAttachment && !youtubeStatus.captionAccess) {
+      setError(`Reconnect YouTube once to let Stanley read the captions for “${ownerOnlyYouTubeAttachment.title || ownerOnlyYouTubeAttachment.name}”.`);
+      return;
+    }
     const runId = ++replyRunRef.current;
 
     // A successful YouTube connection starts the chat with a personalized
@@ -984,8 +1122,22 @@ export default function Home() {
     // topic even though that greeting already exists in `messages`.
     const isFirstMessage = userTurns === 0;
     const rootTopic = isFirstMessage ? cleanMessage : originalTopic;
-    const activeSessionId = sessionId || crypto.randomUUID();
+    // An empty thread is always a new conversation. Derive this from the
+    // rendered message state as well as sessionId so a rapid New chat -> Send
+    // sequence cannot reuse the previous id while React is under load.
+    const activeSessionId = messages.length === 0 ? crypto.randomUUID() : sessionId || crypto.randomUUID();
     const currentAttachments = attachments;
+    const previousAttachments = messages.flatMap((message) => message.attachments || []);
+    const retainedYouTubeReference = previousAttachments.filter((attachment) => attachment.kind === "youtube").at(-1);
+    const retainedUploadedVideo = previousAttachments.filter((attachment) => attachment.kind === "video").at(-1);
+    const cachedUploadedVideo = retainedUploadedVideo ? uploadedVideoCache.get(retainedUploadedVideo.id) : undefined;
+    const requestAttachments: ComposerAttachment[] = [...currentAttachments];
+    if (!requestAttachments.some((attachment) => attachment.kind === "youtube") && retainedYouTubeReference) {
+      requestAttachments.push(retainedYouTubeReference);
+    }
+    if (!requestAttachments.some((attachment) => attachment.kind === "video") && cachedUploadedVideo) {
+      requestAttachments.push(cachedUploadedVideo);
+    }
     const userMessage: ChatMessage = {
       id: crypto.randomUUID(),
       role: "user",
@@ -998,6 +1150,10 @@ export default function Home() {
         thumbnailUrl: attachment.thumbnailUrl,
         videoId: attachment.videoId,
         url: attachment.url,
+        title: attachment.title,
+        views: attachment.views,
+        publishedAt: attachment.publishedAt,
+        privacyStatus: attachment.privacyStatus,
       })),
     };
     const pendingMessages = [...messages, userMessage];
@@ -1010,7 +1166,7 @@ export default function Home() {
     setAttachmentMenuOpen(false);
     setMessages(pendingMessages);
     if (isFirstMessage) setOriginalTopic(rootTopic);
-    if (!sessionId) setSessionId(activeSessionId);
+    if (!sessionId || messages.length === 0) setSessionId(activeSessionId);
 
     try {
       const activityLog: AgentActivity[] = [];
@@ -1027,7 +1183,7 @@ export default function Home() {
           topic: rootTopic,
           mode,
           sessionId: activeSessionId,
-          attachments: currentAttachments.map((attachment) => ({
+          attachments: requestAttachments.map((attachment) => ({
             kind: attachment.kind,
             name: attachment.name,
             mimeType: attachment.mimeType,
@@ -1035,6 +1191,7 @@ export default function Home() {
             videoId: attachment.videoId,
             url: attachment.url,
             title: attachment.title,
+            thumbnailUrl: attachment.thumbnailUrl,
             views: attachment.views,
             publishedAt: attachment.publishedAt,
             privacyStatus: attachment.privacyStatus,
@@ -1081,11 +1238,13 @@ export default function Home() {
         }
       }
       if (replyRunRef.current !== runId) return;
+      // Save the completed turn before rendering its artifacts. This prevents a
+      // very fast New chat click from racing the history write.
+      persistConversation(activeSessionId, completedTopic, completedMessages);
       setMessages(completedMessages);
       setActiveActivity([]);
       setLoading(false);
       if (completedTopic !== originalTopic) setOriginalTopic(completedTopic);
-      persistConversation(activeSessionId, completedTopic, completedMessages);
       if (isCreationMode(payload.mode)) setMode(payload.mode);
       const artifactCount = payload.titles?.length || payload.ideas?.length || payload.thumbnails?.length || (payload.script ? 1 : 0);
       setNotice(payload.blocked ? "Request kept inside creation mode" : artifactCount ? `${artifactCount} options ready` : "Stanley replied");
@@ -1141,6 +1300,7 @@ export default function Home() {
 
   function openDraft(draft: Draft) {
     replyRunRef.current += 1;
+    setUploadedVideoCache(new Map());
     setActiveView("create");
     setSessionId(draft.id);
     setOriginalTopic(draft.topic);
@@ -1157,6 +1317,7 @@ export default function Home() {
 
   function startNewChat() {
     replyRunRef.current += 1;
+    setUploadedVideoCache(new Map());
     setActiveView("create");
     setTopic("");
     setMode("auto");
@@ -1190,14 +1351,15 @@ export default function Home() {
   }
 
   async function disconnectYouTube() {
+    const previousStatus = youtubeStatus;
+    setYouTubeStatus((current) => ({ ...current, connected: false, profile: null }));
     try {
       const response = await fetch("/api/youtube/disconnect", { method: "POST" });
-      if (!response.ok) throw new Error("YouTube could not be disconnected.");
-      setYouTubeStatus({ configured: true, connected: false, profile: null });
+      if (!response.ok) throw new Error("YouTube disconnect failed");
       setYouTubeVideos([]);
-      setNotice("YouTube disconnected");
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "YouTube could not be disconnected.");
+      setAttachments((current) => current.filter((attachment) => attachment.kind !== "youtube"));
+    } catch {
+      setYouTubeStatus(previousStatus);
     }
   }
 
@@ -1209,6 +1371,12 @@ export default function Home() {
   }
 
   function removeAttachment(id: string) {
+    setUploadedVideoCache((current) => {
+      if (!current.has(id)) return current;
+      const next = new Map(current);
+      next.delete(id);
+      return next;
+    });
     setAttachments((current) => current.filter((attachment) => attachment.id !== id));
   }
 
@@ -1226,8 +1394,8 @@ export default function Home() {
       setError("Attach up to three images at a time.");
       return;
     }
-    if (kind === "video" && attachments.some((attachment) => attachment.kind === "video" || attachment.kind === "youtube")) {
-      setError("Remove the current video before attaching another one.");
+    if (kind === "video" && attachments.some((attachment) => attachment.kind === "video")) {
+      setError("Remove the current source video before attaching another one.");
       return;
     }
 
@@ -1254,6 +1422,11 @@ export default function Home() {
           previewUrl: dataUrl,
         });
       }
+      setUploadedVideoCache((current) => {
+        const uploadedVideos = next.filter((attachment) => attachment.kind === "video");
+        if (!uploadedVideos.length) return current;
+        return new Map(uploadedVideos.map((attachment) => [attachment.id, attachment]));
+      });
       setAttachments((current) => [...current, ...next]);
       setError("");
       window.setTimeout(() => topicRef.current?.focus(), 0);
@@ -1281,7 +1454,7 @@ export default function Home() {
       const response = await fetch("/api/youtube/videos", { cache: "no-store" });
       const payload = await response.json() as { videos?: YouTubeVideoOption[]; error?: string };
       if (!response.ok) throw new Error(payload.error || "Your videos could not be loaded.");
-      setYouTubeVideos(payload.videos || []);
+      setYouTubeVideos(selectableYouTubeVideos(payload.videos || []));
     } catch (caught) {
       setVideosError(caught instanceof Error ? caught.message : "Your videos could not be loaded.");
     } finally {
@@ -1292,8 +1465,12 @@ export default function Home() {
   function attachSelectedYouTubeVideo() {
     const video = youtubeVideos.find((item) => item.id === selectedVideoId);
     if (!video) return;
+    if (video.privacyStatus !== "public" && !youtubeStatus.captionAccess) {
+      connectYouTube();
+      return;
+    }
     setAttachments((current) => [
-      ...current.filter((attachment) => attachment.kind !== "youtube" && attachment.kind !== "video"),
+      ...current.filter((attachment) => attachment.kind !== "youtube"),
       {
         id: crypto.randomUUID(),
         kind: "youtube",
@@ -1418,7 +1595,7 @@ export default function Home() {
     startNewChat();
     setMode("idea");
     setTopic(prompt);
-    if (video) {
+    if (video?.privacyStatus === "public") {
       setAttachments([{
         id: crypto.randomUUID(),
         kind: "youtube",
@@ -1447,7 +1624,7 @@ export default function Home() {
       const response = await fetch("/api/youtube/videos", { cache: "no-store" });
       const payload = await response.json() as { videos?: YouTubeVideoOption[]; error?: string };
       if (!response.ok) throw new Error(payload.error || "Your videos could not be loaded.");
-      setYouTubeVideos(payload.videos || []);
+      setYouTubeVideos(selectableYouTubeVideos(payload.videos || []));
     } catch (caught) {
       setVideosError(caught instanceof Error ? caught.message : "Your videos could not be loaded.");
     } finally {
@@ -1456,15 +1633,14 @@ export default function Home() {
   }
 
   const inConversation = messages.length > 0;
-  const userTurns = messages.filter((message) => message.role === "user").length;
-  const chatLimitReached = userTurns >= MAX_USER_TURNS;
   const streamingReply = messages.some((message) => message.streaming);
-  const composerPlaceholder = chatLimitReached
-    ? "Start a new chat to keep working"
-    : transcribing
-      ? "Transcribing your voice message…"
-      : "";
-  const filteredYoutubeVideos = youtubeVideos.filter((video) => video.title.toLocaleLowerCase().includes(videoSearch.trim().toLocaleLowerCase()));
+  const composerPlaceholder = transcribing ? "Transcribing your voice message…" : "";
+  const filteredYoutubeVideos = youtubeVideos.filter((video) =>
+    ["public", "private", "unlisted"].includes(video.privacyStatus)
+    && video.title.toLocaleLowerCase().includes(videoSearch.trim().toLocaleLowerCase()),
+  );
+  const selectedYouTubeVideo = youtubeVideos.find((video) => video.id === selectedVideoId);
+  const selectedVideoNeedsCaptionAccess = Boolean(selectedYouTubeVideo && selectedYouTubeVideo.privacyStatus !== "public" && !youtubeStatus.captionAccess);
 
   function applyPromptSuggestion() {
     if (!promptSuggestion) return;
@@ -1497,7 +1673,9 @@ export default function Home() {
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={attachment.thumbnailUrl} alt="" />
                   </> : <span className="attachment-file-icon"><UploadVideoIcon /></span>}
-                  <span><strong>{attachment.title || attachment.name}</strong><small>{attachment.kind === "youtube" ? "YouTube video" : attachment.kind === "image" ? "Image" : "Video"}</small></span>
+                  <span><strong>{attachment.title || attachment.name}</strong><small>{attachment.kind === "youtube"
+                    ? attachment.privacyStatus === "public" ? "Public YouTube video" : `${attachment.privacyStatus === "private" ? "Private" : "Unlisted"} · captions enabled`
+                    : attachment.kind === "image" ? "Image" : attachments.some((item) => item.kind === "youtube") ? "Source video · full analysis" : "Video"}</small></span>
                   <button type="button" onClick={() => removeAttachment(attachment.id)} aria-label={`Remove ${attachment.title || attachment.name}`}><CloseIcon /></button>
                 </div>)}
               </div>}
@@ -1510,31 +1688,30 @@ export default function Home() {
                   value={topic}
                   onChange={handleComposerChange}
                   onKeyDown={handleComposerKeyDown}
-                  disabled={chatLimitReached}
                   placeholder={composerPlaceholder}
                   maxLength={1200}
                   rows={large ? 2 : 1}
                 />
-                {large && !topic && !composerPlaceholder && typedPlaceholder && <>
+                {large && !topic && !composerPlaceholder && typedPlaceholder && <div className="typewriter-suggestion">
                   <span className="typewriter-placeholder" aria-hidden="true">{typedPlaceholder}</span>
                   <button className="suggestion-apply" type="button" onClick={applyPromptSuggestion} aria-label={`Use suggestion: ${promptSuggestion}`} title="Use this suggestion"><span aria-hidden="true">↹</span><kbd>Tab</kbd></button>
-                </>}
+                </div>}
               </div>
 
               <div className="composer-toolbar">
                 <div className="composer-tools-left">
-                  <button className={attachmentMenuOpen ? "attach-button active" : "attach-button"} type="button" onClick={() => setAttachmentMenuOpen((current) => !current)} aria-expanded={attachmentMenuOpen} aria-haspopup="menu" aria-label="Add attachment"><PlusIcon /></button>
+                  <button ref={attachmentButtonRef} className={attachmentMenuOpen ? "attach-button active" : "attach-button"} type="button" onClick={() => setAttachmentMenuOpen((current) => !current)} aria-expanded={attachmentMenuOpen} aria-haspopup="menu" aria-controls="attachment-menu" aria-label="Add attachment"><PlusIcon /></button>
                 </div>
                 <div className="composer-tools-right">
                   {recording && <span className="recording-time"><i /> {Math.floor(recordingSeconds / 60)}:{String(recordingSeconds % 60).padStart(2, "0")}</span>}
                   {transcribing && <span className="transcribing-label"><i /> Listening</span>}
-                  <button className={recording ? "mic-button recording" : "mic-button"} type="button" disabled={loading || transcribing || chatLimitReached} onClick={() => void toggleRecording()} aria-label={recording ? "Stop recording" : "Start voice message"} aria-pressed={recording}><MicIcon /></button>
-                  <button className="generate-button" type="submit" disabled={!topic.trim() || loading || recording || transcribing || chatLimitReached} aria-label="Send message"><span className="send-arrow" aria-hidden="true" /></button>
+                  <button className={recording ? "mic-button recording" : "mic-button"} type="button" disabled={loading || transcribing} onClick={() => void toggleRecording()} aria-label={recording ? "Stop recording" : "Start voice message"} aria-pressed={recording}><MicIcon /></button>
+                  <button className="generate-button" type="submit" disabled={!topic.trim() || loading || recording || transcribing} aria-label="Send message"><span className="send-arrow" aria-hidden="true" /></button>
                 </div>
               </div>
             </div>
 
-            {attachmentMenuOpen && <div className="attachment-menu" role="menu" aria-label="Add to your message">
+            {attachmentMenuOpen && <div ref={attachmentMenuRef} className="attachment-menu" id="attachment-menu" role="menu" aria-label="Add to your message">
               <button type="button" role="menuitem" onClick={() => imageInputRef.current?.click()}><span><UploadImageIcon /></span><span><strong>Attach an image</strong><small>JPG, PNG, WebP, or GIF</small></span></button>
               <button type="button" role="menuitem" onClick={() => videoInputRef.current?.click()}><span><UploadVideoIcon /></span><span><strong>Attach a video</strong><small>MP4, WebM, MOV, or MPEG</small></span></button>
               <div className="attachment-menu-divider" />
@@ -1544,7 +1721,7 @@ export default function Home() {
 
           <input className="sr-only" ref={imageInputRef} type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple onChange={(event) => void handleFileSelection("image", event)} aria-label="Upload images" />
           <input className="sr-only" ref={videoInputRef} type="file" accept="video/mp4,video/webm,video/quicktime,video/mpeg" onChange={(event) => void handleFileSelection("video", event)} aria-label="Upload video" />
-          {!large && <div className="composer-meta">{error && <p className="form-error" role="alert">{error}</p>}<span>{userTurns}/{MAX_USER_TURNS}</span></div>}
+          {!large && error && <div className="composer-meta"><p className="form-error" role="alert">{error}</p></div>}
           {large && error && <p className="form-error" role="alert">{error}</p>}
         </div>
       </form>
@@ -1629,13 +1806,13 @@ export default function Home() {
       <section className="main-panel">
         <header className="main-header">
           <span className="header-balance" />
-          {youtubeStatus.connected && youtubeStatus.profile ? <div className="channel-connection">
+          {youtubeStatus.connected && youtubeStatus.profile ? <div className="channel-connection" title={`${youtubeStatus.profile.title} is connected`}>
             {youtubeStatus.profile.thumbnailUrl ? <>
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={youtubeStatus.profile.thumbnailUrl} alt="" width="28" height="28" />
             </> : <span className="channel-fallback" aria-hidden="true"><YouTubeIcon /></span>}
-            <span className="channel-copy"><strong>{youtubeStatus.profile.title}</strong><small>Connected channel</small></span>
-            <button className="channel-disconnect" type="button" onClick={() => void disconnectYouTube()} aria-label={`Disconnect ${youtubeStatus.profile.title}`} title="Disconnect YouTube"><DisconnectIcon /></button>
+            <span className="channel-copy"><strong>{youtubeStatus.profile.title}</strong><small><i /> Connected channel</small></span>
+            <button className="channel-disconnect" type="button" onClick={() => void disconnectYouTube()} title={`Disconnect ${youtubeStatus.profile.title}`} aria-label={`Disconnect ${youtubeStatus.profile.title}`}><LogOut aria-hidden="true" /></button>
           </div> : <button className="youtube-connect-header" type="button" onClick={connectYouTube}><YouTubeIcon /><span>Connect YouTube</span></button>}
           <div className="header-actions">
             {activeView === "create" && sessionId && <button className="debug-session" type="button" onClick={copySessionId} title={`Copy session ID: ${sessionId}`} aria-label="Copy session ID"><DebugIcon /><span>Debug</span><code>{sessionId.slice(0, 8)}</code></button>}
@@ -1684,31 +1861,13 @@ export default function Home() {
                     <div>
                       {message.blocked && <span className="boundary-label">Creation boundary</span>}
                       {message.activity?.length && !message.streaming ? <AgentActivityTimeline activity={message.activity} durationMs={message.agent?.durationMs} /> : null}
-                      <ConversationalAnswer text={message.content} streaming={message.streaming} />
+                      {structuredLeadText(message) ? <ConversationalAnswer text={structuredLeadText(message)} streaming={message.streaming} /> : null}
                     </div>
                   </div>
 
-                  {message.ideas?.length ? (() => {
-                    const recommendedIdea = message.ideas.find((item) => item.recommended) || message.ideas[0];
-                    return <>
-                      <details className="response-details">
-                        <summary>Research and script notes <span>Open</span></summary>
-                        <div>{message.ideas.map((item, index) => <section key={item.id}>
-                          <h3>{index + 1}. {item.suggestedTitle || item.idea}</h3>
-                          <p><strong>Opening:</strong> {item.scriptOutline?.opening || item.hook}</p>
-                          {item.channelFit ? <p><strong>Fit:</strong> {item.channelFit}</p> : null}
-                          {item.researchBasis ? <p><strong>Evidence:</strong> {item.researchBasis}</p> : null}
-                          {item.scriptOutline ? <ol>{item.scriptOutline.beats.map((beat, beatIndex) => <li key={`${item.id}-beat-${beatIndex}`}>{beat}</li>)}</ol> : null}
-                          {item.scriptOutline?.payoff ? <p><strong>Payoff:</strong> {item.scriptOutline.payoff}</p> : null}
-                        </section>)}</div>
-                      </details>
-                      <div className="idea-next-actions compact" aria-label="Keep building the top idea">
-                        <button type="button" disabled={loading || chatLimitReached} onClick={() => void submitMessage(`Write the complete YouTube script for the recommended idea: "${recommendedIdea.idea}".`)}>Write the script</button>
-                        <button type="button" disabled={loading || chatLimitReached} onClick={() => void submitMessage(`Give me five strong YouTube title options for the recommended idea: "${recommendedIdea.idea}".`)}>Make titles</button>
-                        <button type="button" disabled={loading || chatLimitReached} onClick={() => void submitMessage(`Create three thumbnail concepts for the recommended idea: "${recommendedIdea.idea}".`)}>Plan thumbnail</button>
-                      </div>
-                    </>;
-                  })() : null}
+                  {message.ideas?.length ? <IdeaWorkspace ideas={message.ideas} /> : null}
+
+                  {message.script ? <ScriptWorkspace script={message.script} /> : null}
 
                   {message.research && (
                     <details className="research-card">
@@ -1720,12 +1879,10 @@ export default function Home() {
                   {!message.streaming && <div className="assistant-actions">
                     <button className={feedback[message.id] === "up" ? "feedback-response selected" : "feedback-response"} type="button" aria-label="Mark response as helpful" aria-pressed={feedback[message.id] === "up"} onClick={() => rateResponse(message.id, "up")}><FeedbackIcon /></button>
                     <button className={feedback[message.id] === "down" ? "feedback-response selected" : "feedback-response"} type="button" aria-label="Mark response as not helpful" aria-pressed={feedback[message.id] === "down"} onClick={() => rateResponse(message.id, "down")}><FeedbackIcon down /></button>
-                    <button className="copy-response" type="button" onClick={() => copyText(message.content, "Response copied")} aria-label="Copy response"><span className="copy-icon" aria-hidden="true" /> Copy</button>
-                    {message.titles?.length ? <button className="copy-response" type="button" onClick={() => copyText(message.titles!.map((item, index) => `${index + 1}. ${item.title}`).join("\n"), "Titles copied")} aria-label="Copy all titles"><span className="copy-icon" aria-hidden="true" /> Copy titles</button> : null}
-                    {message.ideas?.length ? <button className="copy-response" type="button" onClick={() => copyText(message.ideas!.map((item, index) => `${index + 1}. ${item.idea}${item.recommended ? " [TOP PICK]" : ""}\nWorking title: ${item.suggestedTitle || "Not set"}\nFormat: ${item.format || "Not set"} · Difficulty: ${item.difficulty || "Not set"}\nHook: ${item.hook}\nWhy it could work: ${item.whyItCouldWork}\nChannel fit: ${item.channelFit || "Based on the supplied brief"}\nComparable signal: ${item.researchBasis || "Broad format guidance"}${item.scriptOutline ? `\n\nSCRIPT BLUEPRINT\nCold open: ${item.scriptOutline.opening}\n${item.scriptOutline.beats.map((beat, beatIndex) => `${beatIndex + 1}. ${beat}`).join("\n")}\nPayoff: ${item.scriptOutline.payoff}` : ""}`).join("\n\n---\n\n"), "Ideas and scripts copied")} aria-label="Copy all ideas and script blueprints"><span className="copy-icon" aria-hidden="true" /> Copy ideas + scripts</button> : null}
-                    {message.script ? <button className="copy-response" type="button" onClick={() => copyText(`${message.script!.title} (${message.script!.targetLength})\n\nCOLD OPEN\n${message.script!.coldOpen}\n\n${message.script!.sections.map((section) => `${section.heading.toUpperCase()}\n${section.narration}`).join("\n\n")}\n\nENDING\n${message.script!.ending}`, "Full script copied")} aria-label="Copy full script"><span className="copy-icon" aria-hidden="true" /> Copy full script</button> : null}
-                    {message.thumbnails?.length ? <button className="copy-response" type="button" onClick={() => copyText(message.thumbnails!.map((item, index) => `${index + 1}. ${item.concept}\nVisual: ${item.visual}\nText: ${item.textOverlay}`).join("\n\n"), "Thumbnail concepts copied")} aria-label="Copy all thumbnail concepts"><span className="copy-icon" aria-hidden="true" /> Copy concepts</button> : null}
+                    <button className="copy-response" type="button" onClick={() => copyText(assistantClipboardText(message), "Copied")} aria-label={assistantCopyLabel(message)}><span className="copy-icon" aria-hidden="true" /> Copy</button>
                   </div>}
+
+                  {message.ideas?.length ? <IdeaNextSteps ideas={message.ideas} disabled={loading} onPrompt={(prompt) => void submitMessage(prompt)} /> : null}
                 </article>
               ))}
 
@@ -1745,7 +1902,7 @@ export default function Home() {
         <section className="video-picker" role="dialog" aria-modal="true" aria-labelledby="video-picker-title">
           <header><div><h2 id="video-picker-title">Select a reference video</h2><p>Attach one of your YouTube videos to this message.</p></div><button type="button" onClick={() => setVideoPickerOpen(false)} aria-label="Close video picker"><CloseIcon /></button></header>
           {youtubeStatus.connected && <label className="video-search"><SearchIcon /><span className="sr-only">Search your videos</span><input value={videoSearch} onChange={(event) => setVideoSearch(event.target.value)} placeholder="Search your videos" /></label>}
-          <div className="video-picker-tabs" aria-label="Video source"><button type="button" className="active">Your videos</button><span>Connected to {youtubeStatus.profile?.title || "YouTube"}</span></div>
+          <div className="video-picker-tabs" aria-label="Video source"><button type="button" className="active">Your videos</button></div>
           <div className="video-grid">
             {videosLoading ? <div className="video-picker-state"><span className="thinking-spinner" />Loading your videos…</div> : videosError ? <div className="video-picker-state error"><p>{videosError}</p>{!youtubeStatus.connected && <button type="button" onClick={connectYouTube}><YouTubeIcon /> Connect YouTube</button>}</div> : filteredYoutubeVideos.length ? filteredYoutubeVideos.map((video) => <button className={selectedVideoId === video.id ? "video-option selected" : "video-option"} type="button" key={video.id} onClick={() => setSelectedVideoId(video.id)} aria-pressed={selectedVideoId === video.id}>
               <span className="video-option-thumb">
@@ -1753,10 +1910,14 @@ export default function Home() {
                 <img src={video.thumbnailUrl} alt="" />
                 {selectedVideoId === video.id && <i>✓</i>}
               </span>
-              <strong>{video.title}</strong><small>{formatViews(video.views)} views</small>
+              <strong>{video.title}</strong><small>{formatViews(video.views)} views <span className={`video-visibility ${video.privacyStatus}`}>{video.privacyStatus}</span></small>
             </button>) : <div className="video-picker-state">No matching videos found.</div>}
           </div>
-          <footer><button className="video-cancel" type="button" onClick={() => setVideoPickerOpen(false)}>Cancel</button><button className="video-continue" type="button" onClick={attachSelectedYouTubeVideo} disabled={!selectedVideoId}>Add video</button></footer>
+          <footer>
+            {selectedVideoNeedsCaptionAccess && <p>Reconnect once to analyze this video through its owner captions.</p>}
+            <button className="video-cancel" type="button" onClick={() => setVideoPickerOpen(false)}>Cancel</button>
+            <button className="video-continue" type="button" onClick={attachSelectedYouTubeVideo} disabled={!selectedVideoId}>{selectedVideoNeedsCaptionAccess ? "Enable private analysis" : "Add video"}</button>
+          </footer>
         </section>
       </div>}
 

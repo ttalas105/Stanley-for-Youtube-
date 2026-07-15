@@ -44,9 +44,14 @@ export default defineConfig(async () => {
   const { cloudflare } = await import("@cloudflare/vite-plugin");
 
   return {
-    server: isCodexSeatbeltSandbox
-      ? { watch: { useFsEvents: false, usePolling: true } }
-      : undefined,
+    server: {
+      watch: {
+        ...(isCodexSeatbeltSandbox ? { useFsEvents: false, usePolling: true } : {}),
+        // Playwright writes reports while the dev server is running. Watching
+        // those files can reload the app mid-test and erase in-memory state.
+        ignored: ["**/playwright-report/**", "**/test-results/**"],
+      },
+    },
     plugins: [
       vinext(),
       sites(),

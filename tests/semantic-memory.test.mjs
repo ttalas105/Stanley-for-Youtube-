@@ -6,6 +6,7 @@ import {
   formatSemanticMemory,
   mergeMemoryFacts,
   normalizeMemoryFact,
+  selectRelevantSemanticMemory,
 } from "../app/api/generate-titles/semantic-memory.mjs";
 
 test("preserves named creator relationships as reusable memory", () => {
@@ -67,4 +68,47 @@ test("keeps creator and project memory in separate prompt sections", () => {
 
   assert.equal(parsed.creator.facts[0].key, "pet_rudy");
   assert.equal(parsed.currentVideoProject.summary, "A prank-style video about Rudy.");
+});
+
+test("does not inject a selected preference into an unrelated request", () => {
+  const memory = {
+    creator: {
+      summary: "The creator likes cats and dry humor.",
+      facts: [
+        { key: "likes_cats", value: "The creator likes cats.", category: "preference" },
+        { key: "preferred_tone", value: "The creator prefers dry humor.", category: "preference" },
+      ],
+    },
+    project: { summary: "", facts: [] },
+  };
+
+  const selected = selectRelevantSemanticMemory(memory, ["likes_cats"], [], "Write a YouTube script about morning productivity.");
+  assert.deepEqual(selected.creator.facts, []);
+  assert.equal(selected.creator.summary, "");
+});
+
+test("retrieves a saved preference when the prompt depends on that semantic slot", () => {
+  const memory = {
+    creator: {
+      summary: "The creator likes cats.",
+      facts: [{ key: "likes_cats", value: "The creator likes cats.", category: "preference" }],
+    },
+    project: { summary: "", facts: [] },
+  };
+
+  const selected = selectRelevantSemanticMemory(memory, ["likes_cats"], [], "Make a YouTube script about my favorite animal.");
+  assert.deepEqual(selected.creator.facts, [{ key: "likes_cats", value: "The creator likes cats.", category: "preference" }]);
+});
+
+test("does not turn a broad niche match into a named-pet assumption", () => {
+  const memory = {
+    creator: {
+      summary: "Rudy is the creator's dog.",
+      facts: [{ key: "pet_rudy", value: "Rudy is the creator's pet dog.", category: "relationship" }],
+    },
+    project: { summary: "", facts: [] },
+  };
+
+  assert.deepEqual(selectRelevantSemanticMemory(memory, ["pet_rudy"], [], "Give me dog-training video ideas.").creator.facts, []);
+  assert.equal(selectRelevantSemanticMemory(memory, ["pet_rudy"], [], "Write a video about my dog.").creator.facts[0]?.key, "pet_rudy");
 });

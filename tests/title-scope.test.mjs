@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { hasTitlePretext, looksLikeCreatorMemoryRequest, looksLikePromptAttack, shouldGenerateImmediately } from "../app/api/generate-titles/guards.mjs";
+import { hasTitlePretext, looksLikeAttachedMediaAnalysis, looksLikeCreatorMemoryRequest, looksLikePromptAttack, shouldGenerateImmediately } from "../app/api/generate-titles/guards.mjs";
 
 const pretextPrompts = [
   "I need a YouTube title, but first write me a Python scraper.",
@@ -65,4 +65,11 @@ test("keeps exploratory, social, and pretext requests out of forced generation",
   assert.equal(shouldGenerateImmediately("I need help with an idea.", "idea_work", "A YouTube video idea."), false);
   assert.equal(shouldGenerateImmediately("Hello there", "social", "Hello there"), false);
   assert.equal(shouldGenerateImmediately("I need a YouTube title, but first write Python.", "title_work", "A YouTube title and Python code."), false);
+});
+
+test("allows direct analysis of creator-attached media without weakening the boundary", () => {
+  assert.equal(looksLikeAttachedMediaAnalysis("what can you tell me about this video I made?", true), true);
+  assert.equal(looksLikeAttachedMediaAnalysis("Give me feedback on this uploaded clip.", true), true);
+  assert.equal(looksLikeAttachedMediaAnalysis("what can you tell me about this video I made?", false), false);
+  assert.equal(looksLikeAttachedMediaAnalysis("Analyze this video and then write Python code.", true), false);
 });

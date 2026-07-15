@@ -42,6 +42,13 @@ function toolLabel(name: string) {
   return "Checking supporting evidence";
 }
 
+function toolStartingDetail(name: string) {
+  if (name === "youtube_channel_snapshot") return "Reading the connected channel's current uploads and metrics";
+  if (name === "youtube_search_reference_videos") return "Running one focused YouTube search";
+  if (name === "youtube_get_video_evidence") return "Reading current metadata and public statistics";
+  return "Checking the requested evidence";
+}
+
 function conciseDetail(value: string, maxLength = 150) {
   const cleaned = value.replace(/\s+/g, " ").trim();
   return cleaned.length > maxLength ? `${cleaned.slice(0, maxLength - 1).trimEnd()}…` : cleaned;
@@ -124,14 +131,6 @@ export async function runAgent(input: RunAgentInput): Promise<AgentResult> {
       toolsEnabled = false;
     }
 
-    const modelEventId = "model";
-    await emit({
-      id: modelEventId,
-      label: round === 1 ? "Planning the response" : "Reviewing the evidence",
-      detail: round === 1 ? "Deciding what context and research this request needs" : "Turning the gathered evidence into a useful answer",
-      status: "active",
-      kind: "thinking",
-    });
     const response = await input.provider.complete({
       systemInstruction: input.systemInstruction,
       contents,
@@ -147,25 +146,10 @@ export async function runAgent(input: RunAgentInput): Promise<AgentResult> {
     trace.cachedTokens += response.usage.cachedTokens || 0;
 
     if (!response.toolCalls.length) {
-      await emit({
-        id: modelEventId,
-        label: round === 1 ? "Planning the response" : "Reviewing the evidence",
-        detail: "The answer is ready to write",
-        status: "complete",
-        kind: "thinking",
-      });
       await emit({ id: "answer", label: "Writing the answer", detail: "Responding in the conversation", status: "active", kind: "answer" });
       trace.durationMs = Date.now() - started;
       return { output: parseStructuredText(response.text), text: response.text, toolResults, trace };
     }
-
-    await emit({
-      id: modelEventId,
-      label: round === 1 ? "Planning the response" : "Reviewing the evidence",
-      detail: `Opened ${response.toolCalls.length} research ${response.toolCalls.length === 1 ? "step" : "steps"}`,
-      status: "complete",
-      kind: "thinking",
-    });
 
     contents.push(response.rawContent);
     const remainingToolCalls = Math.max(0, maxToolCallsPerTurn - attemptedToolCalls);
@@ -184,7 +168,7 @@ export async function runAgent(input: RunAgentInput): Promise<AgentResult> {
       await emit({
         id: eventId,
         label: toolLabel(call.name),
-        detail: "Opening this layer now",
+        detail: toolStartingDetail(call.name),
         status: "active",
         kind: "tool",
       });

@@ -18,7 +18,7 @@ import {
 test("renders the unified ChatGPT-style Stanley composer", async ({ page }) => {
   await openApp(page);
 
-  await expect(page).toHaveTitle("Stanley — YouTube Creative AI");
+  await expect(page).toHaveTitle("Stanley");
   await expect(page.getByRole("heading", { name: "Where should we start?" })).toBeVisible();
   await expect(page.getByText("Ideas, titles, scripts, and thumbnails in one conversation.")).toBeVisible();
   await expect(page.getByLabel("Message Stanley")).toBeVisible();
@@ -40,12 +40,12 @@ test("offers Stanley-style quick starts that prepare the composer", async ({ pag
 test("shows one creation chat in the sidebar", async ({ page }) => {
   await openApp(page);
   const navigation = page.getByRole("navigation", { name: "Stanley tools" });
-  await expect(navigation.locator(".nav-item")).toHaveCount(4);
+  await expect(navigation.locator(".nav-item")).toHaveCount(3);
   await expect(navigation.getByText("Dashboard", { exact: true })).toBeVisible();
-  await expect(navigation.getByText("Create", { exact: true })).toBeVisible();
   await expect(navigation.getByText("Outliers")).toBeVisible();
   await expect(navigation.getByText("Chrome extension")).toBeVisible();
-  await expect(navigation.locator(".nav-item.active")).toContainText("Create");
+  await expect(page.getByRole("button", { name: "New chat", exact: true })).toBeVisible();
+  await expect(navigation.locator(".nav-item.active")).toHaveCount(0);
   await expect(page.getByText("Idea generator")).toHaveCount(0);
   await expect(page.getByText("Title generator")).toHaveCount(0);
   await expect(page.getByText("Thumbnail generator")).toHaveCount(0);
@@ -62,7 +62,7 @@ test("unfinished sidebar tools respond without pretending they exist", async ({ 
   await openApp(page);
   await page.getByRole("button", { name: "Outliers" }).click();
   await expect(page.getByRole("status")).toHaveText("Outliers is coming soon");
-  await page.getByRole("button", { name: "Create" }).click();
+  await page.getByRole("button", { name: "New chat", exact: true }).click();
   await expect(page.getByLabel("Message Stanley")).toBeFocused();
 });
 

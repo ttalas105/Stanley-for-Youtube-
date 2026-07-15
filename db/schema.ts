@@ -19,3 +19,11 @@ export const projectMemories = sqliteTable("project_memories", {
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 }, (table) => [primaryKey({ columns: [table.ownerId, table.projectId] })]);
+
+export const debugConversations = sqliteTable("debug_conversations", {
+  ownerId: text("owner_id").notNull(),
+  projectId: text("project_id").notNull(),
+  turnsJson: text("turns_json").notNull().default("[]"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [primaryKey({ columns: [table.ownerId, table.projectId] })]);

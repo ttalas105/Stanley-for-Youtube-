@@ -2,6 +2,7 @@ import { cookies } from "next/headers";
 
 export const YOUTUBE_SESSION_COOKIE = "stanley_youtube_session";
 export const YOUTUBE_OAUTH_COOKIE = "stanley_youtube_oauth";
+export const YOUTUBE_CAPTION_SCOPE = "https://www.googleapis.com/auth/youtube.force-ssl";
 
 export type YouTubeChannelProfile = {
   id: string;
@@ -53,6 +54,10 @@ export type YouTubeSession = {
   scope: string;
   profile: YouTubeChannelProfile;
 };
+
+export type YouTubeTranscriptResult =
+  | { status: "available"; text: string; language: string; trackKind: string }
+  | { status: "unavailable"; text: null; reason: string; requiresReconnect?: boolean };
 
 export type OAuthAttempt = {
   state: string;
@@ -236,6 +241,92 @@ async function youtubeJson<T>(url: URL, accessToken: string, signal?: AbortSigna
 function numeric(value: string | undefined) {
   const parsed = Number(value || 0);
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+export function hasYouTubeCaptionAccess(session: YouTubeSession | null | undefined) {
+  return Boolean(session?.scope.split(/\s+/).includes(YOUTUBE_CAPTION_SCOPE));
+}
+
+function decodeCaptionText(value: string) {
+  return value
+    .replace(/<[^>]+>/g, "")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, "\"")
+    .replace(/&#39;/g, "'")
+    .trim();
+}
+
+export function parseYouTubeVtt(value: string) {
+  const lines = value.replace(/^\uFEFF/, "").split(/\r?\n/);
+  const transcript: string[] = [];
+  let skipBlock = false;
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (/^(NOTE|STYLE|REGION)(?:\s|$)/.test(line)) {
+      skipBlock = true;
+      continue;
+    }
+    if (!line) {
+      skipBlock = false;
+      continue;
+    }
+    if (skipBlock || line === "WEBVTT" || /^\d+$/.test(line) || /-->/.test(line)) continue;
+    const cleaned = decodeCaptionText(line);
+    if (cleaned && cleaned !== transcript.at(-1)) transcript.push(cleaned);
+  }
+  return transcript.join(" ").replace(/\s+/g, " ").trim().slice(0, 24_000);
+}
+
+export async function fetchVideoTranscript(session: YouTubeSession, videoId: string, signal?: AbortSignal): Promise<YouTubeTranscriptResult> {
+  if (!hasYouTubeCaptionAccess(session)) {
+    return {
+      status: "unavailable",
+      text: null,
+      reason: "Reconnect YouTube once to enable owner-authorized caption access.",
+      requiresReconnect: true,
+    };
+  }
+
+  try {
+    const listUrl = new URL("https://www.googleapis.com/youtube/v3/captions");
+    listUrl.search = new URLSearchParams({ part: "snippet", videoId }).toString();
+    const listResponse = await fetch(listUrl, { headers: { Authorization: `Bearer ${session.accessToken}` }, signal });
+    if (!listResponse.ok) throw new Error(`YouTube captions.list ${listResponse.status}`);
+    const listing = await listResponse.json() as {
+      items?: Array<{ id?: string; snippet?: { language?: string; trackKind?: string; isDraft?: boolean; status?: string } }>;
+    };
+    const tracks = (listing.items || []).filter((item) => item.id && item.snippet?.status !== "failed");
+    tracks.sort((left, right) => {
+      const score = (item: typeof left) =>
+        (item.snippet?.language?.startsWith("en") ? 8 : 0)
+        + (item.snippet?.trackKind === "standard" ? 4 : item.snippet?.trackKind === "ASR" ? 2 : 0)
+        + (item.snippet?.isDraft ? 0 : 1);
+      return score(right) - score(left);
+    });
+    const track = tracks[0];
+    if (!track?.id) return { status: "unavailable", text: null, reason: "This video has no downloadable caption track yet." };
+
+    const downloadUrl = new URL(`https://www.googleapis.com/youtube/v3/captions/${encodeURIComponent(track.id)}`);
+    downloadUrl.searchParams.set("tfmt", "vtt");
+    const downloadResponse = await fetch(downloadUrl, { headers: { Authorization: `Bearer ${session.accessToken}` }, signal });
+    if (!downloadResponse.ok) throw new Error(`YouTube captions.download ${downloadResponse.status}`);
+    const text = parseYouTubeVtt(await downloadResponse.text());
+    if (!text) return { status: "unavailable", text: null, reason: "YouTube returned an empty caption track for this video." };
+    return {
+      status: "available",
+      text,
+      language: track.snippet?.language || "unknown",
+      trackKind: track.snippet?.trackKind || "unknown",
+    };
+  } catch (error) {
+    return {
+      status: "unavailable",
+      text: null,
+      reason: error instanceof Error ? error.message : "YouTube captions could not be downloaded.",
+    };
+  }
 }
 
 export async function fetchChannelVideos(accessToken: string, maxResults = 24, signal?: AbortSignal): Promise<YouTubeVideoReference[]> {

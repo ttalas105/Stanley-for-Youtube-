@@ -61,3 +61,61 @@ export function formatSemanticMemory(memory) {
     currentVideoProject: { summary: memory.project.summary || "", facts: projectFacts },
   });
 }
+
+const REFERENCE_CUES = {
+  identity: /\b(?:my|our)\s+(?:name|background|experience|identity|role)\b/i,
+  preference: /\b(?:my|our)\s+(?:favou?rite|preferred|usual|go-to|preferences?|interests?)\b|\bwhat\s+(?:i|we)\s+(?:like|love|prefer)\b/i,
+  audience: /\b(?:my|our)\s+(?:audience|viewers|subscribers|community)\b/i,
+  channel: /\b(?:my|our)\s+(?:channel|niche|uploads?|videos?)\b/i,
+  relationship: /\b(?:my|our)\s+(?:pet|dog|cat|partner|friend|brother|sister|mom|mother|dad|father|son|daughter)\b|\b(?:pet|person)\s+i\s+(?:mentioned|told you about)\b/i,
+  subject: /\b(?:same|that|this|previous)\s+(?:subject|idea|video|project)\b/i,
+  format: /\b(?:same|my|our|usual|previous)\s+(?:format|structure|style)\b/i,
+  tone: /\b(?:same|my|our|usual|previous)\s+(?:tone|voice|style)\b/i,
+  constraint: /\b(?:same|my|our|previous)\s+(?:constraint|limit|requirement)\b/i,
+  decision: /\b(?:same|that|this|previous)\s+(?:decision|choice|direction)\b/i,
+  proof: /\b(?:my|our|same|previous)\s+(?:proof|result|data|evidence)\b/i,
+};
+
+const GENERIC_MEMORY_WORDS = new Set([
+  "about", "animal", "cat", "cats", "creator", "dog", "dogs", "favorite", "favourite", "likes", "love", "pet", "pets", "prefers", "their", "they", "video", "videos", "youtube",
+]);
+
+function meaningfulWords(value) {
+  return new Set(clean(value, 400).toLowerCase().match(/[a-z0-9]+/g)?.filter((word) => word.length >= 3 && !GENERIC_MEMORY_WORDS.has(word)) || []);
+}
+
+function factMatchesRequest(fact, requestText) {
+  const text = clean(requestText, 2_000).toLowerCase();
+  if (!text) return false;
+  const requestWords = meaningfulWords(text);
+  const factWords = meaningfulWords(`${fact.key} ${fact.value}`);
+  if (Array.from(factWords).some((word) => requestWords.has(word))) return true;
+
+  const cue = REFERENCE_CUES[fact.category];
+  if (!cue?.test(text)) return false;
+
+  // A relational cue must also point at the same semantic slot. This keeps a
+  // request for "my usual tone" from retrieving an unrelated pet preference.
+  if (/\bfavou?rite\s+animal\b/i.test(text)) return /\b(?:cats?|dogs?|animals?|pets?|birds?|fish|horses?|rabbits?)\b/i.test(fact.value);
+  if (/\b(?:tone|voice|style)\b/i.test(text)) return /\b(?:tone|voice|style|humor|humour|playful|serious|casual|formal)\b/i.test(`${fact.key} ${fact.value}`);
+  if (/\b(?:audience|viewers|subscribers|community)\b/i.test(text)) return fact.category === "audience";
+  if (/\b(?:channel|niche|uploads?)\b/i.test(text)) return fact.category === "channel";
+  return true;
+}
+
+export function selectRelevantSemanticMemory(memory, creatorKeys = [], projectKeys = [], requestText = "") {
+  const selectedCreatorKeys = new Set((Array.isArray(creatorKeys) ? creatorKeys : []).map(normalizeMemoryKey).filter(Boolean));
+  const selectedProjectKeys = new Set((Array.isArray(projectKeys) ? projectKeys : []).map(normalizeMemoryKey).filter(Boolean));
+  const creatorFacts = (Array.isArray(memory?.creator?.facts) ? memory.creator.facts : []).filter((fact) => {
+    const normalized = normalizeMemoryFact(fact, "creator");
+    return normalized && selectedCreatorKeys.has(normalized.key) && factMatchesRequest(normalized, requestText);
+  });
+  const projectFacts = (Array.isArray(memory?.project?.facts) ? memory.project.facts : []).filter((fact) => {
+    const normalized = normalizeMemoryFact(fact, "project");
+    return normalized && selectedProjectKeys.has(normalized.key) && factMatchesRequest(normalized, requestText);
+  });
+  return {
+    creator: { summary: "", facts: creatorFacts },
+    project: { summary: "", facts: projectFacts },
+  };
+}

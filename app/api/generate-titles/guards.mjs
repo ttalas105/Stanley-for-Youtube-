@@ -25,6 +25,9 @@ const creatorMemoryPatterns = [
 
 const mixedMemoryTask = /\b(?:but\s+first|before\s+that|and\s+then|then|also)\s+(?:write|create|make|code|explain|tell|show|give|summarize|translate|search|browse|calculate)\b/i;
 const sensitiveMemory = /\b(?:password|passcode|secret|token|api[_ -]?key|credential|credit[_ -]?card|bank|routing|social[_ -]?security|ssn|sin|medical|diagnosis|exact\s+address|home\s+address|phone|email)\b/i;
+const attachedMediaReference = /\b(?:this|that|my|the|attached|uploaded|selected)\s+(?:youtube\s+)?(?:video|clip|upload|footage|thumbnail|image)\b/i;
+const attachedMediaAnalysis = /\b(?:what\s+can\s+you\s+tell\s+me\s+about|what\s+do\s+you\s+think\s+(?:about|of)|analy[sz]e|review|critique|assess|break\s+down|summarize|describe|give\s+me\s+feedback\s+on|tell\s+me\s+about)\b/i;
+const mixedMediaTask = /\b(?:but\s+first|before\s+that|and\s+then|then|also)\s+(?:write|create|make|code|explain|tell|show|give|translate|search|browse|calculate)\b/i;
 
 export function hasTitlePretext(value) {
   return titleMarker.test(value) && titlePretextPatterns.some((pattern) => pattern.test(value));
@@ -39,6 +42,13 @@ export function looksLikeCreatorMemoryRequest(value) {
   if (!message || message.length > 320 || /[\r\n]/.test(message)) return false;
   if (looksLikePromptAttack(message) || mixedMemoryTask.test(message) || sensitiveMemory.test(message)) return false;
   return creatorMemoryPatterns.some((pattern) => pattern.test(message));
+}
+
+export function looksLikeAttachedMediaAnalysis(value, hasAttachedMedia = false) {
+  const message = typeof value === "string" ? value.trim() : "";
+  if (!hasAttachedMedia || !message) return false;
+  if (looksLikePromptAttack(message) || mixedMediaTask.test(message)) return false;
+  return attachedMediaReference.test(message) && attachedMediaAnalysis.test(message);
 }
 
 const creativeIntents = new Set(["idea_work", "script_work", "title_work", "thumbnail_work"]);

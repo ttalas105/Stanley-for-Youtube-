@@ -10,7 +10,7 @@ test("copies all titles from one ChatGPT-style response action", async ({ contex
   await generate(page);
 
   await page.getByRole("button", { name: "Copy all titles" }).click();
-  await expect(page.getByRole("status")).toHaveText("Titles copied");
+  await expect(page.getByRole("status")).toHaveText("Copied");
   const clipboard = await page.evaluate(() => navigator.clipboard.readText());
   expect(clipboard.split("\n")).toHaveLength(12);
   expect(clipboard).toContain(`1. ${buildTitles()[0].title}`);
@@ -47,7 +47,7 @@ test("renders the submitted message and Stanley response as one conversation", a
   await expect(page.locator(".assistant-option")).toHaveCount(12);
   await expect(page.locator(".assistant-message")).toContainText("I reviewed the strongest comparable videos");
   await expect(page.getByRole("button", { name: "Copy all titles" })).toHaveCount(1);
-  await expect(page.getByRole("button", { name: "Copy response" })).toHaveCount(1);
+  await expect(page.locator(".assistant-actions .copy-response")).toHaveCount(1);
 });
 
 test("keeps the unified composer active without exposing internal creation modes", async ({ page }) => {
@@ -248,9 +248,12 @@ test("caps stored chat history at eight sessions and shows the latest six", asyn
       await page.getByRole("button", { name: "New chat", exact: true }).click();
       await expect(page.getByRole("button", { name: "Copy session ID" })).toHaveCount(0);
     }
-    await page.getByLabel("Message Stanley").fill(`A sufficiently detailed creator test topic number ${index}`);
+    const topic = `A sufficiently detailed creator test topic number ${index}`;
+    await page.getByLabel("Message Stanley").fill(topic);
     await page.getByRole("button", { name: "Send message" }).click();
+    await expect(page.locator(".user-message")).toHaveText(topic);
     await expect(page.locator(".assistant-option")).toHaveCount(12);
+    await expect(page.getByRole("button", { name: "Copy all titles" })).toBeVisible();
   }
 
   const historyLength = await page.evaluate(() => JSON.parse(window.localStorage.getItem("stanley-title-drafts") || "[]").length);

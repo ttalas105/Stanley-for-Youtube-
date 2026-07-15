@@ -22,16 +22,19 @@ test("server-renders the safe Stanley onboarding shell", async () => {
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
 
   const html = await response.text();
-  assert.match(html, /<title>Stanley — YouTube Creative AI<\/title>/i);
+  assert.match(html, /<title>Stanley<\/title>/i);
   assert.match(html, /Loading Stanley/);
   assert.match(html, /onboarding-loading/);
   assert.doesNotMatch(html, /codex-preview|react-loading-skeleton/i);
 });
 
 test("keeps AI keys server-side and removes the disposable starter", async () => {
-  const [page, route, kernel, provider, youtubeTools, oauth, oauthConnect, gitignore] = await Promise.all([
+  const [page, route, stanleyVoice, youtubeStrategy, memoryIdentity, kernel, provider, youtubeTools, oauth, oauthConnect, gitignore] = await Promise.all([
     readFile(new URL("app/page.tsx", root), "utf8"),
     readFile(new URL("app/api/generate-titles/route.ts", root), "utf8"),
+    readFile(new URL("app/api/generate-titles/stanley-voice.mjs", root), "utf8"),
+    readFile(new URL("app/api/generate-titles/youtube-strategy.mjs", root), "utf8"),
+    readFile(new URL("app/api/memory/identity.ts", root), "utf8"),
     readFile(new URL("app/api/generate-titles/agent/kernel.ts", root), "utf8"),
     readFile(new URL("app/api/generate-titles/agent/provider.ts", root), "utf8"),
     readFile(new URL("app/api/generate-titles/agent/youtube-tools.ts", root), "utf8"),
@@ -68,6 +71,23 @@ test("keeps AI keys server-side and removes the disposable starter", async () =>
   assert.match(route, /fail-closed intent and security classifier/);
   assert.match(route, /Choose intent=social only for brief non-task conversation/);
   assert.match(route, /Choose intent=memory only for managing or recalling durable creator context/);
+  assert.match(route, /Choose intent=video_analysis when the creator asks what you can tell them about their attached or selected media/);
+  assert.match(route, /scope\.intent === "video_analysis"/);
+  assert.match(route, /includeTranscript=true/);
+  assert.match(route, /hasYouTubeCaptionAccess/);
+  assert.match(oauthConnect, /youtube\.force-ssl/);
+  assert.match(oauth, /fetchVideoTranscript/);
+  assert.match(oauth, /captions\.download/);
+  assert.match(route, /Gemini could not open that public video/);
+  assert.match(route, /hasUploadedSourceVideo/);
+  assert.match(page, /selectableYouTubeVideos/);
+  assert.doesNotMatch(page, /Add source video/);
+  assert.match(page, /uploadedVideoCache/);
+  assert.match(route, /recordDebugConversationTurn/);
+  assert.match(route, /delete metadata\.data/);
+  assert.match(route, /hq1\.jpg/);
+  assert.match(route, /Tell them what the video actually is/);
+  assert.doesNotMatch(route, /Verified video details/);
   assert.match(route, /idea_work/);
   assert.match(route, /thumbnail_work/);
   assert.match(route, /ideaSchema/);
@@ -75,10 +95,35 @@ test("keeps AI keys server-side and removes the disposable starter", async () =>
   assert.doesNotMatch(route, /Generate exactly 8 distinct/);
   assert.match(route, /fullScriptSchema/);
   assert.match(route, /script_work/);
+  assert.match(route, /STANLEY_VOICE/);
+  assert.match(route, /GEMINI_SCRIPT_MODEL/);
+  assert.match(route, /SCRIPT_MODEL/);
+  assert.match(stanleyVoice, /REFERENCE EXAMPLES/);
+  assert.match(stanleyVoice, /Never open with canned approval/);
+  assert.match(youtubeStrategy, /Before drafting, silently define four things/);
+  assert.match(route, /viewerPromise/);
+  assert.match(route, /voiceDirection/);
+  assert.match(route, /visualDirection/);
+  assert.match(route, /hasUnprovenFutureOutcome/);
+  assert.match(route, /Do not choose the ending for the creator/);
+  assert.match(page, /script-brief/);
+  assert.match(page, /On screen:/);
   assert.match(route, /researchBasis/);
   assert.match(route, /scriptOutline/);
   assert.match(route, /resolvedBrief/);
   assert.match(route, /Later messages usually refine rather than replace earlier facts/);
+  assert.match(route, /selectRelevantMemoryKeys/);
+  assert.match(route, /selectRelevantSemanticMemory/);
+  assert.match(route, /only saved facts selected as relevant/i);
+  assert.match(route, /liking cats does not mean the creator owns a cat/i);
+  assert.doesNotMatch(route, /Server semantic memory:/);
+  assert.match(route, /researchTopic/);
+  assert.match(route, /resolveResearchAccess/);
+  assert.match(route, /allowPublicSearch: researchAccess\.publicSearch/);
+  assert.match(route, /local golf course reviews/);
+  assert.match(route, /maxToolCallsPerTurn: Math\.max\(1, Math\.min\(2, researchBudget\)\)/);
+  assert.match(memoryIdentity, /MEMORY_CHANNEL_COOKIE/);
+  assert.match(memoryIdentity, /mergeMemoryOwners/);
   assert.match(route, /researchFromToolResults/);
   assert.match(route, /conversationTopic: resolvedBrief/);
   assert.match(route, /const fullContext = messages\.map/);

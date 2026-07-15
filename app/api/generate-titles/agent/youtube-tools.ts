@@ -1,4 +1,4 @@
-import { fetchChannelVideos } from "../../youtube/oauth";
+import { fetchChannelVideos, fetchVideoTranscript } from "../../youtube/oauth";
 import type { YouTubeSession } from "../../youtube/oauth";
 import { objectWithOnly, ToolRegistry } from "./tool-registry";
 import type { ToolDefinition, ToolResult, ToolSource } from "./types";
@@ -23,6 +23,10 @@ type SearchData = {
 type YouTubeToolOptions = {
   apiKey?: string;
   session: YouTubeSession | null;
+  researchTopic?: string;
+  allowPublicSearch?: boolean;
+  allowChannelSnapshot?: boolean;
+  allowVideoEvidence?: boolean;
 };
 
 type SearchResponse = {
@@ -54,6 +58,26 @@ type VideoListResponse = {
 function numberValue(value: unknown) {
   const numeric = Number(value || 0);
   return Number.isFinite(numeric) ? numeric : 0;
+}
+
+const RESEARCH_STOP_WORDS = new Set([
+  "about", "best", "channel", "content", "create", "creator", "film", "local", "long", "minute", "minutes", "review", "reviews", "script", "the", "their", "video", "videos", "youtube",
+]);
+
+function researchWords(value: string) {
+  return new Set((value.toLowerCase().match(/[a-z0-9]+/g) || [])
+    .map((word) => word.length > 4 && word.endsWith("s") ? word.slice(0, -1) : word)
+    .filter((word) => word.length >= 3 && !RESEARCH_STOP_WORDS.has(word)));
+}
+
+export function focusResearchQuery(requestedQuery: string, researchTopic = "") {
+  const requested = requestedQuery.replace(/\s+/g, " ").trim().slice(0, 100);
+  const anchor = researchTopic.replace(/\s+/g, " ").trim().slice(0, 100);
+  if (!anchor) return requested;
+  const anchorWords = researchWords(anchor);
+  if (!anchorWords.size) return requested || anchor;
+  const requestedWords = researchWords(requested);
+  return Array.from(anchorWords).some((word) => requestedWords.has(word)) ? requested : anchor;
 }
 
 function parseDurationSeconds(duration: string) {
@@ -165,7 +189,7 @@ function searchReferenceVideosTool(options: YouTubeToolOptions): ToolDefinition 
       return { ...object, query: object.query.trim() };
     },
     async execute(args, context) {
-      const query = String(args.query);
+      const query = focusResearchQuery(String(args.query), options.researchTopic);
       const maxResults = Number(args.maxResults || 12);
       const duration = args.duration === "any" ? "any" : "long_form";
       const order = String(args.order || "view_count").replace("view_count", "viewCount");
@@ -281,12 +305,15 @@ function videoEvidenceTool(options: YouTubeToolOptions): ToolDefinition {
       const capturedAt = new Date().toISOString();
       const videoUrl = `https://www.youtube.com/watch?v=${video.id}`;
       const transcriptRequested = args.includeTranscript === true;
-      const transcript = { status: "unavailable" as const, text: null, reason: transcriptRequested ? "The current read-only YouTube integration does not expose an exact transcript for this video." : "Transcript was not requested." };
+      const transcript = transcriptRequested && options.session
+        ? await fetchVideoTranscript(options.session, video.id, context.signal)
+        : { status: "unavailable" as const, text: null, reason: transcriptRequested ? "Connect the owner channel to read this video's captions." : "Transcript was not requested." };
+      const transcriptAvailable = transcript.status === "available";
       return {
         ok: true,
         tool: "youtube_get_video_evidence",
-        status: transcriptRequested ? "partial" : "complete",
-        summary: `Read current metadata and public statistics for “${video.snippet?.title || video.id}”.${transcriptRequested ? " An exact transcript was not available." : ""}`,
+        status: transcriptRequested && !transcriptAvailable ? "partial" : "complete",
+        summary: `Read current metadata and statistics for “${video.snippet?.title || video.id}”.${transcriptAvailable ? " Owner-authorized captions were included." : transcriptRequested ? " An exact transcript was not available." : ""}`,
         data: {
           id: video.id,
           title: video.snippet?.title || "Untitled video",
@@ -307,20 +334,20 @@ function videoEvidenceTool(options: YouTubeToolOptions): ToolDefinition {
           url: videoUrl,
         },
         handle: `youtube-video:${video.id}:${capturedAt}`,
-        coverage: { returned: 1, totalKnown: 1, complete: !transcriptRequested },
+        coverage: { returned: 1, totalKnown: 1, complete: !transcriptRequested || transcriptAvailable },
         sources: [{ id: `youtube:${video.id}`, label: video.snippet?.title || video.id, url: videoUrl, capturedAt }],
-        warnings: transcriptRequested ? ["Reasoning about the video's spoken content must be limited to creator-supplied media or an exact transcript supplied elsewhere."] : [],
+        warnings: transcriptRequested && !transcriptAvailable ? ["Do not invent spoken content when an exact caption track is unavailable."] : [],
       };
     },
   };
 }
 
 export function createYouTubeToolRegistry(options: YouTubeToolOptions) {
-  return new ToolRegistry([
-    channelSnapshotTool(options),
-    searchReferenceVideosTool(options),
-    videoEvidenceTool(options),
-  ]);
+  const tools: ToolDefinition[] = [];
+  if (options.allowChannelSnapshot !== false) tools.push(channelSnapshotTool(options));
+  if (options.allowPublicSearch !== false) tools.push(searchReferenceVideosTool(options));
+  if (options.allowVideoEvidence !== false) tools.push(videoEvidenceTool(options));
+  return new ToolRegistry(tools);
 }
 
 export function researchFromToolResults(results: ToolResult[]) {

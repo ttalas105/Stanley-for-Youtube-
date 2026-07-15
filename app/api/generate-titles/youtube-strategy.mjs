@@ -50,11 +50,18 @@ const intentStrategy = {
 - Prefer ideas with a clear opening situation, visible progress, meaningful escalation, and a satisfying payoff.
 - Consider whether the idea can naturally lead into another video or series, but never force a sequel hook.`,
   script_work: `SCRIPT JOB
-- Make the first moments validate the title and thumbnail promise, identify the stakes, and create a concrete reason to continue.
-- Every section must add new value, evidence, progress, contrast, complication, or payoff. Remove throat-clearing, repetition, and filler.
-- Use open questions only when the script later resolves them. Make transitions causal and easy to follow.
-- Place the strongest proof and emotional or useful payoff where it satisfies the viewer, not merely where it maximizes duration.
-- End by resolving the core promise, then point to another video only when it is the genuinely useful next step.`,
+- Before drafting, silently define four things: the intended viewer, the one-sentence promise made by the title and thumbnail, the proof available on camera, and the final payoff. If required proof is missing, use an explicit creator placeholder instead of inventing it.
+- In the first 30 seconds, begin with action, tension, a result, or the central question; confirm the packaging promise; establish the stakes; and open the next concrete question. Skip greetings, logos, agendas, and backstory unless they are necessary to understand the promise.
+- Build a causal progression suited to the video. A story may move through setup, attempt, complication, discovery, proof, and payoff. An explainer may move through problem, contrast, demonstration, application, and payoff. Never force either template when the material needs a different shape.
+- Every beat must change what the viewer knows, feels, expects, or sees. Add new value, evidence, progress, contrast, complication, or payoff; remove throat-clearing, repetition, abstract motivation, and filler.
+- Make transitions causal: because this happened, the creator tries or discovers the next thing. Use open questions only when the script later resolves them.
+- Front-load a strong demonstrable moment when the best moment currently appears late. A pattern interrupt must introduce a real visual, piece of evidence, decision, or change, not motion for its own sake.
+- Write natural spoken prose with contractions, varied sentence length, and vocabulary that fits the creator. Avoid stock hooks such as "What if I told you," "In today's video," "You won't believe," and "watch until the end."
+- Earn attention through concrete information and visible progress, not verbal hype. Replace abstract claims such as "changed my life," "pushed me to my limits," or "more time than I thought" with the actual observed behavior, number, decision, or consequence. If it is not known yet, mark the exact proof the creator must supply.
+- Do not invent the creator's motivation, mood, baseline, conflict, lesson, or final opinion. These are factual claims too. Preserve them as specific placeholders when the creator has not supplied them.
+- Avoid creator-script cliches such as "they say," "the honest truth," "the brutal truth," "this is where most people quit," "here's what happened," and inflated either-or questions. Humor must come from a supplied or observable moment, not a fabricated quip.
+- For Shorts, deliver one idea with immediate context and payoff, with no long setup or generic call to action. For long-form, sustain a small number of clear open questions and resolve each one.
+- Place the strongest proof and emotional or useful payoff where it best satisfies the viewer, not where it merely stretches duration. End on the actual answer, result, image, or decision. Cut "thanks for watching," generic subscription requests, and a next-video pitch unless one is genuinely useful.`,
   title_work: `TITLE JOB
 - Optimize honest appeal for the intended viewer. Communicate value and stakes clearly enough to earn the click.
 - Pair curiosity with a concrete promise. Never create a promise the supplied idea or script cannot deliver.

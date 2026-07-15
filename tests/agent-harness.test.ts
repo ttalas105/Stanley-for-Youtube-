@@ -4,7 +4,7 @@ import test from "node:test";
 import { runAgent } from "../app/api/generate-titles/agent/kernel";
 import { toGeminiFunctionParameters } from "../app/api/generate-titles/agent/provider";
 import { ToolRegistry, objectWithOnly } from "../app/api/generate-titles/agent/tool-registry";
-import { createYouTubeToolRegistry } from "../app/api/generate-titles/agent/youtube-tools";
+import { createYouTubeToolRegistry, focusResearchQuery } from "../app/api/generate-titles/agent/youtube-tools";
 import type {
   JsonObject,
   ModelRequest,
@@ -132,9 +132,29 @@ test("emits live activity from the actual model and tool lifecycle", async () =>
   const toolEvents = events.filter((event) => event.id.includes("youtube_search_reference_videos"));
   assert.deepEqual(toolEvents.map((event) => event.status), ["active", "complete"]);
   assert.match(toolEvents[1]?.detail || "", /Evidence returned/);
-  assert.ok(events.some((event) => event.id === "model" && event.status === "active"));
-  assert.ok(events.some((event) => event.id === "model" && event.status === "complete"));
+  assert.equal(events.some((event) => event.id === "model"), false);
   assert.ok(events.some((event) => event.id === "answer" && event.status === "active"));
+});
+
+test("shows only work that actually ran", async () => {
+  const events: Array<{ id: string; label: string; status: string }> = [];
+  await run(new MockProvider([finalReply("Direct answer.")]), new ToolRegistry([readTool()]), {
+    onEvent: (event) => { events.push(event); },
+  });
+  assert.deepEqual(events.map(({ id, label, status }) => ({ id, label, status })), [
+    { id: "answer", label: "Writing the answer", status: "active" },
+  ]);
+});
+
+test("anchors an off-topic YouTube query to the current video subject", () => {
+  assert.equal(
+    focusResearchQuery("motivational videos that get views", "local golf course reviews"),
+    "local golf course reviews",
+  );
+  assert.equal(
+    focusResearchQuery("golf course strategy breakdown", "local golf course reviews"),
+    "golf course strategy breakdown",
+  );
 });
 
 test("answers directly without forcing a research call", async () => {
@@ -254,6 +274,27 @@ test("declares only the three minimal YouTube read tools", async () => {
   const result = await registry.execute("youtube_channel_snapshot", { scope: "connected_channel" }, new AbortController().signal);
   assert.equal(result.status, "empty");
   assert.equal(result.error?.code, "CHANNEL_NOT_CONNECTED");
+});
+
+test("exposes only the research layers approved for the current message", () => {
+  const creativeOnly = createYouTubeToolRegistry({
+    session: null,
+    allowPublicSearch: false,
+    allowChannelSnapshot: false,
+    allowVideoEvidence: false,
+  });
+  assert.deepEqual(creativeOnly.declarations(), []);
+
+  const publicResearch = createYouTubeToolRegistry({
+    session: null,
+    allowPublicSearch: true,
+    allowChannelSnapshot: false,
+    allowVideoEvidence: true,
+  });
+  assert.deepEqual(publicResearch.declarations().map((tool) => tool.name), [
+    "youtube_search_reference_videos",
+    "youtube_get_video_evidence",
+  ]);
 });
 
 test("converts strict internal schemas to Gemini's supported function subset", () => {
