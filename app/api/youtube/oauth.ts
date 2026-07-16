@@ -108,6 +108,7 @@ type VideosResponse = {
 };
 
 const SESSION_MAX_AGE = 60 * 60 * 24 * 30;
+const YOUTUBE_DATA_API_ROOT = "https://www.googleapis.com/youtube/v3/";
 
 function requireConfig(name: "GOOGLE_OAUTH_CLIENT_ID" | "GOOGLE_OAUTH_CLIENT_SECRET" | "OAUTH_SESSION_SECRET") {
   const value = process.env[name]?.trim();
@@ -129,6 +130,15 @@ export function getOAuthClientId() {
 
 export function getOAuthClientSecret() {
   return requireConfig("GOOGLE_OAUTH_CLIENT_SECRET");
+}
+
+export function youtubeDataApiUrl(resource: string, parameters: Record<string, string>) {
+  const url = new URL(resource.replace(/^\/+/, ""), YOUTUBE_DATA_API_ROOT);
+  const search = new URLSearchParams(parameters);
+  const apiKey = process.env.YOUTUBE_OAUTH_API_KEY?.trim();
+  if (apiKey) search.set("key", apiKey);
+  url.search = search.toString();
+  return url;
 }
 
 export function safeReturnTo(value: string | null) {
@@ -290,8 +300,7 @@ export async function fetchVideoTranscript(session: YouTubeSession, videoId: str
   }
 
   try {
-    const listUrl = new URL("https://www.googleapis.com/youtube/v3/captions");
-    listUrl.search = new URLSearchParams({ part: "snippet", videoId }).toString();
+    const listUrl = youtubeDataApiUrl("captions", { part: "snippet", videoId });
     const listResponse = await fetch(listUrl, { headers: { Authorization: `Bearer ${session.accessToken}` }, signal });
     if (!listResponse.ok) throw new Error(`YouTube captions.list ${listResponse.status}`);
     const listing = await listResponse.json() as {
@@ -308,8 +317,7 @@ export async function fetchVideoTranscript(session: YouTubeSession, videoId: str
     const track = tracks[0];
     if (!track?.id) return { status: "unavailable", text: null, reason: "This video has no downloadable caption track yet." };
 
-    const downloadUrl = new URL(`https://www.googleapis.com/youtube/v3/captions/${encodeURIComponent(track.id)}`);
-    downloadUrl.searchParams.set("tfmt", "vtt");
+    const downloadUrl = youtubeDataApiUrl(`captions/${encodeURIComponent(track.id)}`, { tfmt: "vtt" });
     const downloadResponse = await fetch(downloadUrl, { headers: { Authorization: `Bearer ${session.accessToken}` }, signal });
     if (!downloadResponse.ok) throw new Error(`YouTube captions.download ${downloadResponse.status}`);
     const text = parseYouTubeVtt(await downloadResponse.text());
@@ -330,18 +338,16 @@ export async function fetchVideoTranscript(session: YouTubeSession, videoId: str
 }
 
 export async function fetchChannelVideos(accessToken: string, maxResults = 24, signal?: AbortSignal): Promise<YouTubeVideoReference[]> {
-  const channelUrl = new URL("https://www.googleapis.com/youtube/v3/channels");
-  channelUrl.search = new URLSearchParams({ part: "contentDetails", mine: "true" }).toString();
+  const channelUrl = youtubeDataApiUrl("channels", { part: "contentDetails", mine: "true" });
   const channelResult = await youtubeJson<ChannelResponse>(channelUrl, accessToken, signal);
   const uploads = channelResult.items?.[0]?.contentDetails?.relatedPlaylists?.uploads;
   if (!uploads) return [];
 
-  const playlistUrl = new URL("https://www.googleapis.com/youtube/v3/playlistItems");
-  playlistUrl.search = new URLSearchParams({
+  const playlistUrl = youtubeDataApiUrl("playlistItems", {
     part: "snippet,contentDetails",
     playlistId: uploads,
     maxResults: String(Math.min(50, Math.max(1, maxResults))),
-  }).toString();
+  });
   const playlist = await youtubeJson<PlaylistResponse>(playlistUrl, accessToken, signal);
   const playlistItems = playlist.items || [];
   const videoIds = playlistItems
@@ -349,11 +355,10 @@ export async function fetchChannelVideos(accessToken: string, maxResults = 24, s
     .filter((id): id is string => Boolean(id));
   if (!videoIds.length) return [];
 
-  const videosUrl = new URL("https://www.googleapis.com/youtube/v3/videos");
-  videosUrl.search = new URLSearchParams({
+  const videosUrl = youtubeDataApiUrl("videos", {
     part: "snippet,statistics,contentDetails,status",
     id: videoIds.join(","),
-  }).toString();
+  });
   const videos = await youtubeJson<VideosResponse>(videosUrl, accessToken, signal);
   const byId = new Map((videos.items || []).map((video) => [video.id, video]));
 
@@ -377,8 +382,7 @@ export async function fetchChannelVideos(accessToken: string, maxResults = 24, s
 }
 
 export async function fetchChannelProfile(accessToken: string): Promise<YouTubeChannelProfile> {
-  const channelUrl = new URL("https://www.googleapis.com/youtube/v3/channels");
-  channelUrl.search = new URLSearchParams({ part: "snippet,statistics,contentDetails", mine: "true" }).toString();
+  const channelUrl = youtubeDataApiUrl("channels", { part: "snippet,statistics,contentDetails", mine: "true" });
   const channelResult = await youtubeJson<ChannelResponse>(channelUrl, accessToken);
   const channel = channelResult.items?.[0];
   if (!channel?.id) throw new Error("No YouTube channel was found for this Google account");
@@ -388,14 +392,12 @@ export async function fetchChannelProfile(accessToken: string): Promise<YouTubeC
   let recentVideoIds: string[] = [];
   const recentVideoTitles = new Map<string, string>();
   if (uploads) {
-    const playlistUrl = new URL("https://www.googleapis.com/youtube/v3/playlistItems");
-    playlistUrl.search = new URLSearchParams({ part: "contentDetails", playlistId: uploads, maxResults: "25" }).toString();
+    const playlistUrl = youtubeDataApiUrl("playlistItems", { part: "contentDetails", playlistId: uploads, maxResults: "25" });
     const playlist = await youtubeJson<PlaylistResponse>(playlistUrl, accessToken);
     const videoIds = (playlist.items || []).map((item) => item.contentDetails?.videoId).filter((id): id is string => Boolean(id));
     recentVideoIds = videoIds;
     if (videoIds.length) {
-      const videosUrl = new URL("https://www.googleapis.com/youtube/v3/videos");
-      videosUrl.search = new URLSearchParams({ part: "snippet,statistics", id: videoIds.join(",") }).toString();
+      const videosUrl = youtubeDataApiUrl("videos", { part: "snippet,statistics", id: videoIds.join(",") });
       const videos = await youtubeJson<VideosResponse>(videosUrl, accessToken);
       for (const video of videos.items || []) recentVideoTitles.set(video.id, video.snippet?.title || "Untitled video");
       strongestVideo = (videos.items || []).map((video) => {

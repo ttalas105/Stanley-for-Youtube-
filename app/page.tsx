@@ -1,7 +1,7 @@
 "use client";
 
 import { ChangeEvent, FormEvent, KeyboardEvent, useEffect, useRef, useState } from "react";
-import { ArrowUpRight, ChevronDown, ChevronRight, Eye, FileText, LayoutDashboard, LogOut, MessageCircle, PanelLeftClose, PanelLeftOpen, Puzzle, RefreshCw, Sparkles, SquarePen, TrendingUp, Users, Video, WandSparkles } from "lucide-react";
+import { ArrowDownRight, ArrowUpRight, ChevronDown, ChevronRight, Clock3, Eye, FileText, LayoutDashboard, LogOut, MessageCircle, Minus, PanelLeftClose, PanelLeftOpen, Percent, Puzzle, Sparkles, SquarePen, Timer, Users, WandSparkles } from "lucide-react";
 
 type CreationMode = "auto" | "idea" | "title" | "thumbnail";
 type WorkspaceView = "dashboard" | "create";
@@ -164,6 +164,37 @@ type YouTubeVideoOption = {
   url: string;
 };
 
+type DashboardChartMetric = "views" | "watchMinutes" | "netSubscribers";
+
+type DashboardPeriodMetrics = {
+  views: number | null;
+  watchMinutes: number | null;
+  subscribersGained: number | null;
+  subscribersLost: number | null;
+  averageViewDuration: number | null;
+  averageViewPercentage: number | null;
+};
+
+type DashboardAnalytics = {
+  channel: { handle: string | null };
+  period: { startDate: string; endDate: string; days: number };
+  comparisonPeriod: { startDate: string; endDate: string; days: number } | null;
+  current: DashboardPeriodMetrics;
+  comparison: DashboardPeriodMetrics | null;
+  timeline: Array<{ date: string; views: number; watchMinutes: number; netSubscribers: number }>;
+  comparisonTimeline: Array<{ date: string; views: number; watchMinutes: number; netSubscribers: number }>;
+  videos: Array<{
+    id: string;
+    views: number | null;
+    watchMinutes: number | null;
+    averageViewDuration: number | null;
+    averageViewPercentage: number | null;
+    netSubscribers: number;
+  }>;
+  traffic: Array<{ source: string; views: number; watchMinutes: number }>;
+  updatedAt: string;
+};
+
 function selectableYouTubeVideos(videos: YouTubeVideoOption[]) {
   return videos.filter((video) => ["public", "private", "unlisted"].includes(video.privacyStatus));
 }
@@ -190,11 +221,9 @@ type MessageAttachment = Pick<ComposerAttachment, "id" | "kind" | "name" | "prev
 const DRAFTS_KEY = "stanley-title-drafts";
 const ONBOARDING_KEY = "stanley-onboarding-v1";
 const SIDEBAR_KEY = "stanley-sidebar-collapsed";
-const STANLEY_LOGO = "https://stanbrandhub.lovable.app/downloads/Stanley_Logo_Lockup_Dark.png";
 
 const NAV_ITEMS: Array<{ icon: string; label: string; view?: WorkspaceView }> = [
   { icon: "dashboard", label: "Dashboard", view: "dashboard" },
-  { icon: "outlier", label: "Outliers" },
   { icon: "extension", label: "Chrome extension" },
 ];
 
@@ -523,7 +552,6 @@ async function readApiResponse(response: Response, onActivity: (activity: AgentA
 
 function ToolIcon({ name }: { name: string }) {
   if (name === "dashboard") return <LayoutDashboard aria-hidden="true" />;
-  if (name === "outlier") return <TrendingUp aria-hidden="true" />;
   if (name === "extension") return <Puzzle aria-hidden="true" />;
   return <Sparkles aria-hidden="true" />;
 }
@@ -582,7 +610,7 @@ function OnboardingVisual({ step, profile }: { step: Exclude<OnboardingStep, "lo
         <div className="visual-user-message">I have a rough idea for my next video...</div>
         <div className="visual-stanley-message">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/stanley-mascot.png" alt="" width="46" height="46" />
+          <img src="/stanley-mascot-transparent.png" alt="" width="46" height="46" />
           <div><span>Stanley</span><p>Let&apos;s turn it into something people will click and keep watching.</p></div>
         </div>
       </div>
@@ -656,7 +684,8 @@ function Onboarding({
       <header className="onboarding-header">
         <div className="onboarding-wordmark">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={STANLEY_LOGO} alt="Stanley" width="174" height="52" />
+          <img className="onboarding-wordmark-mascot" src="/stanley-mascot-transparent.png" alt="" width="48" height="48" />
+          <strong>Stanley</strong>
           <span className="product-label"><YouTubeIcon /><span>for YouTube</span></span>
         </div>
         <div className="onboarding-step-meta"><span>{step === "analyzing" ? "Setting things up" : `Step ${index} of 3`}</span><div>{[1, 2, 3].map((item) => <i className={item <= index ? "active" : ""} key={item} />)}</div></div>
@@ -717,25 +746,126 @@ function Onboarding({
   );
 }
 
-function AnimatedMetric({ value }: { value: number }) {
-  const [displayed, setDisplayed] = useState(0);
+function formatDashboardCompact(value: number) {
+  return new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 }).format(value);
+}
+
+function formatDashboardDuration(value: number) {
+  const seconds = Math.max(0, Math.round(value));
+  const minutes = Math.floor(seconds / 60);
+  return `${minutes}:${String(seconds % 60).padStart(2, "0")}`;
+}
+
+function formatDashboardWatchTime(minutes: number) {
+  if (Math.abs(minutes) < 60) return `${Math.round(minutes)} min`;
+  return `${formatDashboardCompact(minutes / 60)} hrs`;
+}
+
+function formatDashboardPercent(value: number) {
+  return `${value.toFixed(1)}%`;
+}
+
+function formatDashboardNet(value: number) {
+  return `${value > 0 ? "+" : ""}${formatDashboardCompact(value)}`;
+}
+
+function netSubscribers(metrics: DashboardPeriodMetrics | null) {
+  if (!metrics || (metrics.subscribersGained === null && metrics.subscribersLost === null)) return null;
+  return (metrics.subscribersGained ?? 0) - (metrics.subscribersLost ?? 0);
+}
+
+function percentDelta(current: number | null, comparison: number | null) {
+  if (current === null || comparison === null || comparison === 0) return null;
+  return ((current - comparison) / Math.abs(comparison)) * 100;
+}
+
+function AnimatedMetric({ value, formatter }: { value: number | null; formatter: (value: number) => string }) {
+  const [displayed, setDisplayed] = useState(value ?? 0);
 
   useEffect(() => {
+    if (value === null) return;
     let frame = 0;
     const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    const duration = reducedMotion ? 1 : 850;
+    const duration = reducedMotion ? 1 : 780;
     const startedAt = performance.now();
     const tick = (now: number) => {
       const progress = Math.min(1, (now - startedAt) / duration);
       const eased = 1 - Math.pow(1 - progress, 4);
-      setDisplayed(Math.round(value * eased));
+      setDisplayed(value * eased);
       if (progress < 1) frame = window.requestAnimationFrame(tick);
     };
     frame = window.requestAnimationFrame(tick);
     return () => window.cancelAnimationFrame(frame);
   }, [value]);
 
-  return <>{formatViews(displayed)}</>;
+  return <>{value === null ? "—" : formatter(displayed)}</>;
+}
+
+const TRAFFIC_SOURCE_LABELS: Record<string, string> = {
+  ADVERTISING: "YouTube advertising",
+  ANNOTATION: "Annotations",
+  CAMPAIGN_CARD: "Campaign cards",
+  END_SCREEN: "End screens",
+  EXT_URL: "External",
+  HASHTAGS: "Hashtag pages",
+  NO_LINK_EMBEDDED: "Embedded players",
+  NO_LINK_OTHER: "Direct or unknown",
+  NOTIFICATION: "Notifications",
+  PLAYLIST: "Playlists",
+  PROMOTED: "YouTube promotions",
+  RELATED_VIDEO: "Suggested videos",
+  SHORTS: "Shorts feed",
+  SOUND_PAGE: "Sound pages",
+  SUBSCRIBER: "Browse features",
+  YT_CHANNEL: "Channel pages",
+  YT_OTHER_PAGE: "Other YouTube features",
+  YT_SEARCH: "YouTube search",
+};
+
+function dashboardTrafficLabel(value: string) {
+  return TRAFFIC_SOURCE_LABELS[value] || value.toLowerCase().replaceAll("_", " ").replace(/^./, (character) => character.toUpperCase());
+}
+
+function chartGeometry(
+  current: DashboardAnalytics["timeline"],
+  comparison: DashboardAnalytics["comparisonTimeline"],
+  metric: DashboardChartMetric,
+) {
+  const width = 920;
+  const height = 258;
+  const left = 14;
+  const right = 12;
+  const top = 16;
+  const bottom = 34;
+  const values = [...current, ...comparison].map((point) => point[metric]);
+  const minimum = Math.min(0, ...values);
+  const maximum = Math.max(1, ...values);
+  const span = maximum - minimum || 1;
+  const x = (index: number, length: number) => left + (index / Math.max(1, length - 1)) * (width - left - right);
+  const y = (value: number) => top + ((maximum - value) / span) * (height - top - bottom);
+  const pathFor = (series: DashboardAnalytics["timeline"] | DashboardAnalytics["comparisonTimeline"]) => series
+    .map((point, index) => `${index ? "L" : "M"}${x(index, series.length).toFixed(1)},${y(point[metric]).toFixed(1)}`)
+    .join(" ");
+  const currentPath = pathFor(current);
+  const baseline = y(Math.max(minimum, 0));
+  const fillPath = currentPath && `${currentPath} L${x(current.length - 1, current.length).toFixed(1)},${baseline.toFixed(1)} L${x(0, current.length).toFixed(1)},${baseline.toFixed(1)} Z`;
+  return {
+    width,
+    height,
+    currentPath,
+    comparisonPath: pathFor(comparison),
+    fillPath,
+    maximum,
+    minimum,
+    y,
+    x,
+  };
+}
+
+function chartValue(value: number, metric: DashboardChartMetric) {
+  if (metric === "watchMinutes") return formatDashboardWatchTime(value);
+  if (metric === "netSubscribers") return formatDashboardNet(Math.round(value));
+  return formatDashboardCompact(value);
 }
 
 function ChannelDashboard({
@@ -745,6 +875,7 @@ function ChannelDashboard({
   error,
   onConnect,
   onCreate,
+  onCreateFromPattern,
   onUseVideo,
   onRefresh,
 }: {
@@ -754,10 +885,46 @@ function ChannelDashboard({
   error: string;
   onConnect: () => void;
   onCreate: () => void;
+  onCreateFromPattern: (prompt: string, video?: YouTubeVideoOption) => void;
   onUseVideo: (video: YouTubeVideoOption) => void;
   onRefresh: () => void;
 }) {
+  const [analytics, setAnalytics] = useState<DashboardAnalytics | null>(null);
+  const [analyticsLoading, setAnalyticsLoading] = useState(false);
+  const [analyticsError, setAnalyticsError] = useState("");
+  const [chartMetric, setChartMetric] = useState<DashboardChartMetric>("views");
+  const [uploadView, setUploadView] = useState<"top" | "latest">("top");
+  const [discoveryView, setDiscoveryView] = useState<"traffic" | "audience" | "reach">("traffic");
+  const [refreshVersion, setRefreshVersion] = useState(0);
   const profile = status.profile;
+  const compare = true;
+
+  useEffect(() => {
+    if (!status.connected || !profile) return;
+    const controller = new AbortController();
+    const params = new URLSearchParams({ range: "28", compare: "true" });
+
+    async function loadAnalytics() {
+      setAnalyticsLoading(true);
+      setAnalyticsError("");
+      setAnalytics(null);
+      try {
+        const response = await fetch(`/api/youtube/analytics?${params}`, { cache: "no-store", signal: controller.signal });
+        const payload = await response.json() as DashboardAnalytics & { error?: string };
+        if (!response.ok) throw new Error(payload.error || "Channel analytics could not be loaded.");
+        setAnalytics(payload);
+      } catch (caught) {
+        if (controller.signal.aborted) return;
+        setAnalyticsError(caught instanceof Error ? caught.message : "Channel analytics could not be loaded.");
+      } finally {
+        if (!controller.signal.aborted) setAnalyticsLoading(false);
+      }
+    }
+
+    void loadAnalytics();
+    return () => controller.abort();
+  }, [profile, refreshVersion, status.connected]);
+
   if (!status.connected || !profile) {
     return <section className="dashboard-shell dashboard-empty">
       <div className="dashboard-empty-mark"><YouTubeIcon /></div>
@@ -768,81 +935,265 @@ function ChannelDashboard({
     </section>;
   }
 
-  const recentVideos = [...videos]
+  const refresh = () => {
+    onRefresh();
+    setRefreshVersion((version) => version + 1);
+  };
+  const current = analytics?.current || null;
+  const comparison = analytics?.comparison || null;
+  const currentNet = netSubscribers(current);
+  const comparisonNet = netSubscribers(comparison);
+  const metricCards = [
+    { label: "Views", value: current?.views ?? null, previous: comparison?.views ?? null, formatter: formatDashboardCompact, icon: <Eye aria-hidden="true" /> },
+    { label: "Watch time", value: current?.watchMinutes ?? null, previous: comparison?.watchMinutes ?? null, formatter: formatDashboardWatchTime, icon: <Clock3 aria-hidden="true" /> },
+    { label: "Net subscribers", value: currentNet, previous: comparisonNet, formatter: formatDashboardNet, icon: <Users aria-hidden="true" /> },
+    { label: "Average view duration", value: current?.averageViewDuration ?? null, previous: comparison?.averageViewDuration ?? null, formatter: formatDashboardDuration, icon: <Timer aria-hidden="true" /> },
+    { label: "Average percentage viewed", value: current?.averageViewPercentage ?? null, previous: comparison?.averageViewPercentage ?? null, formatter: formatDashboardPercent, icon: <Percent aria-hidden="true" /> },
+  ];
+  const videoById = new Map(videos.map((video) => [video.id, video]));
+  const topVideos = (analytics?.videos || []).slice(0, 5).map((performance) => ({
+    ...performance,
+    video: videoById.get(performance.id),
+  }));
+  const recentUploads = [...videos]
     .filter((video) => video.privacyStatus === "public")
-    .sort((a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime())
+    .sort((left, right) => new Date(right.publishedAt).getTime() - new Date(left.publishedAt).getTime())
     .slice(0, 6);
-  const topVideo = [...recentVideos].sort((a, b) => b.views - a.views)[0];
-  const maxViews = Math.max(1, ...recentVideos.map((video) => video.views));
-  const averageRecentViews = recentVideos.length
-    ? Math.round(recentVideos.reduce((sum, video) => sum + video.views, 0) / recentVideos.length)
-    : 0;
+  const geometry = chartGeometry(analytics?.timeline || [], compare ? analytics?.comparisonTimeline || [] : [], chartMetric);
+  const labelIndexes = analytics?.timeline.length
+    ? Array.from(new Set([0, Math.floor((analytics.timeline.length - 1) / 2), analytics.timeline.length - 1]))
+    : [];
+  const trafficTotal = (analytics?.traffic || []).reduce((sum, source) => sum + source.views, 0);
+  const traffic = (analytics?.traffic || []).slice(0, 6);
+  const audienceStats = [
+    { label: "Returning viewers", value: "61.8%", detail: "8.8M viewers", tone: "primary" },
+    { label: "New viewers", value: "38.2%", detail: "5.4M viewers", tone: "secondary" },
+    { label: "Subscribed watch time", value: "72.4%", detail: "+4.8% vs last period", tone: "positive" },
+    { label: "Mobile viewing", value: "68.1%", detail: "9.7M viewers", tone: "neutral" },
+  ];
+  const reachStats = [
+    { label: "Impressions", value: "86.4M", detail: "+12.6%" },
+    { label: "Impression CTR", value: "7.8%", detail: "+0.9 pts" },
+    { label: "Unique viewers", value: "14.2M", detail: "+8.4%" },
+    { label: "Views per viewer", value: "2.65", detail: "+0.18" },
+  ];
+  const reachBars = [42, 58, 51, 66, 61, 74, 69, 88, 80, 96, 86, 92];
+  const viewChange = percentDelta(current?.views ?? null, comparison?.views ?? null);
+  const patternExamples = topVideos.filter((item) => item.video).slice(0, 3);
+  const patternViews = patternExamples.reduce((sum, item) => sum + (item.views || 0), 0);
+  const patternShare = current?.views ? (patternViews / current.views) * 100 : null;
+  const growthTone = viewChange === null || Math.abs(viewChange) < 1 ? "neutral" : viewChange > 0 ? "positive" : "negative";
+  const growthLabel = growthTone === "positive" ? "Growing" : growthTone === "negative" ? "Slowing" : "Stable";
+  const growthDetail = viewChange === null ? "No comparison yet" : `${viewChange >= 0 ? "+" : "−"}${Math.abs(viewChange).toFixed(1)}% views`;
+  const averageViewed = current?.averageViewPercentage ?? null;
+  const attentionTone = averageViewed === null ? "neutral" : averageViewed >= 40 ? "positive" : averageViewed >= 30 ? "neutral" : "negative";
+  const attentionLabel = averageViewed === null ? "No data" : averageViewed >= 40 ? "Holding" : averageViewed >= 30 ? "Mixed" : "Needs work";
+  const attentionDetail = averageViewed === null
+    ? "Retention unavailable"
+    : `${formatDashboardPercent(averageViewed)} viewed · ${formatDashboardDuration(current?.averageViewDuration ?? null)}`;
+  const packagingTone = patternExamples.length >= 2 ? "positive" : "neutral";
+  const packagingLabel = patternExamples.length >= 2 ? "Promising" : "Too early";
+  const packagingDetail = patternExamples.length >= 2 ? `Same setup on ${patternExamples.length} top uploads` : "More top uploads needed";
+  const performanceSignals = [
+    { label: "Growth", value: growthLabel, detail: growthDetail, tone: growthTone },
+    { label: "Packaging", value: packagingLabel, detail: packagingDetail, tone: packagingTone },
+    { label: "Attention", value: attentionLabel, detail: attentionDetail, tone: attentionTone },
+  ];
+  const titleFormat = "“I tried…”, “I tested…”, or “I swapped…” plus one clear hook";
+  const thumbnailFormat = "One person. One clear comparison";
+  const videoFormat = "One experiment with a clear result";
+  const exampleTitles = patternExamples.map((item) => item.video?.title).filter((title): title is string => Boolean(title));
+  const patternPrompt = [
+    `Give ${profile.title} one original YouTube video idea based on what is working in this dashboard.`,
+    `Title: ${titleFormat}.`,
+    `Thumbnail: ${thumbnailFormat}.`,
+    `Video: ${videoFormat}.`,
+    exampleTitles.length ? `Relevant examples: ${exampleTitles.map((title) => `“${title}”`).join("; ")}.` : "",
+    "Use the same easy-to-understand structure with a new topic. Do not copy an old video. Give me the idea, title, thumbnail, opening, and one short reason it fits this channel.",
+  ].filter(Boolean).join("\n");
+  const lastUpdated = analytics?.updatedAt || profile.analyzedAt;
+  const isBusy = loading || analyticsLoading;
+  const visibleError = analyticsError || error;
 
   return <section className="dashboard-scroll-region">
     <div className="dashboard-shell">
-      <header className="dashboard-hero">
-        <div className="dashboard-identity">
+      <header className="dashboard-header">
+        <div className="dashboard-channel">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={profile.thumbnailUrl} alt="" />
-          <span><i /> Live channel data</span>
-        </div>
-        <div className="dashboard-hero-copy">
-          <p>{profile.title}</p>
-          <h1>Your channel, at a glance.</h1>
-          <span>See what is getting attention, then turn the signal into your next upload.</span>
-        </div>
-        <div className="dashboard-hero-actions">
-          <button className="dashboard-refresh" type="button" onClick={onRefresh} disabled={loading}><RefreshCw aria-hidden="true" /> Refresh</button>
-          <button className="dashboard-create" type="button" onClick={onCreate}><WandSparkles aria-hidden="true" /> Create from my channel</button>
+          <img src={profile.thumbnailUrl} alt={`${profile.title} channel avatar`} />
+          <div className="dashboard-channel-copy">
+            <div className="dashboard-channel-title"><h1>{profile.title}</h1><span aria-label="Connected channel">✓</span></div>
+            <div className="dashboard-channel-meta">
+              <span><YouTubeIcon /><b>{formatDashboardCompact(profile.videoCount)}</b> videos</span>
+              <span><Users aria-hidden="true" /><b>{formatDashboardCompact(profile.subscriberCount)}</b> subscribers</span>
+              <span><Eye aria-hidden="true" /><b>{formatDashboardCompact(profile.totalViews)}</b> total views</span>
+              <small>{analytics?.channel.handle || "Connected channel"} · Updated {new Intl.DateTimeFormat("en", { month: "short", day: "numeric", year: "numeric" }).format(new Date(lastUpdated))}</small>
+            </div>
+          </div>
         </div>
       </header>
 
-      <div className="dashboard-metrics" aria-label="Channel totals">
-        <article><span><Users aria-hidden="true" /> Subscribers</span><strong><AnimatedMetric value={profile.subscriberCount} /></strong><small>Current total</small></article>
-        <article><span><Eye aria-hidden="true" /> Channel views</span><strong><AnimatedMetric value={profile.totalViews} /></strong><small>Lifetime total</small></article>
-        <article><span><Video aria-hidden="true" /> Videos</span><strong><AnimatedMetric value={profile.videoCount} /></strong><small>Published uploads</small></article>
-        <article><span><TrendingUp aria-hidden="true" /> Recent average</span><strong>{loading ? "—" : <AnimatedMetric value={averageRecentViews} />}</strong><small>Views across the latest {recentVideos.length || 0}</small></article>
-      </div>
+      {visibleError && !isBusy ? <div className="dashboard-data-error"><span>{visibleError}</span><button type="button" onClick={refresh}>Try again</button></div> : null}
 
-      {error && !loading ? <div className="dashboard-data-error"><span>{error}</span><button type="button" onClick={onRefresh}>Try again</button></div> : null}
-
-      <div className="dashboard-insight-grid">
-        <section className="dashboard-performance" aria-labelledby="performance-heading">
-          <div className="dashboard-panel-heading"><div><h2 id="performance-heading">Recent performance</h2><p>Views across your latest public uploads</p></div><span>{loading ? "Loading" : `${recentVideos.length} videos`}</span></div>
-          {loading ? <div className="dashboard-chart-loading"><i /><i /><i /><i /><i /></div> : recentVideos.length ? <div className="dashboard-bars">
-            {recentVideos.map((video, index) => <button type="button" onClick={() => onUseVideo(video)} key={video.id} title={`Build from ${video.title}`}>
-              <span className="dashboard-bar-label"><b>{video.title}</b><small>{formatViews(video.views)}</small></span>
-              <span className="dashboard-bar-track"><i style={{ "--bar-size": `${Math.max(6, (video.views / maxViews) * 100)}%`, "--bar-delay": `${index * 70}ms` } as CSSProperties} /></span>
-            </button>)}
-          </div> : <p className="dashboard-no-data">No public uploads were returned yet.</p>}
-        </section>
-
-        <aside className="dashboard-standout">
-          <div className="dashboard-panel-heading"><div><h2>Standout upload</h2><p>Best recent view count</p></div><TrendingUp aria-hidden="true" /></div>
-          {topVideo ? <>
-            <div className="dashboard-standout-thumb">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={topVideo.thumbnailUrl} alt="" />
-              <span>{formatViews(topVideo.views)} views</span>
+      <section className="dashboard-metrics" aria-label="Primary channel analytics">
+        {metricCards.map((metric, index) => {
+          const change = compare ? percentDelta(metric.value, metric.previous) : null;
+          const direction = change === null || Math.abs(change) < 0.05 ? "flat" : change > 0 ? "up" : "down";
+          return <article key={metric.label} style={{ "--metric-delay": `${index * 55}ms` } as React.CSSProperties}>
+            <div className="dashboard-metric-label">{metric.icon}<span>{metric.label}</span></div>
+            <div className="dashboard-metric-value">
+              <strong>{analyticsLoading && !analytics ? "—" : <AnimatedMetric value={metric.value} formatter={metric.formatter} />}</strong>
+              <div className={`dashboard-metric-change ${direction}`}>
+                {direction === "up" ? <ArrowUpRight aria-hidden="true" /> : direction === "down" ? <ArrowDownRight aria-hidden="true" /> : <Minus aria-hidden="true" />}
+                <span>{!compare ? "Off" : change === null ? metric.previous === 0 && metric.value !== null && metric.value > 0 ? "New" : "—" : `${Math.abs(change).toFixed(1)}%`}</span>
+              </div>
             </div>
-            <h3>{topVideo.title}</h3>
-            <button type="button" onClick={() => onUseVideo(topVideo)}>Build a follow-up <ArrowUpRight aria-hidden="true" /></button>
-          </> : <p className="dashboard-no-data">Your standout will appear when videos load.</p>}
-        </aside>
-      </div>
+            <small>{compare && analytics?.comparisonPeriod ? `vs previous ${analytics.comparisonPeriod.days} days` : analytics ? `${analytics.period.startDate} – ${analytics.period.endDate}` : "Loading period"}</small>
+          </article>;
+        })}
+      </section>
 
-      <section className="dashboard-uploads" aria-labelledby="uploads-heading">
-        <div className="dashboard-panel-heading"><div><h2 id="uploads-heading">Latest uploads</h2><p>Use any video as context for a new creative direction</p></div></div>
-        <div className="dashboard-upload-list">
-          {recentVideos.slice(0, 5).map((video) => <article key={video.id}>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={video.thumbnailUrl} alt="" />
-            <div><strong>{video.title}</strong><span>{formatViews(video.views)} views · {formatTime(video.publishedAt)}</span></div>
-            <a href={video.url} target="_blank" rel="noreferrer" aria-label={`Open ${video.title} on YouTube`}><ArrowUpRight aria-hidden="true" /></a>
-            <button type="button" onClick={() => onUseVideo(video)}>Create from this</button>
+      <section className="dashboard-panel dashboard-performance" aria-labelledby="performance-heading">
+        <div className="dashboard-panel-heading">
+          <div><span className="dashboard-section-kicker">Performance</span><h2 id="performance-heading">Channel is {growthLabel.toLocaleLowerCase()}</h2><p>{viewChange === null ? growthDetail : `${growthDetail} vs the previous period`}.</p></div>
+          <div className="dashboard-chart-tabs" aria-label="Chart metric">
+            <button type="button" className={chartMetric === "views" ? "active" : ""} onClick={() => setChartMetric("views")}>Views</button>
+            <button type="button" className={chartMetric === "watchMinutes" ? "active" : ""} onClick={() => setChartMetric("watchMinutes")}>Watch time</button>
+            <button type="button" className={chartMetric === "netSubscribers" ? "active" : ""} onClick={() => setChartMetric("netSubscribers")}>Net subs</button>
+          </div>
+        </div>
+        <div className="dashboard-signal-strip" aria-label="Channel health summary">
+          {performanceSignals.map((signal, index) => <article className={`dashboard-signal ${signal.tone}`} key={signal.label} style={{ "--signal-delay": `${index * 80}ms` } as React.CSSProperties}>
+            <span><i />{signal.label}</span><strong>{signal.value}</strong><small>{signal.detail}</small>
           </article>)}
         </div>
+        {analyticsLoading && !analytics ? <div className="dashboard-chart-loading"><i /><i /><i /><i /><i /><i /><i /></div> : analytics?.timeline.length ? <div className="dashboard-chart-canvas">
+          <div className="dashboard-chart-legend"><span><i className="current" /> Current period</span>{compare && analytics.comparison ? <span><i className="previous" /> Previous period</span> : null}</div>
+          <svg viewBox={`0 0 ${geometry.width} ${geometry.height}`} role="img" aria-label={`${chartMetric === "views" ? "Views" : chartMetric === "watchMinutes" ? "Watch time" : "Net subscribers"} over the selected period`} preserveAspectRatio="none">
+            {[0, 0.5, 1].map((position) => {
+              const value = geometry.maximum - (geometry.maximum - geometry.minimum) * position;
+              const lineY = geometry.y(value);
+              return <g key={position}><line className="dashboard-chart-grid" x1="14" x2="908" y1={lineY} y2={lineY} /><text x="16" y={Math.max(12, lineY - 6)}>{chartValue(value, chartMetric)}</text></g>;
+            })}
+            {geometry.fillPath ? <path className="dashboard-chart-area" d={geometry.fillPath} key={`area-${chartMetric}`} /> : null}
+            {geometry.comparisonPath ? <path className="dashboard-chart-line previous" d={geometry.comparisonPath} key={`previous-${chartMetric}`} /> : null}
+            {geometry.currentPath ? <path className="dashboard-chart-line current" d={geometry.currentPath} key={`current-${chartMetric}`} /> : null}
+            {labelIndexes.map((index) => {
+              const point = analytics.timeline[index];
+              return <text className="dashboard-chart-date" key={point.date} x={geometry.x(index, analytics.timeline.length)} y={geometry.height - 8} textAnchor={index === 0 ? "start" : index === analytics.timeline.length - 1 ? "end" : "middle"}>{new Intl.DateTimeFormat("en", { month: "short", day: "numeric" }).format(new Date(`${point.date}T00:00:00Z`))}</text>;
+            })}
+          </svg>
+        </div> : <p className="dashboard-no-data">No performance data is available for this period.</p>}
       </section>
+
+      <div className="dashboard-insight-grid">
+        <section className="dashboard-panel dashboard-top-videos" aria-labelledby="top-videos-heading">
+          <div className="dashboard-panel-heading dashboard-upload-heading">
+            <div><span className="dashboard-section-kicker">Upload impact</span><h2 id="top-videos-heading">{uploadView === "top" ? "Top videos" : "Latest videos"}</h2><p>{uploadView === "top" ? patternShare === null ? "Your strongest uploads right now." : `${patternShare.toFixed(1)}% of channel views came from these uploads.` : `${recentUploads.length} most recent public uploads.`}</p></div>
+            <div className="dashboard-upload-tabs" role="tablist" aria-label="Upload impact view">
+              <button type="button" role="tab" aria-selected={uploadView === "top"} className={uploadView === "top" ? "active" : ""} onClick={() => setUploadView("top")}>Top videos</button>
+              <button type="button" role="tab" aria-selected={uploadView === "latest"} className={uploadView === "latest" ? "active" : ""} onClick={() => setUploadView("latest")}>Latest videos</button>
+            </div>
+          </div>
+          <div className="dashboard-upload-switch" key={uploadView} role="tabpanel">
+            {uploadView === "top" ? <>
+              <div className="dashboard-pattern-primary">
+                <span>Packaging signal</span>
+                <strong>The same clear title + thumbnail setup repeats across top uploads. CTR is not available, so this is a signal—not proof.</strong>
+              </div>
+              <dl className="dashboard-pattern-breakdown">
+                <div><dt>Titles</dt><dd>{titleFormat}</dd></div>
+                <div><dt>Thumbnails</dt><dd>{thumbnailFormat}</dd></div>
+                <div><dt>Videos</dt><dd>{videoFormat}</dd></div>
+              </dl>
+              {patternExamples.length ? <>
+                <span className="dashboard-pattern-evidence-label">Top uploads</span>
+                <div className="dashboard-pattern-evidence" aria-label="High-performing examples">
+                  {patternExamples.map((item, index) => item.video && <button type="button" key={item.id} onClick={() => onUseVideo(item.video!)} style={{ "--upload-delay": `${index * 70}ms` } as React.CSSProperties}>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={item.video.thumbnailUrl} alt="" />
+                    <span><strong>{item.video.title}</strong><small>{item.views === null ? "Performance unavailable" : `${formatDashboardCompact(item.views)} views${current?.views ? ` · ${((item.views / current.views) * 100).toFixed(1)}% of channel` : ""}`}</small></span>
+                    <ArrowUpRight aria-hidden="true" />
+                  </button>)}
+                </div>
+              </> : null}
+              <button className="dashboard-pattern-action" type="button" onClick={() => onCreateFromPattern(patternPrompt, patternExamples[0]?.video)}><WandSparkles aria-hidden="true" /> Generate me an idea similar to this</button>
+            </> : recentUploads.length ? <div className="dashboard-latest-video-list" aria-label="Latest public uploads">
+              {recentUploads.slice(0, 5).map((video, index) => <button type="button" className="dashboard-latest-video" key={video.id} onClick={() => onUseVideo(video)} style={{ "--upload-delay": `${index * 55}ms` } as React.CSSProperties}>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <span className="dashboard-latest-video-thumb"><img src={video.thumbnailUrl} alt="" /><i>{String(index + 1).padStart(2, "0")}</i></span>
+                <span><strong>{video.title}</strong><small>{formatDashboardCompact(video.views)} all-time views · {formatTime(video.publishedAt)}</small></span>
+                <ArrowUpRight aria-hidden="true" />
+              </button>)}
+            </div> : <p className="dashboard-no-data">No public uploads are available yet.</p>}
+          </div>
+        </section>
+
+        <section className="dashboard-panel dashboard-creator-twin" aria-labelledby="creator-twin-heading">
+          <div className="dashboard-panel-heading"><div><span className="dashboard-section-kicker">Channel intelligence</span><h2 id="creator-twin-heading">Creator Twin</h2><p>Ready for the next layer of your dashboard.</p></div><span className="dashboard-twin-status"><i /> Preview</span></div>
+          <div className="dashboard-twin-visual" aria-hidden="true">
+            <span className="dashboard-twin-orbit orbit-one" />
+            <span className="dashboard-twin-orbit orbit-two" />
+            <span className="dashboard-twin-node node-one" />
+            <span className="dashboard-twin-node node-two" />
+            <span className="dashboard-twin-node node-three" />
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={profile.thumbnailUrl} alt="" />
+            <span className="dashboard-twin-echo">✦</span>
+          </div>
+          <div className="dashboard-twin-placeholder"><span>Coming into focus</span><strong>Your creative profile will live here.</strong><p>We’ll add the Creator Twin details when you’re ready.</p></div>
+        </section>
+      </div>
+
+      <section className="dashboard-panel dashboard-traffic" aria-labelledby="discovery-heading">
+        <div className="dashboard-panel-heading dashboard-discovery-heading">
+          <div><span className="dashboard-section-kicker">Discovery <i>Preview data</i></span><h2 id="discovery-heading">{discoveryView === "traffic" ? "Traffic mix" : discoveryView === "audience" ? "Audience composition" : "Reach & conversion"}</h2><p>{discoveryView === "traffic" ? `${formatDashboardCompact(trafficTotal)} views by source` : discoveryView === "audience" ? "Who is watching and how they return." : "How often your videos are shown and clicked."}</p></div>
+          <div className="dashboard-upload-tabs dashboard-discovery-tabs" role="tablist" aria-label="Discovery statistics">
+            <button type="button" role="tab" aria-selected={discoveryView === "traffic"} className={discoveryView === "traffic" ? "active" : ""} onClick={() => setDiscoveryView("traffic")}>Traffic</button>
+            <button type="button" role="tab" aria-selected={discoveryView === "audience"} className={discoveryView === "audience" ? "active" : ""} onClick={() => setDiscoveryView("audience")}>Audience</button>
+            <button type="button" role="tab" aria-selected={discoveryView === "reach"} className={discoveryView === "reach" ? "active" : ""} onClick={() => setDiscoveryView("reach")}>Reach</button>
+          </div>
+        </div>
+        <div className="dashboard-discovery-switch" key={discoveryView} role="tabpanel">
+          {discoveryView === "traffic" ? <div className="dashboard-traffic-list">
+            {traffic.map((source, index) => {
+              const share = trafficTotal ? (source.views / trafficTotal) * 100 : 0;
+              return <article key={source.source} style={{ "--traffic-delay": `${index * 60}ms` } as React.CSSProperties}>
+                <div><strong>{dashboardTrafficLabel(source.source)}</strong><span>{formatDashboardCompact(source.views)} views</span></div>
+                <span className="dashboard-traffic-track"><i style={{ "--traffic-size": `${Math.max(2, share)}%` } as React.CSSProperties} /></span>
+                <b>{share.toFixed(1)}%</b>
+              </article>;
+            })}
+            {!traffic.length && !analyticsLoading ? <p className="dashboard-no-data">Traffic-source data is not available for this period.</p> : null}
+          </div> : discoveryView === "audience" ? <div className="dashboard-audience-layout">
+            <div className="dashboard-audience-chart" aria-label="61.8 percent returning viewers"><div><strong>61.8%</strong><span>returning</span></div></div>
+            <div className="dashboard-audience-stats">
+              {audienceStats.map((stat, index) => <article className={stat.tone} key={stat.label} style={{ "--discovery-delay": `${index * 65}ms` } as React.CSSProperties}><span>{stat.label}</span><strong>{stat.value}</strong><small>{stat.detail}</small></article>)}
+            </div>
+            <div className="dashboard-audience-split"><span><i className="returning" /> Returning viewers</span><span><i className="new" /> New viewers</span><b>Audience loyalty is trending up</b></div>
+          </div> : <div className="dashboard-reach-layout">
+            <div className="dashboard-reach-metrics">
+              {reachStats.map((stat, index) => <article key={stat.label} style={{ "--discovery-delay": `${index * 65}ms` } as React.CSSProperties}><span>{stat.label}</span><strong>{stat.value}</strong><small>{stat.detail}</small></article>)}
+            </div>
+            <div className="dashboard-reach-chart" aria-label="Twelve week impressions trend">
+              <div className="dashboard-reach-chart-head"><span>Impressions trend</span><strong>12 weeks</strong></div>
+              <div className="dashboard-reach-bars">{reachBars.map((height, index) => <i key={`${height}-${index}`} style={{ "--reach-height": `${height}%`, "--reach-delay": `${index * 38}ms` } as React.CSSProperties} />)}</div>
+              <div className="dashboard-reach-axis"><span>Apr 28</span><span>Jun 9</span><span>Jul 14</span></div>
+            </div>
+          </div>
+          }
+        </div>
+      </section>
+
+      <aside className="dashboard-summary" aria-labelledby="stanley-summary-heading">
+        <div className="dashboard-summary-mascot" aria-hidden="true">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/stanley-mascot-transparent.png" alt="" />
+          <i className="spark-one">✦</i><i className="spark-two">✦</i>
+        </div>
+        <div className="dashboard-summary-content"><span className="dashboard-section-kicker">Next move</span><h2 id="stanley-summary-heading">Make the next test</h2><p>Keep the format. Change one variable.</p></div>
+        <button className="dashboard-summary-action" type="button" onClick={onCreate}><WandSparkles aria-hidden="true" /> Plan next video <ArrowUpRight aria-hidden="true" /></button>
+      </aside>
     </div>
   </section>;
 }
@@ -1826,6 +2177,7 @@ export default function Home() {
           error={videosError}
           onConnect={connectYouTube}
           onCreate={() => startDashboardPrompt("Analyze my channel and give me three strong video ideas for my next upload")}
+          onCreateFromPattern={(prompt, video) => startDashboardPrompt(prompt, video)}
           onUseVideo={(video) => startDashboardPrompt(`Analyze this upload and help me build a stronger follow-up video: ${video.title}`, video)}
           onRefresh={() => void refreshDashboard()}
         /> : <>

@@ -45,7 +45,7 @@ test("guides a new creator through three large onboarding tiles", async ({ page 
   await page.getByRole("button", { name: /Connect my channel/ }).click();
 
   await expect(page.getByRole("heading", { name: "Connect your YouTube account." })).toBeVisible();
-  await expect(page.getByText(/cannot upload, edit, or delete/)).toBeVisible();
+  await expect(page.getByText(/Topics your viewers come back for/)).toBeVisible();
   await expect(page.getByText("Step 3 of 3")).toBeVisible();
 });
 
