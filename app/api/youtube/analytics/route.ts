@@ -18,7 +18,7 @@ type Period = {
   days: number;
 };
 
-const SUPPORTED_RANGES = new Set([7, 28, 90, 365]);
+const SUPPORTED_RANGES = new Set([7, 28, 30, 90, 180, 365]);
 const DAY_MS = 86_400_000;
 
 function isoDate(date: Date) {
