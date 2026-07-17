@@ -84,6 +84,29 @@ test("turns a successful OAuth callback into a personalized first chat", async (
   await expect(page.locator(".channel-disconnect svg")).toHaveCount(1);
 });
 
+test("loads connected channel avatars through the local image proxy", async ({ page }) => {
+  await mockStatus(page, {
+    ...connectedStatus,
+    profile: { ...connectedStatus.profile, thumbnailUrl: "https://yt3.ggpht.com/test-channel-avatar" },
+  });
+  let avatarRequests = 0;
+  await page.route("**/api/youtube/avatar*", (route) => {
+    avatarRequests += 1;
+    return route.fulfill({
+      status: 200,
+      contentType: "image/png",
+      body: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64"),
+    });
+  });
+
+  await page.goto("/?youtube=connected");
+  await waitForApp(page);
+  await expect(page.getByText("YouTube connected", { exact: true })).toBeVisible({ timeout: 4_000 });
+  await expect(page.locator('img[src^="/api/youtube/avatar"]')).toHaveCount(2);
+  expect(avatarRequests).toBeGreaterThan(0);
+  await expect(page.locator(".youtube-avatar-fallback")).toHaveCount(0);
+});
+
 test("sends the first creator message after the personalized channel greeting", async ({ page }) => {
   await mockStatus(page, connectedStatus);
   let submitted: { topic: string; mode: string; sessionId: string; messages?: unknown[] } | undefined;

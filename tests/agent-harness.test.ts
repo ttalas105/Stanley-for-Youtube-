@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { runAgent } from "../app/api/generate-titles/agent/kernel";
-import { toGeminiFunctionParameters } from "../app/api/generate-titles/agent/provider";
+import { GeminiProviderAdapter, isRetryableTransportError, toGeminiFunctionParameters } from "../app/api/generate-titles/agent/provider";
 import { ToolRegistry, objectWithOnly } from "../app/api/generate-titles/agent/tool-registry";
 import { createYouTubeToolRegistry, focusResearchQuery } from "../app/api/generate-titles/agent/youtube-tools";
 import type {
@@ -166,6 +166,41 @@ test("answers directly without forcing a research call", async () => {
   assert.deepEqual(result.output, { reply: "Howdy. What are you making?" });
 });
 
+test("recognizes Cloudflare remote model failures as retryable transport errors", () => {
+  assert.equal(isRetryableTransportError(new TypeError("connection reset")), true);
+  assert.equal(isRetryableTransportError(Object.assign(new Error("Network connection lost."), { retryable: true })), true);
+  assert.equal(isRetryableTransportError(Object.assign(new Error("internal error"), { remote: true })), true);
+  assert.equal(isRetryableTransportError(new DOMException("deadline", "TimeoutError")), false);
+});
+
+test("can fail over after one premium-provider attempt", async () => {
+  const originalFetch = globalThis.fetch;
+  let attempts = 0;
+  globalThis.fetch = async () => {
+    attempts += 1;
+    return new Response(JSON.stringify({ error: { message: "This model is currently experiencing high demand." } }), {
+      status: 503,
+      headers: { "Content-Type": "application/json" },
+    });
+  };
+
+  try {
+    const provider = new GeminiProviderAdapter("test-key", "gemini-premium-test", 1);
+    await assert.rejects(provider.complete({
+      systemInstruction: "Return JSON.",
+      contents: [{ role: "user", parts: [{ text: "Write a script." }] }],
+      tools: [],
+      responseSchema: outputSchema,
+      maxOutputTokens: 100,
+      signal: new AbortController().signal,
+      deadlineAt: Date.now() + 5_000,
+    }), /Gemini 503/);
+    assert.equal(attempts, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("can deterministically remove tools for social and security-only turns", async () => {
   const provider = new MockProvider([(request) => {
     assert.equal(request.tools.length, 0);
@@ -295,6 +330,46 @@ test("exposes only the research layers approved for the current message", () => 
     "youtube_search_reference_videos",
     "youtube_get_video_evidence",
   ]);
+  const publicSearch = publicResearch.declarations().find((tool) => tool.name === "youtube_search_reference_videos");
+  assert.ok(publicSearch);
+  assert.ok("channelName" in publicSearch.parameters.properties);
+  assert.ok("publishedWithinHours" in publicSearch.parameters.properties);
+});
+
+test("requires a topic, channel, or recent window for public video search", async () => {
+  const registry = createYouTubeToolRegistry({ session: null, allowPublicSearch: true, allowChannelSnapshot: false, allowVideoEvidence: false });
+  const result = await registry.execute("youtube_search_reference_videos", {}, new AbortController().signal);
+  assert.equal(result.status, "error");
+  assert.equal(result.error?.code, "INVALID_ARGUMENTS");
+});
+
+test("uses the most-popular chart for a broad recent-video window", async () => {
+  const originalFetch = globalThis.fetch;
+  const requestedUrls: string[] = [];
+  globalThis.fetch = async (input) => {
+    requestedUrls.push(String(input));
+    const publishedAt = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+    return new Response(JSON.stringify({
+      pageInfo: { totalResults: 4 },
+      items: Array.from({ length: 4 }, (_, index) => ({
+        id: `video${index}`,
+        snippet: { title: `Popular video ${index}`, channelTitle: `Channel ${index}`, publishedAt, thumbnails: {} },
+        statistics: { viewCount: String(10_000 - index) },
+        contentDetails: { duration: "PT45S" },
+      })),
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  try {
+    const registry = createYouTubeToolRegistry({ apiKey: "test-key", session: null, researchTopic: "", requestedPublishedWithinHours: 24, forceMostPopularChart: true, allowPublicSearch: true, allowChannelSnapshot: false, allowVideoEvidence: false });
+    const result = await registry.execute("youtube_search_reference_videos", { query: "an invented topic the model should not use", maxResults: 4 }, new AbortController().signal);
+    assert.equal(result.status, "complete");
+    assert.equal(result.coverage.returned, 4);
+    assert.match(requestedUrls[0] || "", /\/youtube\/v3\/videos\?/);
+    assert.match(requestedUrls[0] || "", /chart=mostPopular/);
+    assert.doesNotMatch(requestedUrls[0] || "", /\/youtube\/v3\/search\?/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test("converts strict internal schemas to Gemini's supported function subset", () => {

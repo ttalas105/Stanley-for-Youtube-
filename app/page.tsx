@@ -1,7 +1,7 @@
 "use client";
 
 import { ChangeEvent, FormEvent, KeyboardEvent, useEffect, useRef, useState } from "react";
-import { ArrowDownRight, ArrowUpRight, Check, ChevronDown, ChevronRight, Clock3, ExternalLink, Eye, Facebook, FileText, Globe2, Instagram, LayoutDashboard, LogOut, MessageCircle, Minus, PanelLeftClose, PanelLeftOpen, Puzzle, RefreshCw, Sparkles, SquarePen, Timer, Users, WandSparkles, X } from "lucide-react";
+import { ArrowDownRight, ArrowUpRight, Check, ChevronDown, ChevronRight, Clock3, Copy as CopyIcon, Download, ExternalLink, Eye, Facebook, FileText, Globe2, Image as ImageIcon, Instagram, LayoutDashboard, LogOut, MessageCircle, Minus, PanelLeftClose, PanelLeftOpen, Puzzle, RefreshCw, Sparkles, SquarePen, ThumbsDown, ThumbsUp, Timer, Users, Video, WandSparkles, X } from "lucide-react";
 
 type CreationMode = "auto" | "idea" | "title" | "thumbnail";
 type WorkspaceView = "dashboard" | "create";
@@ -43,12 +43,31 @@ type GeneratedScript = {
   ending: string;
 };
 
+type GeneratedFilmingPlan = {
+  format: string;
+  setup: string;
+  shotList: string[];
+  editNotes: string;
+};
+
 type ThumbnailConcept = {
   id: string;
   concept: string;
   visual: string;
   textOverlay: string;
   whyItWorks: string;
+};
+
+type GeneratedThumbnailImage = {
+  id: string;
+  mimeType: string;
+  data?: string;
+  aspectRatio: "16:9";
+  width: number;
+  height: number;
+  sourceUsed: boolean;
+  model: string;
+  alt: string;
 };
 
 type ResearchVideo = {
@@ -76,7 +95,9 @@ type ChatMessage = {
   titles?: GeneratedTitle[];
   ideas?: GeneratedIdea[];
   script?: GeneratedScript;
+  filmingPlan?: GeneratedFilmingPlan;
   thumbnails?: ThumbnailConcept[];
+  thumbnailImage?: GeneratedThumbnailImage;
   research?: Research;
   agent?: AgentRun;
   activity?: AgentActivity[];
@@ -120,7 +141,9 @@ type ApiPayload = {
   titles?: GeneratedTitle[];
   ideas?: GeneratedIdea[];
   script?: GeneratedScript;
+  filmingPlan?: GeneratedFilmingPlan;
   thumbnails?: ThumbnailConcept[];
+  thumbnailImage?: GeneratedThumbnailImage;
   research?: Research;
   agent?: AgentRun;
   conversationTopic?: string;
@@ -285,10 +308,10 @@ const MODE_PLACEHOLDERS: Record<CreationMode, string[]> = {
     "Give me five title options based on what works in my niche",
   ],
   thumbnail: [
-    "Create three thumbnail concepts for my next video",
-    "Plan a thumbnail with one clear focal point",
-    "Improve the thumbnail idea for my most recent upload",
-    "Match this title with a stronger thumbnail concept",
+    "Generate a thumbnail for my next video",
+    "Turn this photo into a YouTube thumbnail",
+    "Make this thumbnail clearer at phone size",
+    "Create a thumbnail that complements this title",
   ],
 };
 
@@ -308,7 +331,7 @@ function getModePlaceholders(value: unknown) {
 const QUICK_STARTS: Array<{ label: string; prompt: string; mode: CreationMode; icon: string }> = [
   { label: "Video ideas", prompt: "Help me find a data-backed idea for my next YouTube video about ", mode: "idea", icon: "✦" },
   { label: "Better titles", prompt: "Research comparable videos and improve this YouTube title: ", mode: "title", icon: "T" },
-  { label: "New thumbnail", prompt: "Create a clear thumbnail concept for this YouTube video: ", mode: "thumbnail", icon: "▣" },
+  { label: "New thumbnail", prompt: "Generate a finished YouTube thumbnail for this video: ", mode: "thumbnail", icon: "▣" },
   { label: "Write a script", prompt: "Help me write a complete YouTube script about ", mode: "idea", icon: "✎" },
   { label: "Use my channel", prompt: "Based on my connected channel, find a strong direction for my next video about ", mode: "idea", icon: "▶" },
   { label: "Improve my packaging", prompt: "Help me improve the idea, title, and thumbnail direction for ", mode: "auto", icon: "◇" },
@@ -360,7 +383,7 @@ function compactSentences(value: string, maxLength = 280) {
 
 function formatAssistantAnswer(payload: ApiPayload) {
   const reply = payload.reply?.trim() || "";
-  if (payload.ideas?.length || payload.script) return reply;
+  if (payload.ideas?.length || payload.script || payload.filmingPlan || payload.thumbnailImage) return reply;
   if (payload.titles?.length) return [reply, ...payload.titles.map((item, index) => `${index + 1}. ${item.title}`)].filter(Boolean).join("\n\n");
   if (payload.thumbnails?.length) {
     const concepts = payload.thumbnails.map((item, index) => `${index + 1}. ${item.concept}\n${item.visual}${item.textOverlay && item.textOverlay !== "No text" ? `\nOn-screen text: ${item.textOverlay}` : ""}`);
@@ -370,17 +393,27 @@ function formatAssistantAnswer(payload: ApiPayload) {
 }
 
 function ConversationalAnswer({ text, streaming }: { text: string; streaming?: boolean }) {
-  const blocks = text.split(/\n\n/);
+  // Models are inconsistent about blank lines between numbered items. Normalize
+  // every numbered line into its own block so formatting never depends on
+  // whether the model used one newline or two.
+  const blocks = text
+    .replace(/\r\n/g, "\n")
+    .replace(/([^\n])\n(?=\d+\.\s)/g, "$1\n\n")
+    .split(/\n{2,}/);
   return <div className="assistant-answer">{blocks.map((block, index) => {
     const lines = block.split("\n").filter(Boolean);
     if (!lines.length) return null;
-    if (/^\d+\.\s/.test(lines[0])) return <section className="assistant-option" key={`${index}-${lines[0]}`}>
-      <strong>{lines[0]}</strong>
+    const numbered = lines[0].match(/^(\d+)\.\s+(.*)$/);
+    if (numbered) {
+      const labeled = numbered[2].match(/^([^:\n]{2,48}:)\s+(.+)$/);
+      return <section className="assistant-option" key={`${index}-${lines[0]}`}>
+      <p className="assistant-option-title"><span>{numbered[1]}.</span> {labeled ? <><strong>{labeled[1]}</strong> {labeled[2]}</> : <strong>{numbered[2]}</strong>}</p>
       {lines.slice(1).map((line, lineIndex) => {
         const label = line.match(/^(Why it works|Format|On-screen text):\s*(.*)$/);
         return <p key={`${lineIndex}-${line}`}>{label ? <><b>{label[1]}:</b> {label[2]}</> : line}</p>;
       })}
     </section>;
+    }
     const labeled = lines[0].match(/^(Cold open|Ending):\s*(.*)$/);
     return <section className="assistant-paragraph" key={`${index}-${lines[0]}`}>
       {labeled ? <p><b>{labeled[1]}:</b> {labeled[2]}</p> : lines.length > 1 ? <><h2>{lines[0]}</h2>{lines.slice(1).map((line) => <p key={line}>{line}</p>)}</> : <p>{lines[0]}</p>}
@@ -405,16 +438,18 @@ function ideaClipboardText(ideas: GeneratedIdea[]) {
 }
 
 function scriptClipboardText(script: GeneratedScript) {
-  const brief = [
-    script.viewerPromise ? `VIEWER PROMISE\n${script.viewerPromise}` : "",
-    script.voiceDirection ? `VOICE\n${script.voiceDirection}` : "",
-  ].filter(Boolean).join("\n\n");
-  return `${script.title} (${script.targetLength})${brief ? `\n\n${brief}` : ""}\n\nCOLD OPEN\n${script.coldOpen}\n\n${script.sections.map((section) => `${section.heading.toUpperCase()}\n${section.narration}${section.visualDirection ? `\n\nVisual: ${section.visualDirection}` : ""}`).join("\n\n")}\n\nENDING\n${script.ending}`;
+  return `${script.title} (${script.targetLength})\n\nCOLD OPEN\n${script.coldOpen}\n\n${script.sections.map((section) => `${section.heading.toUpperCase()}\n${section.narration}${section.visualDirection ? `\n\nVisual: ${section.visualDirection}` : ""}`).join("\n\n")}\n\nENDING\n${script.ending}`;
+}
+
+function filmingPlanClipboardText(plan: GeneratedFilmingPlan) {
+  return `HOW TO FILM\nFormat: ${plan.format}\nSetup: ${plan.setup}\n\nSHOT LIST\n${plan.shotList.map((shot, index) => `${index + 1}. ${shot}`).join("\n")}\n\nEDIT\n${plan.editNotes}`;
 }
 
 function assistantClipboardText(message: ChatMessage) {
   if (message.ideas?.length) return ideaClipboardText(message.ideas);
+  if (message.script && message.filmingPlan) return `${scriptClipboardText(message.script)}\n\n---\n\n${filmingPlanClipboardText(message.filmingPlan)}`;
   if (message.script) return scriptClipboardText(message.script);
+  if (message.filmingPlan) return filmingPlanClipboardText(message.filmingPlan);
   if (message.titles?.length) return message.titles.map((item, index) => `${index + 1}. ${item.title}`).join("\n");
   if (message.thumbnails?.length) return message.thumbnails.map((item, index) => `${index + 1}. ${item.concept}\nVisual: ${item.visual}\nText: ${item.textOverlay}`).join("\n\n");
   return message.content;
@@ -422,7 +457,9 @@ function assistantClipboardText(message: ChatMessage) {
 
 function assistantCopyLabel(message: ChatMessage) {
   if (message.ideas?.length) return "Copy all ideas and script blueprints";
+  if (message.script && message.filmingPlan) return "Copy script and filming plan";
   if (message.script) return "Copy full script";
+  if (message.filmingPlan) return "Copy filming plan";
   if (message.titles?.length) return "Copy all titles";
   if (message.thumbnails?.length) return "Copy all thumbnail concepts";
   return "Copy response";
@@ -458,31 +495,39 @@ function IdeaWorkspace({ ideas }: { ideas: GeneratedIdea[] }) {
   </section>;
 }
 
-function IdeaNextSteps({ ideas, disabled, onPrompt }: { ideas: GeneratedIdea[]; disabled: boolean; onPrompt: (prompt: string) => void }) {
-  const recommendedIdea = ideas.find((item) => item.recommended) || ideas[0];
-  return <section className="idea-next-actions compact" aria-label="Next steps for the top idea">
-      <div><strong>What do you want to do next?</strong><small>Continue with “{recommendedIdea.suggestedTitle || recommendedIdea.idea}”</small></div>
+function ThumbnailWorkspace({ thumbnail, disabled, onEdit }: { thumbnail: GeneratedThumbnailImage; disabled: boolean; onEdit: () => void }) {
+  const imageUrl = thumbnail.data ? `data:${thumbnail.mimeType};base64,${thumbnail.data}` : "";
+  function downloadThumbnail() {
+    if (!imageUrl) return;
+    const link = document.createElement("a");
+    link.href = imageUrl;
+    link.download = `stanley-youtube-thumbnail.${thumbnail.mimeType.includes("jpeg") ? "jpg" : "png"}`;
+    link.click();
+  }
+
+  return <section className="thumbnail-workspace" aria-label="Generated YouTube thumbnail">
+    {imageUrl ? <figure className="generated-thumbnail">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={imageUrl} alt={thumbnail.alt} />
+    </figure> : <div className="thumbnail-unavailable"><ImageIcon aria-hidden="true" /><p><strong>Thumbnail preview expired</strong><span>Generate it again to restore the full-size image.</span></p></div>}
+    <div className="thumbnail-toolbar">
+      <div><strong>Generated thumbnail</strong><span>{thumbnail.width} x {thumbnail.height} / 16:9 / {thumbnail.sourceUsed ? "Reference image used" : "Created from your brief"}</span></div>
       <div>
-        <button className="primary" type="button" disabled={disabled} onClick={() => onPrompt(`Write the complete YouTube script for the recommended idea: "${recommendedIdea.idea}".`)}><FileText /> Write the script</button>
-        <button type="button" disabled={disabled} onClick={() => onPrompt(`Give me five strong YouTube title options for the recommended idea: "${recommendedIdea.idea}".`)}>Make titles</button>
-        <button type="button" disabled={disabled} onClick={() => onPrompt(`Create three thumbnail concepts for the recommended idea: "${recommendedIdea.idea}".`)}>Plan thumbnail</button>
+        <button type="button" disabled={!imageUrl} onClick={downloadThumbnail}><Download aria-hidden="true" /> Download</button>
+        <button className="thumbnail-edit" type="button" disabled={disabled || !imageUrl} onClick={onEdit}><WandSparkles aria-hidden="true" /> Refine in chat</button>
       </div>
-    </section>;
+    </div>
+  </section>;
 }
 
-function ScriptWorkspace({ script }: { script: GeneratedScript }) {
-  return <section className="script-workspace assistant-answer" aria-label={`Script: ${script.title}`}>
+function ScriptWorkspace({ script, workspaceRef }: { script: GeneratedScript; workspaceRef?: React.Ref<HTMLElement> }) {
+  return <section ref={workspaceRef} className="script-workspace assistant-answer" aria-label={`Script: ${script.title}`}>
     <header className="artifact-header script-header">
       <div className="artifact-heading">
         <span className="artifact-icon" aria-hidden="true"><FileText /></span>
         <div><h2>{script.title}</h2><p>{script.targetLength} · {script.sections.length + 2} script beats</p></div>
       </div>
     </header>
-
-    {script.viewerPromise || script.voiceDirection ? <div className="script-brief" aria-label="Script strategy">
-      {script.viewerPromise ? <p><strong>Viewer promise</strong><span>{script.viewerPromise}</span></p> : null}
-      {script.voiceDirection ? <p><strong>Delivery</strong><span>{script.voiceDirection}</span></p> : null}
-    </div> : null}
 
     <div className="script-flow">
       <section className="script-block script-hook">
@@ -497,6 +542,32 @@ function ScriptWorkspace({ script }: { script: GeneratedScript }) {
       <section className="script-block script-ending">
         <header><span className="script-block-index">End</span><h3>Ending</h3></header>
         <p>{script.ending}</p>
+      </section>
+    </div>
+
+  </section>;
+}
+
+function FilmingPlanWorkspace({ plan }: { plan: GeneratedFilmingPlan }) {
+  return <section className="filming-plan-workspace assistant-answer" aria-label="How to film this video">
+    <header className="artifact-header filming-plan-header">
+      <div className="artifact-heading">
+        <span className="artifact-icon filming-icon" aria-hidden="true"><Video /></span>
+        <div><h2>How to film it</h2><p>{plan.format} · {plan.shotList.length} planned shots</p></div>
+      </div>
+    </header>
+    <div className="filming-plan-body">
+      <div className="filming-plan-overview">
+        <p><strong>Format</strong><span>{plan.format}</span></p>
+        <p><strong>Setup</strong><span>{plan.setup}</span></p>
+      </div>
+      <section>
+        <h3>Shot list</h3>
+        <ol>{plan.shotList.map((shot, index) => <li key={`${index}-${shot}`}>{shot}</li>)}</ol>
+      </section>
+      <section>
+        <h3>Edit</h3>
+        <p>{plan.editNotes}</p>
       </section>
     </div>
   </section>;
@@ -538,18 +609,17 @@ function serializeMessage(message: ChatMessage) {
     ).join("\n");
     return { role: message.role, content: attachmentLines ? `${message.content}\n${attachmentLines}` : message.content };
   }
-  const artifactLines = message.titles?.length
-    ? `Title options:\n${message.titles.map((item, index) => `${index + 1}. ${item.title}`).join("\n")}`
-    : message.ideas?.length
-      ? `Idea options:\n${message.ideas.map((item, index) => {
-        const outline = item.scriptOutline ? `\nOpening: ${item.scriptOutline.opening}\nBeats: ${item.scriptOutline.beats.join(" | ")}\nPayoff: ${item.scriptOutline.payoff}` : "";
-        return `${index + 1}. ${item.idea}${item.recommended ? " [RECOMMENDED]" : ""}\nWorking title: ${item.suggestedTitle || "Not recorded"}\nFormat: ${item.format || "Not recorded"} · Difficulty: ${item.difficulty || "Not recorded"}\nHook: ${item.hook}\nChannel fit: ${item.channelFit || "Not recorded"}\nResearch basis: ${item.researchBasis || "Not recorded"}${outline}`;
-      }).join("\n\n")}`
-      : message.thumbnails?.length
-        ? `Thumbnail concepts:\n${message.thumbnails.map((item, index) => `${index + 1}. ${item.concept}: ${item.visual}`).join("\n")}`
-        : message.script
-          ? `Full script: ${message.script.title}${message.script.viewerPromise ? `\nViewer promise: ${message.script.viewerPromise}` : ""}${message.script.voiceDirection ? `\nVoice: ${message.script.voiceDirection}` : ""}\nCold open: ${message.script.coldOpen}\n${message.script.sections.map((section) => `${section.heading}: ${section.narration}${section.visualDirection ? `\nOn screen: ${section.visualDirection}` : ""}`).join("\n")}\nEnding: ${message.script.ending}`
-          : "";
+  const artifactSections: string[] = [];
+  if (message.titles?.length) artifactSections.push(`Title options:\n${message.titles.map((item, index) => `${index + 1}. ${item.title}`).join("\n")}`);
+  if (message.ideas?.length) artifactSections.push(`Idea options:\n${message.ideas.map((item, index) => {
+    const outline = item.scriptOutline ? `\nOpening: ${item.scriptOutline.opening}\nBeats: ${item.scriptOutline.beats.join(" | ")}\nPayoff: ${item.scriptOutline.payoff}` : "";
+    return `${index + 1}. ${item.idea}${item.recommended ? " [RECOMMENDED]" : ""}\nWorking title: ${item.suggestedTitle || "Not recorded"}\nFormat: ${item.format || "Not recorded"} · Difficulty: ${item.difficulty || "Not recorded"}\nHook: ${item.hook}\nChannel fit: ${item.channelFit || "Not recorded"}\nResearch basis: ${item.researchBasis || "Not recorded"}${outline}`;
+  }).join("\n\n")}`);
+  if (message.script) artifactSections.push(`Full script: ${message.script.title}${message.script.viewerPromise ? `\nViewer promise: ${message.script.viewerPromise}` : ""}${message.script.voiceDirection ? `\nVoice: ${message.script.voiceDirection}` : ""}\nCold open: ${message.script.coldOpen}\n${message.script.sections.map((section) => `${section.heading}: ${section.narration}${section.visualDirection ? `\nOn screen: ${section.visualDirection}` : ""}`).join("\n")}\nEnding: ${message.script.ending}`);
+  if (message.filmingPlan) artifactSections.push(`Filming plan:\nFormat: ${message.filmingPlan.format}\nSetup: ${message.filmingPlan.setup}\nShot list: ${message.filmingPlan.shotList.join(" | ")}\nEdit: ${message.filmingPlan.editNotes}`);
+  if (message.thumbnailImage) artifactSections.push(`Generated thumbnail: ${message.thumbnailImage.aspectRatio}, ${message.thumbnailImage.sourceUsed ? "edited from creator-supplied visual reference" : "created from the video brief"}.`);
+  if (message.thumbnails?.length) artifactSections.push(`Thumbnail concepts:\n${message.thumbnails.map((item, index) => `${index + 1}. ${item.concept}: ${item.visual}`).join("\n")}`);
+  const artifactLines = artifactSections.join("\n\n");
   return { role: message.role, content: artifactLines ? `${message.content}\n${artifactLines}` : message.content };
 }
 
@@ -603,11 +673,27 @@ function DebugIcon() {
 }
 
 function FeedbackIcon({ down = false }: { down?: boolean }) {
-  return <svg className={down ? "feedback-icon down" : "feedback-icon"} viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10v10H4a2 2 0 0 1-2-2v-6a2 2 0 0 1 2-2h3Zm0 9h9.2a2 2 0 0 0 1.9-1.4l2.2-7A2 2 0 0 0 18.4 8H14l.7-3.1A2.3 2.3 0 0 0 10.3 3L7 10v9Z" /></svg>;
+  return down
+    ? <ThumbsDown className="feedback-icon" aria-hidden="true" />
+    : <ThumbsUp className="feedback-icon" aria-hidden="true" />;
 }
 
 function YouTubeIcon() {
   return <svg className="youtube-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21.6 7.2a3 3 0 0 0-2.1-2.1C17.7 4.6 12 4.6 12 4.6s-5.7 0-7.5.5a3 3 0 0 0-2.1 2.1A31 31 0 0 0 2 12a31 31 0 0 0 .4 4.8 3 3 0 0 0 2.1 2.1c1.8.5 7.5.5 7.5.5s5.7 0 7.5-.5a3 3 0 0 0 2.1-2.1A31 31 0 0 0 22 12a31 31 0 0 0-.4-4.8Z" /><path className="youtube-play" d="m10 15.2 5-3.2-5-3.2v6.4Z" /></svg>;
+}
+
+function YouTubeAvatar({ profile, alt = "" }: { profile: YouTubeProfile; alt?: string }) {
+  const sourceKey = `${profile.id}:${profile.thumbnailUrl}:${profile.analyzedAt}`;
+  const [failedSource, setFailedSource] = useState<string | null>(null);
+  const failed = failedSource === sourceKey;
+  const initial = profile.title.trim().charAt(0).toUpperCase() || "Y";
+  if (!profile.thumbnailUrl || failed) {
+    return <span className="youtube-avatar-fallback" role={alt ? "img" : undefined} aria-label={alt || undefined} aria-hidden={alt ? undefined : true}>{initial}</span>;
+  }
+  return <>
+    {/* eslint-disable-next-line @next/next/no-img-element */}
+    <img src={`/api/youtube/avatar?v=${encodeURIComponent(profile.analyzedAt)}`} alt={alt} onError={() => setFailedSource(sourceKey)} />
+  </>;
 }
 
 function PlusIcon() {
@@ -678,10 +764,7 @@ function OnboardingVisual({ step, profile }: { step: Exclude<OnboardingStep, "lo
   return (
     <div className="onboarding-visual-canvas visual-channel" aria-hidden="true">
       <div className="channel-preview-head">
-        <div className="channel-preview-avatar">{profile?.thumbnailUrl ? <>
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={profile.thumbnailUrl} alt="" />
-        </> : <YouTubeIcon />}</div>
+        <div className="channel-preview-avatar">{profile ? <YouTubeAvatar profile={profile} /> : <YouTubeIcon />}</div>
         <div><span>{step === "analyzing" ? "Channel connected" : "Your YouTube channel"}</span><strong>{profile?.title || "Connect to see your channel"}</strong></div>
         <i className={step === "analyzing" ? "connected" : ""}>{step === "analyzing" ? "Connected" : "Read-only"}</i>
       </div>
@@ -1264,8 +1347,7 @@ function ChannelDashboard({
     <div className="dashboard-shell">
       <header className="dashboard-header">
         <div className="dashboard-channel">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={profile.thumbnailUrl} alt={`${profile.title} channel avatar`} />
+          <YouTubeAvatar profile={profile} alt={`${profile.title} channel avatar`} />
           <div className="dashboard-channel-copy">
             <div className="dashboard-channel-title"><h1>{profile.title}</h1><span aria-label="Connected channel">✓</span></div>
             <div className="dashboard-channel-meta">
@@ -1454,6 +1536,8 @@ function ChannelDashboard({
 export default function Home() {
   const topicRef = useRef<HTMLTextAreaElement>(null);
   const conversationEndRef = useRef<HTMLDivElement>(null);
+  const latestAssistantRef = useRef<HTMLElement>(null);
+  const latestScriptRef = useRef<HTMLElement>(null);
   const replyRunRef = useRef(0);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
@@ -1684,9 +1768,30 @@ export default function Home() {
   }, [topic, messages.length]);
 
   useEffect(() => {
-    if (!messages.length) return;
-    window.requestAnimationFrame(() => conversationEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" }));
-  }, [messages.length, loading]);
+    if (!loading || !messages.length) return;
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const frame = window.requestAnimationFrame(() => conversationEndRef.current?.scrollIntoView({
+      behavior: reducedMotion ? "auto" : "smooth",
+      block: "end",
+    }));
+    return () => window.cancelAnimationFrame(frame);
+  }, [messages.length, loading, activeActivity.length]);
+
+  function scrollLatestScriptToStart() {
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    window.requestAnimationFrame(() => window.requestAnimationFrame(() => latestScriptRef.current?.scrollIntoView({
+      behavior: reducedMotion ? "auto" : "smooth",
+      block: "start",
+    })));
+  }
+
+  function scrollLatestAssistantToStart() {
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    window.requestAnimationFrame(() => window.requestAnimationFrame(() => latestAssistantRef.current?.scrollIntoView({
+      behavior: reducedMotion ? "auto" : "smooth",
+      block: "start",
+    })));
+  }
 
   function persistConversation(id: string, rootTopic: string, nextMessages: ChatMessage[]) {
     const firstTitleResponse = nextMessages.find((message) => message.role === "assistant" && message.titles?.length);
@@ -1704,7 +1809,14 @@ export default function Home() {
       research: firstTitleResponse?.research,
     };
     const next = [updated, ...current.filter((draft) => draft.id !== id)].slice(0, 8);
-    window.localStorage.setItem(DRAFTS_KEY, JSON.stringify(next));
+    const storageSafe = next.map((draft) => ({
+      ...draft,
+      messages: draft.messages?.map((message) => ({
+        ...message,
+        thumbnailImage: message.thumbnailImage ? { ...message.thumbnailImage, data: undefined } : undefined,
+      })),
+    }));
+    window.localStorage.setItem(DRAFTS_KEY, JSON.stringify(storageSafe));
     setDrafts(next);
   }
 
@@ -1735,12 +1847,23 @@ export default function Home() {
     const retainedYouTubeReference = previousAttachments.filter((attachment) => attachment.kind === "youtube").at(-1);
     const retainedUploadedVideo = previousAttachments.filter((attachment) => attachment.kind === "video").at(-1);
     const cachedUploadedVideo = retainedUploadedVideo ? uploadedVideoCache.get(retainedUploadedVideo.id) : undefined;
+    const retainedGeneratedThumbnail = messages.filter((message) => message.role === "assistant" && message.thumbnailImage?.data).at(-1)?.thumbnailImage;
     const requestAttachments: ComposerAttachment[] = [...currentAttachments];
     if (!requestAttachments.some((attachment) => attachment.kind === "youtube") && retainedYouTubeReference) {
       requestAttachments.push(retainedYouTubeReference);
     }
     if (!requestAttachments.some((attachment) => attachment.kind === "video") && cachedUploadedVideo) {
       requestAttachments.push(cachedUploadedVideo);
+    }
+    if (mode === "thumbnail" && !requestAttachments.some((attachment) => attachment.kind === "image") && retainedGeneratedThumbnail?.data) {
+      requestAttachments.push({
+        id: retainedGeneratedThumbnail.id,
+        kind: "image",
+        name: "Previous generated thumbnail",
+        mimeType: retainedGeneratedThumbnail.mimeType,
+        size: Math.floor(retainedGeneratedThumbnail.data.length * .75),
+        data: retainedGeneratedThumbnail.data,
+      });
     }
     const userMessage: ChatMessage = {
       id: crypto.randomUUID(),
@@ -1817,7 +1940,9 @@ export default function Home() {
         titles: payload.titles,
         ideas: payload.ideas,
         script: payload.script,
+        filmingPlan: payload.filmingPlan,
         thumbnails: payload.thumbnails,
+        thumbnailImage: payload.thumbnailImage,
         research: payload.research,
         agent: payload.agent,
         activity: [...activityLog],
@@ -1848,19 +1973,24 @@ export default function Home() {
       setMessages(completedMessages);
       setActiveActivity([]);
       setLoading(false);
+      if (payload.script) scrollLatestScriptToStart();
+      else scrollLatestAssistantToStart();
       if (completedTopic !== originalTopic) setOriginalTopic(completedTopic);
       if (isCreationMode(payload.mode)) setMode(payload.mode);
-      const artifactCount = payload.titles?.length || payload.ideas?.length || payload.thumbnails?.length || (payload.script ? 1 : 0);
-      setNotice(payload.blocked ? "Request kept inside creation mode" : artifactCount ? `${artifactCount} options ready` : "Stanley replied");
+      const artifactCount = (payload.titles?.length || 0)
+        + (payload.ideas?.length || 0)
+        + (payload.thumbnails?.length || 0)
+        + (payload.thumbnailImage ? 1 : 0)
+        + (payload.script ? 1 : 0)
+        + (payload.filmingPlan ? 1 : 0);
+      setNotice(payload.blocked ? "Request kept inside creation mode" : artifactCount ? `${artifactCount} ${artifactCount === 1 ? "result" : "results"} ready` : "Stanley replied");
     } catch (caught) {
       setMessages(messages);
       setTopic(cleanMessage);
       setAttachments(currentAttachments);
       setActiveActivity([]);
-      if (isFirstMessage) {
-        setOriginalTopic("");
-        setSessionId("");
-      }
+      // Keep the attempted chat ID visible after a failure so the exact server
+      // trace can be copied and retried without losing the uploaded context.
       setError(caught instanceof Error ? caught.message : "Something went wrong. Try again.");
     } finally {
       setLoading(false);
@@ -2238,6 +2368,8 @@ export default function Home() {
 
   const inConversation = messages.length > 0;
   const streamingReply = messages.some((message) => message.streaming);
+  const latestAssistantMessageId = [...messages].reverse().find((message) => message.role === "assistant")?.id;
+  const latestScriptMessageId = [...messages].reverse().find((message) => message.script)?.id;
   const composerPlaceholder = transcribing ? "Transcribing your voice message…" : "";
   const filteredYoutubeVideos = youtubeVideos.filter((video) =>
     ["public", "private", "unlisted"].includes(video.privacyStatus)
@@ -2399,10 +2531,7 @@ export default function Home() {
         </section>
 
         {youtubeStatus.connected && youtubeStatus.profile && <div className="sidebar-account">
-          {youtubeStatus.profile.thumbnailUrl ? <>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={youtubeStatus.profile.thumbnailUrl} alt="" width="30" height="30" />
-          </> : <span><YouTubeIcon /></span>}
+          <YouTubeAvatar profile={youtubeStatus.profile} />
           <div><strong>{youtubeStatus.profile.title}</strong><small>YouTube connected</small></div>
         </div>}
       </aside>
@@ -2411,10 +2540,7 @@ export default function Home() {
         <header className="main-header">
           <span className="header-balance" />
           {youtubeStatus.connected && youtubeStatus.profile ? <div className="channel-connection" title={`${youtubeStatus.profile.title} is connected`}>
-            {youtubeStatus.profile.thumbnailUrl ? <>
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={youtubeStatus.profile.thumbnailUrl} alt="" width="28" height="28" />
-            </> : <span className="channel-fallback" aria-hidden="true"><YouTubeIcon /></span>}
+            <YouTubeAvatar profile={youtubeStatus.profile} />
             <span className="channel-copy"><strong>{youtubeStatus.profile.title}</strong><small><i /> Connected channel</small></span>
             <button className="channel-disconnect" type="button" onClick={() => void disconnectYouTube()} title={`Disconnect ${youtubeStatus.profile.title}`} aria-label={`Disconnect ${youtubeStatus.profile.title}`}><LogOut aria-hidden="true" /></button>
           </div> : <button className="youtube-connect-header" type="button" onClick={connectYouTube}><YouTubeIcon /><span>Connect YouTube</span></button>}
@@ -2463,7 +2589,13 @@ export default function Home() {
                   <p>{message.content}</p>
                 </div>
               ) : (
-                <article className={message.blocked ? "assistant-message blocked" : "assistant-message"} key={message.id} aria-busy={message.streaming || undefined}>
+                <article
+                  className={message.blocked ? "assistant-message blocked" : "assistant-message"}
+                  key={message.id}
+                  ref={message.id === latestAssistantMessageId ? latestAssistantRef : undefined}
+                  data-latest-response={message.id === latestAssistantMessageId ? "true" : undefined}
+                  aria-busy={message.streaming || undefined}
+                >
                   <div className="assistant-lead">
                     <div>
                       {message.blocked && <span className="boundary-label">Creation boundary</span>}
@@ -2474,7 +2606,15 @@ export default function Home() {
 
                   {message.ideas?.length ? <IdeaWorkspace ideas={message.ideas} /> : null}
 
-                  {message.script ? <ScriptWorkspace script={message.script} /> : null}
+                  {message.script ? <ScriptWorkspace script={message.script} workspaceRef={message.id === latestScriptMessageId ? latestScriptRef : undefined} /> : null}
+
+                  {message.filmingPlan ? <FilmingPlanWorkspace plan={message.filmingPlan} /> : null}
+
+                  {message.thumbnailImage ? <ThumbnailWorkspace thumbnail={message.thumbnailImage} disabled={loading} onEdit={() => {
+                    setMode("thumbnail");
+                    setTopic("Make this thumbnail ");
+                    window.setTimeout(() => topicRef.current?.focus(), 0);
+                  }} /> : null}
 
                   {message.research && (
                     <details className="research-card">
@@ -2486,15 +2626,14 @@ export default function Home() {
                   {!message.streaming && <div className="assistant-actions">
                     <button className={feedback[message.id] === "up" ? "feedback-response selected" : "feedback-response"} type="button" aria-label="Mark response as helpful" aria-pressed={feedback[message.id] === "up"} onClick={() => rateResponse(message.id, "up")}><FeedbackIcon /></button>
                     <button className={feedback[message.id] === "down" ? "feedback-response selected" : "feedback-response"} type="button" aria-label="Mark response as not helpful" aria-pressed={feedback[message.id] === "down"} onClick={() => rateResponse(message.id, "down")}><FeedbackIcon down /></button>
-                    <button className="copy-response" type="button" onClick={() => copyText(assistantClipboardText(message), "Copied")} aria-label={assistantCopyLabel(message)}><span className="copy-icon" aria-hidden="true" /> Copy</button>
+                    <button className="copy-response" type="button" onClick={() => copyText(assistantClipboardText(message), "Copied")} aria-label={assistantCopyLabel(message)}><CopyIcon className="copy-icon" aria-hidden="true" /> Copy</button>
                   </div>}
 
-                  {message.ideas?.length ? <IdeaNextSteps ideas={message.ideas} disabled={loading} onPrompt={(prompt) => void submitMessage(prompt)} /> : null}
                 </article>
               ))}
 
               {loading && !streamingReply ? <AgentActivityTimeline activity={activeActivity} live /> : null}
-              <div ref={conversationEndRef} aria-hidden="true" />
+              <div ref={conversationEndRef} data-testid="conversation-end" aria-hidden="true" />
             </section>
           )}
         </div>

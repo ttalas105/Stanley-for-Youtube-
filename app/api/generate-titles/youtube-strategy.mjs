@@ -67,9 +67,29 @@ const intentStrategy = {
 - Pair curiosity with a concrete promise. Never create a promise the supplied idea or script cannot deliver.
 - Learn structures from comparable winners without copying their distinctive wording or assuming their audience is identical.`,
   thumbnail_work: `THUMBNAIL JOB
-- Give the intended viewer one instantly legible focal idea. Complement the title instead of repeating it.
-- Favor clear subject, emotion, action, contrast, and visual stakes over clutter or manufactured shock.
-- The visual claim must be supported by the actual video.`,
+- Render one finished 16:9 thumbnail image, not a written concept list.
+- Target the intended viewer with one instantly legible focal idea. Complement the title instead of repeating it.
+- Favor a clear subject, emotion, action, contrast, and visual stakes over clutter or manufactured shock. Use simple hierarchy and the rule of thirds when useful.
+- Keep text large and easy to read, use no more than four words, and omit it when the picture carries the idea alone.
+- The visual claim must be supported by the actual video. A click that disappoints the viewer is failed packaging, not a win.
+- Treat every so-called viral thumbnail formula as a hypothesis to test, never as a guarantee.`,
+  filming_work: `FILMING PLAN JOB
+- Turn the actual idea or script into a practical capture plan, not generic filmmaking advice.
+- Choose format, orientation, duration, location, camera, lighting, and audio that match the creator's likely resources and the video's real promise.
+- Order the shot list for efficient capture while tying every shot to a specific story beat, piece of evidence, reaction, action, or payoff.
+- Name framing and action clearly enough that the creator can film without translating vague directions such as "get some B-roll."
+- Never invent an outcome or unavailable footage. Mark the exact pickup the creator must capture when the event has not happened yet.
+- Use editing notes to protect clarity, pacing, and payoff. Do not add cuts, captions, music, or effects merely to manufacture stimulation.`,
+  youtube_guidance: `YOUTUBE CREATION GUIDANCE JOB
+- Answer the creator's actual craft or strategy question directly. Explain the practical principle, why it matters to the viewer, and one concrete example when useful.
+- Distinguish durable first-party guidance from hypotheses, channel-specific evidence, and myths. Never imply access to YouTube's private recommendation formula.
+- Do not generate a batch of ideas, titles, scripts, or thumbnails unless the creator asks for one. Do not ask a follow-up question when the question can be answered as written.`,
+  youtube_research: `PUBLIC YOUTUBE RESEARCH JOB
+- Research only the public YouTube trend, video set, creator, or channel the creator explicitly named.
+- Honor explicit time windows and distinguish current observations from durable patterns.
+- Use titles, formats, publishing dates, views, view velocity, and other returned metadata as evidence. Never claim to have watched footage or read a transcript unless an exact tool result provides it.
+- Extract transferable audience and packaging patterns without copying another creator's wording, identity, or distinctive execution.
+- Cite concrete examples through the returned source list and state the limits of the sample.`,
   social: "CONVERSATION JOB\n- Answer naturally. Do not force algorithm advice into greetings or casual conversation.",
   memory: "MEMORY JOB\n- Store only explicit creator context. Never turn a preference into an unsupported algorithm claim.",
 };

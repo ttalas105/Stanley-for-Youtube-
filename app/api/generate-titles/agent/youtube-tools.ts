@@ -24,13 +24,15 @@ type YouTubeToolOptions = {
   apiKey?: string;
   session: YouTubeSession | null;
   researchTopic?: string;
+  requestedPublishedWithinHours?: number;
+  forceMostPopularChart?: boolean;
   allowPublicSearch?: boolean;
   allowChannelSnapshot?: boolean;
   allowVideoEvidence?: boolean;
 };
 
 type SearchResponse = {
-  items?: Array<{ id?: { videoId?: string } }>;
+  items?: Array<{ id?: { videoId?: string; channelId?: string }; snippet?: { channelId?: string } }>;
   nextPageToken?: string;
   pageInfo?: { totalResults?: number };
   error?: { message?: string };
@@ -52,6 +54,8 @@ type VideoListResponse = {
     contentDetails?: { duration?: string; definition?: string; caption?: string };
     status?: { privacyStatus?: string };
   }>;
+  nextPageToken?: string;
+  pageInfo?: { totalResults?: number };
   error?: { message?: string };
 };
 
@@ -61,7 +65,7 @@ function numberValue(value: unknown) {
 }
 
 const RESEARCH_STOP_WORDS = new Set([
-  "about", "best", "channel", "content", "create", "creator", "film", "local", "long", "minute", "minutes", "review", "reviews", "script", "the", "their", "video", "videos", "youtube",
+  "about", "best", "channel", "content", "create", "creator", "day", "days", "film", "hour", "hours", "last", "local", "long", "minute", "minutes", "most", "past", "performing", "popular", "recent", "review", "reviews", "script", "the", "their", "top", "trending", "video", "videos", "viral", "week", "weeks", "youtube",
 ]);
 
 function researchWords(value: string) {
@@ -162,46 +166,134 @@ function channelSnapshotTool(options: YouTubeToolOptions): ToolDefinition {
   };
 }
 
+async function recentPopularVideos(
+  options: YouTubeToolOptions,
+  signal: AbortSignal,
+  publishedWithinHours: number,
+  maxResults: number,
+): Promise<ToolResult> {
+  const chartUrl = new URL("https://www.googleapis.com/youtube/v3/videos");
+  chartUrl.search = new URLSearchParams({ part: "snippet,statistics,contentDetails", chart: "mostPopular", maxResults: "50" }).toString();
+  const details = await youtubeRequest<VideoListResponse>(chartUrl, options, signal);
+  const capturedAt = new Date().toISOString();
+  const now = Date.now();
+  const cutoff = now - publishedWithinHours * 3_600_000;
+  const videos = (details.items || []).flatMap((item): ResearchVideo[] => {
+    const id = item.id || "";
+    const title = item.snippet?.title?.trim() || "";
+    const channel = item.snippet?.channelTitle?.trim() || "Unknown channel";
+    const publishedAt = item.snippet?.publishedAt || "";
+    const publishedTimestamp = Date.parse(publishedAt);
+    if (!id || !title || !publishedAt || !Number.isFinite(publishedTimestamp) || publishedTimestamp < cutoff) return [];
+    const views = numberValue(item.statistics?.viewCount);
+    const ageDays = Math.max(1 / 24, (now - publishedTimestamp) / 86_400_000);
+    const durationSeconds = parseDurationSeconds(item.contentDetails?.duration || "");
+    const thumbnails = item.snippet?.thumbnails;
+    return [{
+      id,
+      title,
+      channel,
+      views,
+      viewsPerDay: Math.round(views / ageDays),
+      publishedAt,
+      durationSeconds,
+      thumbnailUrl: thumbnails?.maxres?.url || thumbnails?.high?.url || thumbnails?.medium?.url || thumbnails?.default?.url || `https://i.ytimg.com/vi/${id}/hqdefault.jpg`,
+      url: `https://www.youtube.com/watch?v=${id}`,
+    }];
+  }).sort((left, right) => right.views - left.views).slice(0, maxResults);
+  const label = `YouTube's most-popular chart from the last ${publishedWithinHours} hours`;
+  return {
+    ok: true,
+    tool: "youtube_search_reference_videos",
+    status: videos.length >= Math.min(4, maxResults) ? "complete" : videos.length ? "partial" : "empty",
+    summary: videos.length ? `Found ${videos.length} videos on ${label}.` : `No videos on the current most-popular chart were published in the last ${publishedWithinHours} hours.`,
+    data: { query: label, videos } satisfies SearchData,
+    handle: `youtube-popular:${publishedWithinHours}:${capturedAt.slice(0, 13)}`,
+    coverage: { returned: videos.length, totalKnown: details.pageInfo?.totalResults, complete: true },
+    sources: videos.map((video) => youtubeSource(video, capturedAt)),
+    warnings: [
+      "Public view counts are current observations, not historical CTR, retention, or causal algorithm signals.",
+      "YouTube's current most-popular chart is a bounded chart, not a complete global ranking of every upload.",
+    ],
+  };
+}
+
 function searchReferenceVideosTool(options: YouTubeToolOptions): ToolDefinition {
   return {
     name: "youtube_search_reference_videos",
-    description: "Search current public YouTube videos for explicit comparable evidence. Use when fresh examples materially improve an idea, packaging decision, or comparison. Search one clear premise at a time; if results are empty, broaden the query once. Results show association, not causation.",
+    description: "Search current public YouTube videos for explicit comparable evidence, a named public channel, or a requested recent trend window. Use channelName for one named creator and publishedWithinHours for requests such as the last 24 hours. Results show association, not causation.",
     effect: "read",
     parameters: {
       type: "object",
       additionalProperties: false,
       properties: {
-        query: { type: "string", minLength: 2, maxLength: 100, description: "A plain 2-10 word YouTube search query preserving the central subject." },
+        query: { type: "string", minLength: 2, maxLength: 100, description: "An optional plain 2-10 word topic query. Omit it only for an explicitly broad trending search or a channel-wide search." },
+        channelName: { type: "string", minLength: 2, maxLength: 100, description: "Exact public creator or channel display name when the creator asks to analyze a named channel." },
+        publishedWithinHours: { type: "integer", minimum: 1, maximum: 720, description: "Only return videos published within this many hours. Use 24 for 'the last 24 hours'." },
         maxResults: { type: "integer", minimum: 4, maximum: 25, description: "Maximum comparable videos to return. Defaults to 12." },
         duration: { type: "string", enum: ["long_form", "any"], description: "long_form keeps videos at least 90 seconds. Defaults to long_form." },
         order: { type: "string", enum: ["view_count", "relevance", "date"], description: "YouTube search order. Defaults to view_count for evidence discovery." },
         pageToken: { type: "string", maxLength: 100, description: "Opaque next-page cursor returned by a previous call." },
       },
-      required: ["query"],
+      required: [],
     },
     validate(value) {
-      const object = objectWithOnly(value, ["query", "maxResults", "duration", "order", "pageToken"], "youtube_search_reference_videos");
-      if (typeof object.query !== "string" || object.query.trim().length < 2 || object.query.trim().length > 100) throw new Error("query must be 2 to 100 characters.");
+      const object = objectWithOnly(value, ["query", "channelName", "publishedWithinHours", "maxResults", "duration", "order", "pageToken"], "youtube_search_reference_videos");
+      if (object.query !== undefined && (typeof object.query !== "string" || object.query.trim().length < 2 || object.query.trim().length > 100)) throw new Error("query must be 2 to 100 characters when supplied.");
+      if (object.channelName !== undefined && (typeof object.channelName !== "string" || object.channelName.trim().length < 2 || object.channelName.trim().length > 100)) throw new Error("channelName must be 2 to 100 characters when supplied.");
+      if (object.publishedWithinHours !== undefined && (!Number.isInteger(object.publishedWithinHours) || Number(object.publishedWithinHours) < 1 || Number(object.publishedWithinHours) > 720)) throw new Error("publishedWithinHours must be an integer from 1 to 720.");
+      if (object.query === undefined && object.channelName === undefined && object.publishedWithinHours === undefined) throw new Error("supply query, channelName, or publishedWithinHours.");
       if (object.maxResults !== undefined && (!Number.isInteger(object.maxResults) || Number(object.maxResults) < 4 || Number(object.maxResults) > 25)) throw new Error("maxResults must be an integer from 4 to 25.");
       if (object.duration !== undefined && object.duration !== "long_form" && object.duration !== "any") throw new Error("duration must be long_form or any.");
       if (object.order !== undefined && !["view_count", "relevance", "date"].includes(String(object.order))) throw new Error("order must be view_count, relevance, or date.");
       if (object.pageToken !== undefined && (typeof object.pageToken !== "string" || object.pageToken.length > 100)) throw new Error("pageToken is invalid.");
-      return { ...object, query: object.query.trim() };
+      return {
+        ...object,
+        ...(typeof object.query === "string" ? { query: object.query.trim() } : {}),
+        ...(typeof object.channelName === "string" ? { channelName: object.channelName.trim() } : {}),
+      };
     },
     async execute(args, context) {
-      const query = focusResearchQuery(String(args.query), options.researchTopic);
+      const channelName = typeof args.channelName === "string" ? args.channelName.trim() : "";
+      const requestedQuery = typeof args.query === "string" ? args.query : "";
+      const query = focusResearchQuery(requestedQuery, options.researchTopic);
       const maxResults = Number(args.maxResults || 12);
-      const duration = args.duration === "any" ? "any" : "long_form";
+      const duration = args.duration === "any" || args.publishedWithinHours ? "any" : "long_form";
       const order = String(args.order || "view_count").replace("view_count", "viewCount");
+      let channelId = "";
+      if (channelName) {
+        const channelUrl = new URL("https://www.googleapis.com/youtube/v3/search");
+        channelUrl.search = new URLSearchParams({ part: "snippet", type: "channel", maxResults: "1", q: channelName }).toString();
+        const channelSearch = await youtubeRequest<SearchResponse>(channelUrl, options, context.signal);
+        channelId = channelSearch.items?.[0]?.id?.channelId || channelSearch.items?.[0]?.snippet?.channelId || "";
+        if (!channelId) {
+          return {
+            ok: true,
+            tool: "youtube_search_reference_videos",
+            status: "empty",
+            summary: `No public YouTube channel matched “${channelName}”.`,
+            data: { query: channelName, videos: [] },
+            coverage: { returned: 0, complete: true },
+            sources: [],
+            warnings: ["Ask for the channel URL or exact display name instead of silently substituting another creator."],
+          };
+        }
+      }
+      const publishedWithinHours = Number(args.publishedWithinHours || options.requestedPublishedWithinHours || 0);
+      if (publishedWithinHours && !channelId && (options.forceMostPopularChart || researchWords(query).size === 0)) {
+        return recentPopularVideos(options, context.signal, publishedWithinHours, maxResults);
+      }
       const searchUrl = new URL("https://www.googleapis.com/youtube/v3/search");
       searchUrl.search = new URLSearchParams({
         part: "snippet",
         type: "video",
         maxResults: String(Math.min(50, Math.max(maxResults * 2, 12))),
         order,
-        q: query,
         relevanceLanguage: "en",
         safeSearch: "moderate",
+        ...(query ? { q: query } : {}),
+        ...(channelId ? { channelId } : {}),
+        ...(publishedWithinHours ? { publishedAfter: new Date(Date.now() - publishedWithinHours * 3_600_000).toISOString() } : {}),
         ...(args.pageToken ? { pageToken: String(args.pageToken) } : {}),
       }).toString();
       const search = await youtubeRequest<SearchResponse>(searchUrl, options, context.signal);
@@ -211,8 +303,8 @@ function searchReferenceVideosTool(options: YouTubeToolOptions): ToolDefinition 
           ok: true,
           tool: "youtube_search_reference_videos",
           status: "empty",
-          summary: `No comparable videos were returned for “${query}”.`,
-          data: { query, videos: [] },
+          summary: `No public videos were returned for “${channelName || query || `the last ${publishedWithinHours} hours`}”.`,
+          data: { query: channelName || query || `last ${publishedWithinHours} hours`, videos: [] },
           coverage: { returned: 0, totalKnown: search.pageInfo?.totalResults, complete: !search.nextPageToken, ...(search.nextPageToken ? { nextCursor: search.nextPageToken } : {}) },
           sources: [],
           warnings: ["Broaden the search once while preserving the creator's central subject, then continue without claiming evidence if it remains empty."],
@@ -247,14 +339,15 @@ function searchReferenceVideosTool(options: YouTubeToolOptions): ToolDefinition 
         }];
       }).sort((left, right) => right.viewsPerDay - left.viewsPerDay || right.views - left.views).slice(0, maxResults);
       const sources = videos.map((video) => youtubeSource(video, capturedAt));
+      const searchLabel = channelName || query || `the last ${publishedWithinHours} hours`;
       const status = videos.length >= Math.min(4, maxResults) ? "complete" : videos.length ? "partial" : "empty";
       return {
         ok: true,
         tool: "youtube_search_reference_videos",
         status,
-        summary: videos.length ? `Found ${videos.length} current comparable videos for “${query}”.` : `The search returned videos, but none matched the explicit duration filter for “${query}”.`,
-        data: { query, videos } satisfies SearchData,
-        handle: `youtube-search:${encodeURIComponent(query.toLowerCase()).slice(0, 80)}:${capturedAt.slice(0, 10)}`,
+        summary: videos.length ? `Found ${videos.length} public videos for “${searchLabel}”.` : `The search returned videos, but none matched the explicit duration filter for “${searchLabel}”.`,
+        data: { query: searchLabel, videos } satisfies SearchData,
+        handle: `youtube-search:${encodeURIComponent(searchLabel.toLowerCase()).slice(0, 80)}:${capturedAt.slice(0, 10)}`,
         coverage: { returned: videos.length, totalKnown: search.pageInfo?.totalResults, complete: !search.nextPageToken, ...(search.nextPageToken ? { nextCursor: search.nextPageToken } : {}) },
         sources,
         warnings: ["Public view counts and views per day are current observations, not historical CTR, retention, or causal algorithm signals."],

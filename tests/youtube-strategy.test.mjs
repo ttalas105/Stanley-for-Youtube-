@@ -21,13 +21,17 @@ test("rejects common algorithm myths and fake performance guarantees", () => {
   const strategy = algorithmStrategyForIntent("script_work");
   assert.match(strategy, /no universal ideal video length, CTR, retention percentage, upload frequency, or publish time/i);
   assert.match(strategy, /Do not promise views, virality, ranking, or algorithmic preference/i);
-  assert.match(strategy, /remove throat-clearing, repetition, and filler/i);
+  assert.match(strategy, /remove throat-clearing, repetition, abstract motivation, and filler/i);
 });
 
-test("uses job-specific strategy for scripts and packaging", () => {
-  assert.match(algorithmStrategyForIntent("script_work"), /first moments validate the title and thumbnail promise/i);
+test("uses job-specific strategy for scripts, guidance, and packaging", () => {
+  assert.match(algorithmStrategyForIntent("script_work"), /first 30 seconds/i);
   assert.match(algorithmStrategyForIntent("title_work"), /Optimize honest appeal/i);
   assert.match(algorithmStrategyForIntent("thumbnail_work"), /one instantly legible focal idea/i);
+  assert.match(algorithmStrategyForIntent("filming_work"), /practical capture plan/i);
+  assert.match(algorithmStrategyForIntent("youtube_guidance"), /Answer the creator's actual craft or strategy question directly/i);
+  assert.match(algorithmStrategyForIntent("youtube_research"), /PUBLIC YOUTUBE RESEARCH JOB/);
+  assert.match(algorithmStrategyForIntent("youtube_research"), /Never claim to have watched footage/);
 });
 
 test("records only first-party YouTube and Google research sources", () => {
@@ -37,7 +41,8 @@ test("records only first-party YouTube and Google research sources", () => {
 
 test("wires the official strategy into the production creative system", async () => {
   const route = await readFile(new URL("../app/api/generate-titles/route.ts", import.meta.url), "utf8");
-  assert.match(route, /algorithmStrategyForIntent\(scope\.intent\)/);
+  assert.match(route, /algorithmStrategyForIntent\(workflowIntent\)/);
+  assert.match(route, /requestedDeliverables\.has\("script"\)/);
   assert.match(route, /appeal, engagement, and satisfaction framework/i);
-  assert.match(route, /Every later section must add proof, progress, contrast, complication, or payoff/i);
+  assert.match(route, /Each later beat must change what the viewer knows, feels, expects, or sees/i);
 });

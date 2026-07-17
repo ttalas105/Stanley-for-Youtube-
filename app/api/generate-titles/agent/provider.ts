@@ -9,6 +9,7 @@ import type {
 } from "./types";
 
 const RETRYABLE_STATUS = new Set([408, 409, 429, 500, 502, 503, 504]);
+const MAX_PROVIDER_ATTEMPTS = 3;
 const GEMINI_FUNCTION_SCHEMA_FIELDS = new Set([
   "type",
   "format",
@@ -51,6 +52,19 @@ function delay(ms: number, signal: AbortSignal) {
       reject(signal.reason || new DOMException("Aborted", "AbortError"));
     }, { once: true });
   });
+}
+
+function shouldRetryStatus(status: number, message: string) {
+  if (!RETRYABLE_STATUS.has(status)) return false;
+  if (status === 429 && /(?:free[_ -]?tier|billing|payment|required|limit:\s*0|limit\s*is\s*0)/i.test(message)) return false;
+  return true;
+}
+
+export function isRetryableTransportError(error: unknown) {
+  if (error instanceof TypeError) return true;
+  if (!error || typeof error !== "object") return false;
+  const transportError = error as { remote?: unknown; retryable?: unknown };
+  return transportError.retryable === true || transportError.remote === true;
 }
 
 function signalUntil(parent: AbortSignal, deadlineAt: number) {
@@ -131,14 +145,16 @@ export function parseStructuredText(text: string) {
 export class GeminiProviderAdapter implements ProviderAdapter {
   readonly provider = "google";
   readonly model: string;
+  private readonly maxAttempts: number;
 
-  constructor(private readonly apiKey: string, model = "gemini-3.1-flash-lite") {
+  constructor(private readonly apiKey: string, model = "gemini-3.1-flash-lite", maxAttempts = MAX_PROVIDER_ATTEMPTS) {
     this.model = model;
+    this.maxAttempts = Math.min(MAX_PROVIDER_ATTEMPTS, Math.max(1, Math.floor(maxAttempts)));
   }
 
   async complete(request: ModelRequest): Promise<ModelResponse> {
     let lastError: Error | null = null;
-    for (let attempt = 0; attempt < 2; attempt += 1) {
+    for (let attempt = 0; attempt < this.maxAttempts; attempt += 1) {
       if (request.signal.aborted) throw request.signal.reason || new DOMException("Aborted", "AbortError");
       if (Date.now() >= request.deadlineAt) throw new DOMException("The model deadline was reached.", "TimeoutError");
 
@@ -183,10 +199,12 @@ export class GeminiProviderAdapter implements ProviderAdapter {
         );
         const payload = await response.json() as GeminiResponsePayload;
         if (!response.ok) {
-          const error = new Error(`Gemini ${response.status}: ${payload.error?.message || "request failed"}`);
-          if (attempt === 0 && RETRYABLE_STATUS.has(response.status) && Date.now() + 250 < request.deadlineAt) {
+          const message = payload.error?.message || "request failed";
+          const error = new Error(`Gemini ${response.status}: ${message}`);
+          const retryDelay = 400 * (2 ** attempt);
+          if (attempt < this.maxAttempts - 1 && shouldRetryStatus(response.status, message) && Date.now() + retryDelay < request.deadlineAt) {
             lastError = error;
-            await delay(200, request.signal);
+            await delay(retryDelay, request.signal);
             continue;
           }
           throw error;
@@ -202,9 +220,10 @@ export class GeminiProviderAdapter implements ProviderAdapter {
         };
       } catch (error) {
         lastError = error instanceof Error ? error : new Error("Gemini request failed");
-        const retryableTransport = error instanceof TypeError;
-        if (request.signal.aborted || attempt > 0 || !retryableTransport || Date.now() + 250 >= request.deadlineAt) throw lastError;
-        await delay(200, request.signal);
+        const retryableTransport = isRetryableTransportError(error);
+        const retryDelay = 400 * (2 ** attempt);
+        if (request.signal.aborted || attempt >= this.maxAttempts - 1 || !retryableTransport || Date.now() + retryDelay >= request.deadlineAt) throw lastError;
+        await delay(retryDelay, request.signal);
       } finally {
         cleanup();
       }

@@ -1,4 +1,7 @@
 const titleMarker = /\b(?:youtube\s+)?(?:video\s+)?(?:titles?|ideas?|scripts?|thumbnails?)\b/i;
+const creativeAssetMarker = /\b(?:youtube\s+)?(?:video\s+)?(?:titles?|ideas?|scripts?|thumbnails?)\b/gi;
+const productionGuidanceMarker = /\b(?:how\s+(?:do\s+i|should\s+i|to)\s+)?(?:film|shoot|record|edit)\b|\b(?:shot\s*list|b-?roll|camera\s+setup|filming\s+plan|production\s+plan)\b/i;
+const directProductionRequest = /\b(?:how\s+(?:do\s+i|should\s+i|to)\s+(?:film|shoot|record|edit)|tell\s+me\s+how\s+to\s+(?:film|shoot|record|edit)|filming\s+plan|production\s+plan|shot\s*list|camera\s+setup)\b/i;
 
 const promptAttackPatterns = [
   /ignore\s+(?:all|any|the|your|previous|prior|above)\s+(?:instructions|rules|prompt|constraints)/i,
@@ -28,8 +31,19 @@ const sensitiveMemory = /\b(?:password|passcode|secret|token|api[_ -]?key|creden
 const attachedMediaReference = /\b(?:this|that|my|the|attached|uploaded|selected)\s+(?:youtube\s+)?(?:video|clip|upload|footage|thumbnail|image)\b/i;
 const attachedMediaAnalysis = /\b(?:what\s+can\s+you\s+tell\s+me\s+about|what\s+do\s+you\s+think\s+(?:about|of)|analy[sz]e|review|critique|assess|break\s+down|summarize|describe|give\s+me\s+feedback\s+on|tell\s+me\s+about)\b/i;
 const mixedMediaTask = /\b(?:but\s+first|before\s+that|and\s+then|then|also)\s+(?:write|create|make|code|explain|tell|show|give|translate|search|browse|calculate)\b/i;
+const youtubeGuidanceSubject = /\b(?:youtube\s+)?(?:video\s+)?(?:titles?|thumbnails?|scripts?|hooks?|openings?|ideas?|packaging|retention|audience\s+satisfaction)\b/i;
+const youtubeGuidanceQuestion = /\b(?:what\s+(?:goes\s+into|makes|matters|should)|how\s+(?:do\s+i|does|should|can\s+i)|why\s+(?:do|does|is|are)|explain|teach\s+me|tips\s+for|principles\s+(?:of|for)|best\s+practices\s+(?:for|of))\b/i;
+const mixedGuidanceRequest = /\b(?:but\s+first|before\s+that|and\s+then|then\s+also|also\s+(?:write|create|make|code|translate|search|browse|calculate))\b/i;
+const directCreativeVerb = /\b(?:generate|create|make|write|draft|give(?:\s+me)?|come\s+up\s+with|build|design|render|plan)\b/i;
+const publicYouTubeResearchAction = /\b(?:find|show|list|research|search|look\s+(?:up|at|into)|access|analy[sz]e|review|audit|break\s+down|compare)\b/i;
+const publicYouTubeResearchTarget = /\b(?:(?:youtube\s+)?(?:channel|creator)s?|you\s*tubers?|(?:youtube\s+)?videos?\s+(?:in|from|on)\s+(?:the\s+)?(?:last|past)\b|(?:most\s+popular|most[-\s]?viewed|top[-\s]?performing|trending|viral)\s+(?:youtube\s+)?videos?|videos?\s+(?:that\s+are\s+)?(?:trending|going\s+viral))\b/i;
 
 export function hasTitlePretext(value) {
+  const supportedAssets = typeof value === "string" ? value.match(creativeAssetMarker) || [] : [];
+  // Multiple YouTube deliverables, or one deliverable plus practical filming
+  // direction, are a normal package request. Let the semantic classifier judge
+  // any unrelated remainder instead of treating sequencing words as an attack.
+  if (supportedAssets.length >= 2 || (supportedAssets.length === 1 && productionGuidanceMarker.test(value))) return false;
   return titleMarker.test(value) && titlePretextPatterns.some((pattern) => pattern.test(value));
 }
 
@@ -51,8 +65,32 @@ export function looksLikeAttachedMediaAnalysis(value, hasAttachedMedia = false) 
   return attachedMediaReference.test(message) && attachedMediaAnalysis.test(message);
 }
 
-const creativeIntents = new Set(["idea_work", "script_work", "title_work", "thumbnail_work"]);
-const directCreationRequest = /\b(?:give|generate|create|make|list|brainstorm|suggest|write|draft|rewrite|improve|rank|come\s+up\s+with|show\s+me|find)\b/i;
+export function looksLikeYouTubeCreationGuidance(value) {
+  const message = typeof value === "string" ? value.trim() : "";
+  if (!message || looksLikePromptAttack(message) || looksLikeCreatorMemoryRequest(message) || mixedGuidanceRequest.test(message)) return false;
+  return youtubeGuidanceSubject.test(message) && youtubeGuidanceQuestion.test(message);
+}
+
+export function looksLikePublicYouTubeResearchRequest(value) {
+  const message = typeof value === "string" ? value.trim() : "";
+  if (!message || looksLikePromptAttack(message) || looksLikeCreatorMemoryRequest(message)) return false;
+  return publicYouTubeResearchAction.test(message) && publicYouTubeResearchTarget.test(message);
+}
+
+export function requestedCreativeDeliverables(value) {
+  const message = typeof value === "string" ? value.trim() : "";
+  if (!message || (!directCreativeVerb.test(message) && !directProductionRequest.test(message))) return [];
+  const requested = [];
+  if (/\b(?:video\s+)?ideas?\b/i.test(message)) requested.push("idea");
+  if (/\b(?:video\s+)?scripts?\b/i.test(message)) requested.push("script");
+  if (/\b(?:video\s+)?titles?\b/i.test(message)) requested.push("title");
+  if (/\b(?:video\s+)?thumbnails?\b/i.test(message)) requested.push("thumbnail");
+  if (directProductionRequest.test(message)) requested.push("filming_plan");
+  return requested;
+}
+
+const creativeIntents = new Set(["idea_work", "script_work", "title_work", "thumbnail_work", "filming_work"]);
+const directCreationRequest = /\b(?:give|generate|create|make|list|brainstorm|suggest|write|draft|rewrite|improve|rank|plan|film|shoot|record|come\s+up\s+with|show\s+me|find)\b/i;
 
 export function shouldGenerateImmediately(value, intent, resolvedBrief = "", hasConnectedChannel = false) {
   const message = typeof value === "string" ? value.trim() : "";

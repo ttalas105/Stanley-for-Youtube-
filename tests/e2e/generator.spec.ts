@@ -190,6 +190,22 @@ test("collects feedback under Stanley replies", async ({ page }) => {
   await openApp(page);
   await generate(page);
   const helpful = page.getByRole("button", { name: "Mark response as helpful" });
+  const actionButtons = page.locator(".assistant-actions > button");
+  const actionIcons = page.locator(".assistant-actions svg");
+
+  await expect(actionButtons).toHaveCount(3);
+  await expect(actionIcons).toHaveCount(3);
+  const metrics = await actionButtons.evaluateAll((buttons) => buttons.map((button) => {
+    const box = button.getBoundingClientRect();
+    return { height: box.height, centerY: box.top + box.height / 2 };
+  }));
+  expect(metrics.every(({ height }) => height === 32)).toBe(true);
+  expect(Math.max(...metrics.map(({ centerY }) => centerY)) - Math.min(...metrics.map(({ centerY }) => centerY))).toBeLessThan(0.5);
+  expect(await actionIcons.evaluateAll((icons) => icons.every((icon) => {
+    const box = icon.getBoundingClientRect();
+    return box.width === 16 && box.height === 16;
+  }))).toBe(true);
+
   await helpful.click();
   await expect(helpful).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByRole("status")).toHaveText("Marked as helpful");
@@ -219,8 +235,7 @@ test("generates video ideas from the Ideas mode", async ({ page }) => {
   await expect(page.locator(".assistant-option")).toHaveCount(3);
   await expect(page.locator(".assistant-option").first()).toContainText("Top pick");
   await expect(page.locator(".assistant-option").first()).toContainText(buildIdeas()[0].suggestedTitle);
-  await expect(page.getByRole("button", { name: "Make titles" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Plan thumbnail" })).toBeVisible();
+  await expect(page.getByText("What do you want to do next?", { exact: true })).toHaveCount(0);
   await page.locator(".response-details summary").click();
   await expect(page.locator(".response-details")).toContainText(buildIdeas()[0].scriptOutline.opening);
   await expect(page.getByRole("button", { name: "Copy all ideas and script blueprints" })).toBeVisible();
@@ -238,11 +253,124 @@ test("expands a researched idea into a complete YouTube script", async ({ page }
   await page.getByRole("button", { name: "Video ideas" }).click();
   await page.getByLabel("Message Stanley").fill("Productivity experiments for remote workers");
   await page.getByRole("button", { name: "Send message" }).click();
-  await page.getByRole("button", { name: "Write the script" }).click();
+  await page.getByLabel("Message Stanley").fill("Write the complete script for the recommended idea.");
+  await page.getByRole("button", { name: "Send message" }).click();
 
   await expect(page.locator(".assistant-answer").last()).toContainText(buildScript().coldOpen);
   await expect(page.locator(".assistant-answer").last()).toContainText(buildScript().ending);
   await expect(page.getByRole("button", { name: "Copy full script" })).toBeVisible();
+});
+
+test("renders every numbered conversational point with consistent emphasis", async ({ page }) => {
+  const reply = `YouTube matches content based on viewer signals, so focus on these three areas.
+
+1. Clarity: Can someone tell exactly what they get in 3 seconds?
+2. Relevance: Stop trying to reach everyone and make the video for one specific viewer.
+
+3. Satisfaction: Does the opening deliver on the title?`;
+  await mockGeneration(page, { payload: { reply, titles: [], mode: "idea", blocked: false, model: "test" } });
+  await openApp(page);
+  await page.getByLabel("Message Stanley").fill("What is his message?");
+  await page.getByRole("button", { name: "Send message" }).click();
+
+  const answer = page.locator(".assistant-answer").last();
+  await expect(answer.locator(".assistant-option")).toHaveCount(3);
+  await expect(answer.locator(".assistant-option-title strong")).toHaveText([
+    "Clarity:",
+    "Relevance:",
+    "Satisfaction:",
+  ]);
+  const fontWeights = await answer.locator(".assistant-option-title").evaluateAll((items) => items.map((item) => getComputedStyle(item).fontWeight));
+  const fontSizes = await answer.locator(".assistant-option-title").evaluateAll((items) => items.map((item) => getComputedStyle(item).fontSize));
+  expect(new Set(fontWeights).size).toBe(1);
+  expect(new Set(fontSizes)).toEqual(new Set(["16px"]));
+});
+
+test("keeps a submitted follow-up and its live work in view", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 650 });
+  let requestCount = 0;
+  await mockGeneration(page, {
+    handler: async (route) => {
+      requestCount += 1;
+      if (requestCount === 2) await new Promise((resolve) => setTimeout(resolve, 800));
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(buildPayload()) });
+    },
+  });
+  await openApp(page);
+  await generate(page);
+
+  await page.getByLabel("Message Stanley").fill("Make the third title less dramatic.");
+  await page.getByLabel("Message Stanley").press("Enter");
+  await expect(page.locator(".user-message")).toHaveCount(2);
+  await expect.poll(() => page.evaluate(() => {
+    const scroller = document.querySelector<HTMLElement>(".content.conversation-mode");
+    const end = document.querySelector<HTMLElement>('[data-testid="conversation-end"]');
+    if (!scroller || !end) return 999;
+    return Math.round(end.getBoundingClientRect().bottom - scroller.getBoundingClientRect().bottom);
+  })).toBeLessThanOrEqual(2);
+});
+
+test("positions a completed follow-up at the beginning of its answer", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 650 });
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  let requestCount = 0;
+  await mockGeneration(page, {
+    handler: async (route) => {
+      requestCount += 1;
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(requestCount === 1 ? buildIdeaPayload() : buildPayload()),
+      });
+    },
+  });
+  await openApp(page);
+  await page.getByLabel("Message Stanley").fill("Give me three chaotic gaming video ideas.");
+  await page.getByRole("button", { name: "Send message" }).click();
+  await page.getByLabel("Message Stanley").fill("I like the third one. Make it about CS:GO.");
+  await page.getByLabel("Message Stanley").press("Enter");
+  await expect(page.locator('.assistant-message[data-latest-response="true"]')).toContainText(buildPayload().reply);
+
+  await expect.poll(() => page.evaluate(() => {
+    const scroller = document.querySelector<HTMLElement>(".content.conversation-mode");
+    const response = document.querySelector<HTMLElement>('.assistant-message[data-latest-response="true"]');
+    if (!scroller || !response) return 999;
+    return Math.round(response.getBoundingClientRect().top - scroller.getBoundingClientRect().top);
+  })).toBeGreaterThanOrEqual(20);
+  await expect.poll(() => page.evaluate(() => {
+    const scroller = document.querySelector<HTMLElement>(".content.conversation-mode");
+    const response = document.querySelector<HTMLElement>('.assistant-message[data-latest-response="true"]');
+    if (!scroller || !response) return 999;
+    return Math.round(response.getBoundingClientRect().top - scroller.getBoundingClientRect().top);
+  })).toBeLessThanOrEqual(36);
+});
+
+test("positions a completed script at its beginning", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 650 });
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await mockGeneration(page, { payload: buildScriptPayload() });
+  await openApp(page);
+  await page.getByLabel("Message Stanley").fill("Write the complete script for my 30 day experiment.");
+  await page.getByRole("button", { name: "Send message" }).click();
+  await expect(page.locator(".script-workspace")).toBeVisible();
+
+  await expect.poll(() => page.evaluate(() => {
+    const scroller = document.querySelector<HTMLElement>(".content.conversation-mode");
+    const script = document.querySelector<HTMLElement>(".script-workspace");
+    if (!scroller || !script) return 999;
+    return Math.round(script.getBoundingClientRect().top - scroller.getBoundingClientRect().top);
+  })).toBeGreaterThanOrEqual(20);
+  await expect.poll(() => page.evaluate(() => {
+    const scroller = document.querySelector<HTMLElement>(".content.conversation-mode");
+    const script = document.querySelector<HTMLElement>(".script-workspace");
+    if (!scroller || !script) return 999;
+    return Math.round(script.getBoundingClientRect().top - scroller.getBoundingClientRect().top);
+  })).toBeLessThanOrEqual(36);
+  expect(await page.evaluate(() => {
+    const scroller = document.querySelector<HTMLElement>(".content.conversation-mode");
+    const ending = document.querySelector<HTMLElement>(".script-ending");
+    return Boolean(scroller && ending && ending.getBoundingClientRect().bottom > scroller.getBoundingClientRect().bottom);
+  })).toBe(true);
 });
 
 test("generates visual thumbnail concepts from the Thumbnails mode", async ({ page }) => {
