@@ -728,36 +728,158 @@ function OnboardingIcon({ name }: { name: "ideas" | "build" | "learn" }) {
 
 function OnboardingVisual({ step, profile }: { step: Exclude<OnboardingStep, "loading" | "done">; profile: YouTubeProfile | null }) {
   if (step === "welcome") return (
-    <div className="onboarding-visual-canvas visual-welcome" aria-hidden="true">
-      <div className="visual-toolbar"><span><i /> Creative room</span><span>Research ready</span></div>
-      <div className="visual-thread">
-        <div className="visual-user-message">I have a rough idea for my next video...</div>
-        <div className="visual-stanley-message">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/stanley-mascot-transparent.png" alt="" width="46" height="46" />
-          <div><span>Stanley</span><p>Let&apos;s turn it into something people will click and keep watching.</p></div>
+    <div className="onboarding-visual-canvas startup-visual" aria-hidden="true">
+      <div className="startup-visual-header">
+        <span><i /> Stanley creative system</span>
+        <strong><span /> Ready</strong>
+      </div>
+
+      <div className="startup-flow">
+        <article className="startup-input-card">
+          <span><i /> Your idea</span>
+          <p>I want to make a video about building better habits...</p>
+          <small>Rough is perfect.</small>
+        </article>
+
+        <div className="startup-core-wrap">
+          <span className="startup-core-ring ring-one" />
+          <span className="startup-core-ring ring-two" />
+          <div className="startup-core">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/stanley-mascot-transparent.png" alt="" width="74" height="74" />
+          </div>
+          <small>Thinking with you</small>
+        </div>
+
+        <div className="startup-output-stack">
+          <article>
+            <span><OnboardingIcon name="ideas" /></span>
+            <div><small>Angle found</small><strong>The habit nobody sticks with</strong></div>
+          </article>
+          <article>
+            <span><OnboardingIcon name="build" /></span>
+            <div><small>Title direction</small><strong>A clear reason to click</strong></div>
+          </article>
+          <article>
+            <span><OnboardingIcon name="learn" /></span>
+            <div><small>Story mapped</small><strong>Hook, beats, and payoff</strong></div>
+          </article>
         </div>
       </div>
-      <div className="visual-idea-stack">
-        <article><span>Idea</span><strong>The angle worth testing</strong><i className="idea-score">High fit</i></article>
-        <article><span>Title</span><strong>A clear reason to click</strong><i className="idea-arrow">↗</i></article>
-        <article><span>Script</span><strong>A hook that earns the next minute</strong><i className="idea-lines" /></article>
+
+      <div className="startup-visual-footer">
+        <span><i /> Creative workspace online</span>
+        <span>Idea · research · full plan</span>
       </div>
-      <div className="visual-status"><span>✦</span> One conversation. A complete video plan.</div>
     </div>
   );
 
   if (step === "features") return (
-    <div className="onboarding-visual-canvas visual-package" aria-hidden="true">
-      <div className="package-hero">
-        <div className="package-preview"><span className="preview-play">▶</span><span className="preview-caption">Your next upload</span></div>
-        <div className="package-title"><span>Title direction</span><strong>I Tried the Habit Everyone Keeps Recommending</strong><small>Clear promise · honest curiosity</small></div>
+    <div className="onboarding-visual-canvas feature-visual" aria-hidden="true">
+      <div className="feature-chat-shell">
+        <aside className="feature-chat-sidebar">
+          <div className="feature-chat-brand">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/stanley-mascot-transparent.png" alt="" width="34" height="34" />
+            <div><strong>Stanley</strong><small><YouTubeIcon /> for YouTube</small></div>
+          </div>
+
+          <div className="feature-chat-nav active"><SquarePen /><span>New chat</span></div>
+          <div className="feature-chat-nav"><LayoutDashboard /><span>Dashboard</span></div>
+          <div className="feature-chat-nav"><Puzzle /><span>Extension</span></div>
+
+          <div className="feature-chat-history">
+            <span>Chats</span>
+            <i />
+            <i />
+          </div>
+        </aside>
+
+        <div className="feature-chat-main">
+          <header className="feature-chat-topbar">
+            <span><PanelLeftClose /></span>
+            <strong><YouTubeIcon /> Connect YouTube</strong>
+          </header>
+
+          <div className="feature-chat-thread">
+            <p className="feature-chat-kicker"><Sparkles /> One chat, full creative plan</p>
+
+            <div className="feature-chat-user">
+              <span>I have a rough idea about building better habits.</span>
+              <i />
+            </div>
+
+            <div className="feature-chat-assistant">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="/stanley-mascot-transparent.png" alt="" width="30" height="30" />
+              <p><span>Stanley</span><strong>Let&apos;s turn it into a video people will click—and finish.</strong></p>
+            </div>
+
+            <div className="feature-chat-thinking"><i /><i /><i /><span>Shaping your video</span></div>
+
+            <div className="feature-chat-results">
+              <article>
+                <span><OnboardingIcon name="ideas" /></span>
+                <p><small>Angle</small><strong>The habit nobody sticks with</strong></p>
+                <i>01</i>
+              </article>
+              <article>
+                <span><OnboardingIcon name="build" /></span>
+                <p><small>Title</small><strong>I Tried the Habit Everyone Keeps Recommending</strong></p>
+                <i>02</i>
+              </article>
+              <article>
+                <span><OnboardingIcon name="learn" /></span>
+                <p><small>Script</small><strong>Hook · 3 beats · Payoff</strong></p>
+                <i>03</i>
+              </article>
+            </div>
+          </div>
+
+          <div className="feature-chat-composer">
+            <span>Ask Stanley anything...</span>
+            <i><ChevronRight /></i>
+          </div>
+        </div>
       </div>
-      <div className="package-support">
-        <article className="package-script"><span>Script map</span><strong>Hook</strong><i /><strong>Story beats</strong><i /><i /><strong>Payoff</strong></article>
-        <article className="package-thumbnail"><span>Thumbnail concept</span><div><b>THE<br />TRUTH</b><i>●</i></div><small>One subject. One emotion. No clutter.</small></article>
+    </div>
+  );
+
+  if (step === "connect") return (
+    <div className="onboarding-visual-canvas connect-visual" aria-hidden="true">
+      <div className="connect-visual-header">
+        <span><YouTubeIcon /> Channel signal preview</span>
+        <strong>Read-only</strong>
       </div>
-      <div className="package-research"><span className="research-pulse" /><p><strong>Research in the background</strong><small>Stanley checks what is already earning attention before suggesting the direction.</small></p></div>
+
+      <div className="connect-channel-card">
+        <div className="connect-channel-avatar"><YouTubeIcon /></div>
+        <div><span>Your YouTube channel</span><strong>Connect to reveal your patterns</strong></div>
+        <i><span /> Private</i>
+      </div>
+
+      <div className="connect-signal-scan">
+        <article style={{ "--signal": "88%" } as React.CSSProperties}>
+          <span>01</span>
+          <p><strong>Topics viewers return for</strong><small>Find the subjects with repeat interest.</small></p>
+          <div><i /></div>
+        </article>
+        <article style={{ "--signal": "68%" } as React.CSSProperties}>
+          <span>02</span>
+          <p><strong>Videos that break your baseline</strong><small>See which uploads outperform the rest.</small></p>
+          <div><i /></div>
+        </article>
+        <article style={{ "--signal": "78%" } as React.CSSProperties}>
+          <span>03</span>
+          <p><strong>Patterns in winning titles</strong><small>Spot formats worth building on.</small></p>
+          <div><i /></div>
+        </article>
+      </div>
+
+      <div className="connect-trust-strip">
+        <span><Check /></span>
+        <p><strong>Private analysis, without publishing</strong><small>Stanley can read channel signals. It cannot upload, edit, or delete videos.</small></p>
+      </div>
     </div>
   );
 
@@ -815,34 +937,34 @@ function Onboarding({
       <section className={`onboarding-stage onboarding-${step}`} aria-live="polite" key={step}>
         <div className="onboarding-copy-panel">
           {step === "welcome" && <>
-            <p className="onboarding-label"><span>✦</span> Your YouTube creative sidekick</p>
-            <h1>Hey, meet Stanley.</h1>
-            <p className="onboarding-copy">Bring the idea. Stanley helps you figure out what people want to watch and turn it into a video you can actually make.</p>
-            <button className="onboarding-primary" type="button" onClick={onContinue}>Show me how <span aria-hidden="true">→</span></button>
-            <p className="onboarding-footnote">Ideas, titles, thumbnails, research, and scripts all in one chat.</p>
+            <p className="onboarding-label startup-label"><Sparkles aria-hidden="true" /> Your YouTube creative sidekick</p>
+            <h1>Hey, meet <span className="startup-name">Stanley.</span></h1>
+            <p className="onboarding-copy">Bring the rough idea. Stanley finds the angle, pressure-tests what people want to watch, and helps you shape a video you can actually make.</p>
+            <button className="onboarding-primary" type="button" onClick={onContinue}>Show me how <ChevronRight aria-hidden="true" /></button>
+            <p className="onboarding-footnote startup-footnote"><span>Ideas</span><span>Research</span><span>Full video plans</span></p>
           </>}
 
           {step === "features" && <>
-            <p className="onboarding-label"><span>◇</span> Start messy. Stanley will organize it.</p>
+            <p className="onboarding-label feature-label"><Sparkles aria-hidden="true" /> Start messy. Stanley will organize it.</p>
             <h1>One chat.<br />Your whole video.</h1>
             <p className="onboarding-copy">Start with a rough thought, a weird angle, or a title that is not clicking yet.</p>
-            <div className="onboarding-features">
+            <div className="feature-list">
               <article><span><OnboardingIcon name="ideas" /></span><div><h2>Find an idea worth making</h2><p>Use real YouTube patterns to find a sharper angle.</p></div></article>
               <article><span><OnboardingIcon name="build" /></span><div><h2>Build the full package</h2><p>Shape the title, thumbnail, hook, and script together.</p></div></article>
               <article><span><OnboardingIcon name="learn" /></span><div><h2>Keep it sounding like you</h2><p>Stanley remembers your channel, choices, and creative style.</p></div></article>
             </div>
-            <div className="onboarding-actions"><button className="onboarding-back" type="button" onClick={onBack}>Back</button><button className="onboarding-primary" type="button" onClick={onContinue}>Connect my channel <span aria-hidden="true">→</span></button></div>
+            <div className="onboarding-actions"><button className="onboarding-back" type="button" onClick={onBack}>Back</button><button className="onboarding-primary" type="button" onClick={onContinue}>Connect my channel <ChevronRight aria-hidden="true" /></button></div>
           </>}
 
           {step === "connect" && <>
             <div className="onboarding-youtube-mark" aria-hidden="true"><YouTubeIcon /></div>
             <h1>Connect your YouTube account.</h1>
-            <p className="onboarding-copy">Stanley looks at your recent videos and uses what already worked to suggest better ideas, titles, and scripts. You can skip this and connect later.</p>
-            <div className="connect-benefits"><span>✓ Topics your viewers come back for</span><span>✓ Videos that stand out by views</span><span>✓ Patterns in your strongest titles</span></div>
+            <p className="onboarding-copy">Stanley reads your recent channel signals and uses what already worked to suggest sharper ideas, titles, and scripts. You can connect later.</p>
+            <div className="connect-benefits"><span><Check aria-hidden="true" /> Topics your viewers come back for</span><span><Check aria-hidden="true" /> Videos that outperform your baseline</span><span><Check aria-hidden="true" /> Patterns in your strongest titles</span></div>
             {error && <p className="onboarding-error" role="alert">{error}</p>}
-            {!configured && <p className="oauth-dev-note">Google OAuth needs its private test credentials before connection can open.</p>}
+            {!configured && <p className="oauth-dev-note"><strong>Preview setup</strong><span>Private Google credentials are needed before connection can open.</span></p>}
             <div className="onboarding-connect-actions">
-              <button className="onboarding-primary youtube-button" type="button" onClick={onConnect}><YouTubeIcon /> Connect YouTube</button>
+              <button className="onboarding-primary youtube-button" type="button" onClick={onConnect}><span className="youtube-button-icon"><YouTubeIcon /></span> Connect YouTube</button>
               <button className="onboarding-skip" type="button" onClick={onSkip}>Skip for now</button>
             </div>
             <button className="onboarding-back standalone" type="button" onClick={onBack}>Back</button>
