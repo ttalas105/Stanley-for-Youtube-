@@ -2304,6 +2304,9 @@ export default function Home() {
       const params = new URLSearchParams(window.location.search);
       const result = params.get("youtube");
       const replayOnboarding = params.get("onboarding") === "1";
+      const extensionPrompt = params.get("source") === "youtube-extension"
+        ? params.get("stanleyPrompt")?.trim().slice(0, 600) || ""
+        : "";
       const savedOnboarding = window.localStorage.getItem(ONBOARDING_KEY);
       let status: YouTubeStatus = { configured: false, connected: false, profile: null };
       try {
@@ -2315,7 +2318,16 @@ export default function Home() {
       if (!active) return;
       setYouTubeStatus(status);
 
-      if (replayOnboarding) {
+      if (extensionPrompt) {
+        setActiveView("create");
+        setMode("idea");
+        setTopic(extensionPrompt);
+        setOnboardingStep(savedOnboarding ? "done" : "welcome");
+        window.history.replaceState({}, "", window.location.pathname);
+        analysisTimer = window.setTimeout(() => {
+          if (active && savedOnboarding) topicRef.current?.focus();
+        }, 120);
+      } else if (replayOnboarding) {
         setOnboardingStep("welcome");
       } else if (result === "connected" && status.connected && status.profile) {
         setActiveView("create");

@@ -19,7 +19,8 @@ interface Frequency { uploadCount: number; validUploads: AnalyzedVideo[]; gaps: 
 interface TitlePattern { key: keyof TitleMetadata; label: string; matchingCount: number; nonMatchingCount: number; matchingMedianOutlier: number | null; nonMatchingMedianOutlier: number | null; matchingMedianViewsPerDay: number | null; limitedSample: boolean }
 interface TitleAnalysis { scatter: Array<{ x: number; y: number; video: AnalyzedVideo }>; buckets: GroupSummary[]; patterns: TitlePattern[] }
 interface Engagement { likeScatter: Array<{ x: number; y: number; video: AnalyzedVideo }>; commentScatter: Array<{ x: number; y: number; video: AnalyzedVideo }>; medianLikeRate: number | null; medianCommentRate: number | null; highestLikeRateVideo: AnalyzedVideo | null; highestCommentRateVideo: AnalyzedVideo | null; validLikeCount: number; validCommentCount: number }
-export interface AnalysisResult { channel: ChannelSummary; scannedAt: string; videos: AnalyzedVideo[]; eligible: AnalyzedVideo[]; metrics: Metrics; uploadPatterns: { duration: GroupSummary[]; weekday: GroupSummary[]; frequency: Frequency; title: TitleAnalysis; engagement: Engagement; observedPatterns: string[] } }
+export interface ContentFormat { key: string; label: string; count: number; share: number; medianOutlier: number | null; medianViewsPerDay: number | null; sampleVideo: AnalyzedVideo | null }
+export interface AnalysisResult { channel: ChannelSummary; scannedAt: string; videos: AnalyzedVideo[]; eligible: AnalyzedVideo[]; metrics: Metrics; uploadPatterns: { duration: GroupSummary[]; weekday: GroupSummary[]; frequency: Frequency; title: TitleAnalysis; engagement: Engagement; formats: ContentFormat[]; observedPatterns: string[] } }
 
   function buildAnalysis(payload: ChannelAnalysisResponse): AnalysisResult {
     const scannedAt = new Date(payload.scannedAt || Date.now());
@@ -69,8 +70,41 @@ export interface AnalysisResult { channel: ChannelSummary; scannedAt: string; vi
     const frequency = buildFrequency(videos, scannedAt);
     const title = buildTitleAnalysis(eligible);
     const engagement = buildEngagement(eligible);
+    const formats = buildContentFormats(eligible);
     const observedPatterns = buildInsights({ videos, eligible, metrics, duration, weekday, frequency, title });
-    return { duration, weekday, frequency, title, engagement, observedPatterns };
+    return { duration, weekday, frequency, title, engagement, formats, observedPatterns };
+  }
+
+  function buildContentFormats(eligible: AnalyzedVideo[]): ContentFormat[] {
+    const definitions: Array<{ key: string; label: string; matches: (title: string) => boolean }> = [
+      { key: "challenge", label: "Challenges", matches: (title) => /\b(?:challenge|challenged|trying|tried|attempt|attempted|survive|survived|for \d+ days?)\b/i.test(title) },
+      { key: "how-to", label: "How-to guides", matches: (title) => /\b(?:how to|guide|tutorial|beginner|tips?|explained|learn)\b/i.test(title) },
+      { key: "comparison", label: "Reviews & comparisons", matches: (title) => /\b(?:vs\.?|versus|review|reviewed|best|worst|rated|ranking|ranked|compare|compared|comparison)\b/i.test(title) },
+      { key: "experiment", label: "Experiments", matches: (title) => /\b(?:experiment|testing|tested|test|what happens|i spent|i used)\b/i.test(title) },
+      { key: "list", label: "Lists & rankings", matches: (title) => /^(?:the )?\d+\b|\b(?:top \d+|\d+ (?:ways|things|tips|mistakes|reasons|lessons))\b/i.test(title) },
+      { key: "story", label: "Personal stories", matches: (title) => /^(?:i|my|we)\b|\b(?:journey|story|day \d+|the truth|what happened)\b/i.test(title) },
+      { key: "reaction", label: "Reactions", matches: (title) => /\b(?:react|reacting|reaction|responding|thoughts on|commentary)\b/i.test(title) },
+      { key: "interview", label: "Interviews", matches: (title) => /\b(?:interview|podcast|conversation|talking with|ft\.|featuring)\b/i.test(title) },
+      { key: "update", label: "News & updates", matches: (title) => /\b(?:update|news|announcement|announcing|new release|breaking)\b/i.test(title) },
+    ];
+    const groups = new Map<string, AnalyzedVideo[]>();
+    for (const video of eligible) {
+      const format = definitions.find((definition) => definition.matches(video.title)) || { key: "topic", label: "Topic-led videos" };
+      groups.set(format.key, [...(groups.get(format.key) || []), video]);
+    }
+    return [...groups.entries()].map(([key, videos]) => {
+      const definition = definitions.find((item) => item.key === key);
+      const ranked = [...videos].sort((a, b) => (b.outlierMultiple ?? -1) - (a.outlierMultiple ?? -1));
+      return {
+        key,
+        label: definition?.label || "Topic-led videos",
+        count: videos.length,
+        share: eligible.length ? videos.length / eligible.length : 0,
+        medianOutlier: S.median(videos.map((video) => video.outlierMultiple)),
+        medianViewsPerDay: S.median(videos.map((video) => video.viewsPerDay)),
+        sampleVideo: ranked[0] || null,
+      };
+    }).sort((a, b) => b.count - a.count || (b.medianOutlier ?? -1) - (a.medianOutlier ?? -1));
   }
 
   function groupByBuckets(videos: AnalyzedVideo[], definitions: readonly (BucketDefinition & { label: string })[], getter: (video: AnalyzedVideo) => number): GroupSummary[] {

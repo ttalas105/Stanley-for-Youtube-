@@ -1,5 +1,5 @@
 import { build } from "esbuild";
-import { cp, mkdir, rm } from "node:fs/promises";
+import { cp, rm } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -8,7 +8,6 @@ const extension = path.join(root, "extension");
 const dist = path.join(extension, "dist");
 
 await rm(dist, { recursive: true, force: true });
-await mkdir(path.join(dist, "vendor"), { recursive: true });
 await build({
   entryPoints: {
     content: path.join(extension, "content.ts"),
@@ -23,4 +22,5 @@ await build({
   sourcemap: true,
 });
 for (const file of ["manifest.json", "popup.html", "content.css"]) await cp(path.join(extension, file), path.join(dist, file));
-for (const file of ["chart.umd.min.js", "Chart.js.LICENSE.md"]) await cp(path.join(extension, "vendor", file), path.join(dist, "vendor", file));
+await cp(path.join(root, "..", "public", "stanley-mascot-dashboard.png"), path.join(dist, "stanley-mascot-dashboard.png"));
+await cp(path.join(root, "..", "public", "stanley-channel-robot.png"), path.join(dist, "stanley-channel-robot.png"));

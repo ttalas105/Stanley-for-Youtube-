@@ -1,22 +1,34 @@
 {
   "manifest_version": 3,
-  "name": "YouTube Outlier Demo",
+  "name": "Stanley for YouTube — Outliers",
   "version": "0.1.0",
-  "description": "Scan a YouTube channel and show recent long-form video outliers.",
-  "permissions": ["activeTab", "scripting"],
+  "description": "Automatically analyze YouTube channels and show recent long-form video outliers.",
+  "permissions": ["activeTab", "scripting", "storage"],
   "host_permissions": ["http://localhost:3000/*", "https://*.youtube.com/*"],
+  "icons": {
+    "16": "stanley-mascot-dashboard.png",
+    "32": "stanley-mascot-dashboard.png",
+    "48": "stanley-mascot-dashboard.png",
+    "128": "stanley-mascot-dashboard.png"
+  },
   "action": {
-    "default_title": "YouTube Outlier Demo",
-    "default_popup": "popup.html"
+    "default_title": "Stanley for YouTube",
+    "default_popup": "popup.html",
+    "default_icon": "stanley-mascot-dashboard.png"
   },
   "background": {
     "service_worker": "background.js"
   },
+  "web_accessible_resources": [
+    {
+      "resources": ["stanley-mascot-dashboard.png", "stanley-channel-robot.png"],
+      "matches": ["https://*.youtube.com/*"]
+    }
+  ],
   "content_scripts": [
     {
       "matches": ["https://*.youtube.com/*"],
       "js": [
-        "vendor/chart.umd.min.js",
         "content.js"
       ],
       "css": ["content.css"],

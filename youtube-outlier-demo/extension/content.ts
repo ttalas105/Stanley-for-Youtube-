@@ -1,104 +1,174 @@
-import { buildAnalysis, type AnalysisResult, type AnalyzedVideo } from "./analysis";
+import { buildAnalysis, type AnalysisResult, type AnalyzedVideo, type ContentFormat } from "./analysis";
 import { stats } from "./statistics";
-import { config } from "./config";
-import { charts } from "./charts";
-import { growth } from "./growth";
 import { getErrorMessage, isChannelAnalysisResponse, isContentMessage, isRecord } from "../shared/guards";
-import type { ChannelSnapshot, SupportedChannelIdentifier, VideoSnapshot } from "../shared/types";
-import type { SnapshotStore } from "../server/snapshot-store";
+import type { SupportedChannelIdentifier } from "../shared/types";
 
-type GrowthSummary = Awaited<ReturnType<SnapshotStore["channel"]>>;
-type GroupSummary = AnalysisResult["uploadPatterns"]["duration"][number];
-type Frequency = AnalysisResult["uploadPatterns"]["frequency"];
-type GrowthMetric = "viewCount" | "viewGain" | "viewsPerHour" | "likeGain" | "commentGain";
-type AnalysisMetric = "viewCount" | "viewsPerDay" | "outlierMultiple";
-type GroupMetric = "medianViews" | "medianViewsPerDay" | "medianOutlier";
-type MetricCard = [string, string, string?];
-type LatestInterval = NonNullable<GrowthSummary["videos"][number]["latestInterval"]>;
-type ChartItem = { dataIndex: number; raw?: unknown; label?: string };
-type TooltipLike = { opacity: number; dataPoints?: ChartItem[]; caretX: number; caretY: number };
-type CommonOptions = { scales: Record<string, unknown>; plugins: { tooltip: Record<string, unknown> }; [key: string]: unknown };
-type ScatterContext = { raw: { video: AnalyzedVideo; x?: number } };
 declare global {
   interface Window {
     __ytOutlierDemoLoaded?: boolean;
     __ytOutlierRefresh?: () => void;
+    __ytOutlierDispose?: () => void;
   }
 }
 
-(() => {
-if (window.__ytOutlierDemoLoaded) { window.__ytOutlierRefresh?.(); return; }
-window.__ytOutlierDemoLoaded = true;
+type StatusKind = "loading" | "success" | "error";
+type OutlierTier = "breakout" | "above" | "below" | "unrated";
+type TitlePlacement = { host: HTMLElement; heading: HTMLElement };
+type PatternInsight = { label: string; value: string; score: number; detail: string };
+type PulseLeader = { videoId: string; title: string; thumbnailUrl: string | null; viewGain: number | null; viewsPerHour: number | null; elapsedHours: number };
+type PulseVideo = { videoId: string; title: string; thumbnailUrl: string | null; acceleration: { change: number; velocity1: number; velocity2: number; classification: "Accelerating" | "Decelerating" | "Stable" } | null };
+type ChannelPulseData = {
+  summary: {
+    recordedScans: number;
+    totalViewGain: number;
+    medianViewsPerHour: number | null;
+    fastestGrowingVideo: PulseLeader | null;
+    largestAbsoluteGain: PulseLeader | null;
+    videosWithComparisons: number;
+  };
+  videos: PulseVideo[];
+};
 
-const S = stats;
-const C = config;
-const Charts = charts;
-const G = growth;
-const BUTTON_ID = "yt-outlier-scan-button";
-const PANEL_ID = "yt-outlier-panel";
-const tabs = ["overview", "performance", "videos", "upload-patterns", "growth-tracking"];
+const AUTO_SCAN_KEY = "autoScanEnabled";
+const DETAIL_ID = "stanley-video-detail";
+const CHANNEL_LAUNCHER_ID = "stanley-channel-launcher";
+const CHANNEL_ANALYTICS_ID = "stanley-channel-analytics";
+const CHANNEL_BACKDROP_ID = "stanley-channel-analytics-backdrop";
+const STATUS_ID = "stanley-channel-status";
+const LEGACY_PANEL_ID = "yt-outlier-panel";
+const OVERLAY_SELECTOR = ".stanley-outlier-badge";
+const VIDEO_LINK_SELECTOR = "a[href*='/watch?v=']";
+const STANLEY_APP_URL = "http://localhost:3001/";
+const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+
 let currentUrl = location.href;
 let currentChannelKey = channelKey(getChannelFromUrl());
-let panel: HTMLElement | null = null;
-let analysis = null as unknown as AnalysisResult;
-let activeTab = "overview";
-let selectedVideoId: string | null = null;
-let videoSort = "views";
-let videoFilter = "all";
-let titleSearch = "";
-let recentMetric: AnalysisMetric = "outlierMultiple";
-let ageMetric: AnalysisMetric = "viewCount";
-let durationMetric: GroupMetric = "medianViews";
-let weekdayMetric: GroupMetric = "medianViewsPerDay";
-let navigationTimer: ReturnType<typeof setTimeout> | null = null;
-let growthSummary: GrowthSummary | null = null;
-let growthLoading = false;
-let growthError = "";
-let growthMetric: GrowthMetric = "viewCount";
-let rankingMetric: GrowthMetric = "viewGain";
-let growthVideoId: string | null = null;
-let growthRequestToken = 0;
-const growthSummaryCache = new Map<string, GrowthSummary>();
-const videoSnapshotCache = new Map<string, VideoSnapshot[] | null>();
+let autoScanEnabled = false;
+let lastScannedChannelKey = "";
+let analysis: AnalysisResult | null = null;
+let channelPulse: ChannelPulseData | null = null;
+let overlayRenderTimer: ReturnType<typeof setTimeout> | null = null;
+let statusTimer: ReturnType<typeof setTimeout> | null = null;
+let scanToken = 0;
+let activeDetailButton: HTMLButtonElement | null = null;
+let activeAnalyticsTrigger: HTMLButtonElement | null = null;
+let openAnalyticsAfterScan = false;
+let pageObserver: MutationObserver | null = null;
+let disposed = false;
+const activeScans = new Set<string>();
 
-init();
+window.__ytOutlierDispose?.();
+window.__ytOutlierDemoLoaded = true;
 window.__ytOutlierRefresh = refreshUi;
+window.__ytOutlierDispose = dispose;
+void init();
 
-function init() {
-  chrome.runtime.onMessage.addListener(handleContentMessage);
+async function init(): Promise<void> {
+  removeInjectedUi();
+  if (!extensionContextAvailable()) {
+    dispose();
+    return;
+  }
+
+  try {
+    chrome.runtime.onMessage.addListener(handleContentMessage);
+    chrome.storage.onChanged.addListener(handleStorageChange);
+    document.addEventListener("click", handleDocumentClick, true);
+    document.addEventListener("keydown", handleDocumentKeydown);
+    window.addEventListener("resize", handleViewportChange);
+    window.addEventListener("scroll", handleViewportChange, true);
+
+    const stored = await chrome.storage.local.get(AUTO_SCAN_KEY);
+    if (disposed) return;
+    autoScanEnabled = stored[AUTO_SCAN_KEY] === true;
+  } catch (error: unknown) {
+    if (isInvalidatedContext(error)) {
+      dispose();
+      return;
+    }
+    showStatus("error", getErrorMessage(error) || "Stanley could not read its settings.");
+  }
+
   refreshUi();
-  const observer = new MutationObserver(() => {
-    if (location.href === currentUrl || navigationTimer) return;
-    navigationTimer = setTimeout(() => {
-      navigationTimer = null;
-      if (location.href === currentUrl) return;
-      currentUrl = location.href;
-      const nextKey = channelKey(getChannelFromUrl());
-      if (nextKey !== currentChannelKey) clearAnalysis();
-      currentChannelKey = nextKey;
-      refreshUi();
-    }, 120);
-  });
-  observer.observe(document.documentElement, { childList: true, subtree: true });
+  pageObserver = new MutationObserver(handlePageMutation);
+  pageObserver.observe(document.documentElement, { childList: true, subtree: true });
 }
 
-function handleContentMessage(message: unknown, _sender: chrome.runtime.MessageSender, sendResponse: (response: unknown) => void) {
-  if (!isContentMessage(message)) return false;
-  if (message?.type === "PING_CONTENT_SCRIPT") {
-    refreshUi();
-    sendResponse({ ok: true, isChannelPage: Boolean(getChannelFromUrl()) });
+function dispose(): void {
+  if (disposed) return;
+  disposed = true;
+  scanToken += 1;
+  pageObserver?.disconnect();
+  pageObserver = null;
+  if (overlayRenderTimer) clearTimeout(overlayRenderTimer);
+  if (statusTimer) clearTimeout(statusTimer);
+  overlayRenderTimer = null;
+  statusTimer = null;
+  document.removeEventListener("click", handleDocumentClick, true);
+  document.removeEventListener("keydown", handleDocumentKeydown);
+  window.removeEventListener("resize", handleViewportChange);
+  window.removeEventListener("scroll", handleViewportChange, true);
+  try {
+    chrome.runtime.onMessage.removeListener(handleContentMessage);
+    chrome.storage.onChanged.removeListener(handleStorageChange);
+  } catch {
+    // A reloaded extension has already detached these listeners.
+  }
+  removeInjectedUi();
+  if (window.__ytOutlierDispose === dispose) {
+    delete window.__ytOutlierDispose;
+    delete window.__ytOutlierRefresh;
+    delete window.__ytOutlierDemoLoaded;
+  }
+}
+
+function extensionContextAvailable(): boolean {
+  try {
+    return Boolean(chrome.runtime?.id);
+  } catch {
     return false;
   }
-  if (message?.type === "START_SCAN") {
-    handleScanClick().then(() => sendResponse({ ok: true })).catch((error: unknown) => sendResponse({ ok: false, error: getErrorMessage(error) }));
-    return true;
+}
+
+function isInvalidatedContext(error: unknown): boolean {
+  return !extensionContextAvailable() || /extension context invalidated/i.test(getErrorMessage(error));
+}
+
+function handlePageMutation(): void {
+  if (disposed) return;
+  if (!extensionContextAvailable()) {
+    dispose();
+    return;
   }
+  if (location.href !== currentUrl) {
+    currentUrl = location.href;
+    const nextChannelKey = channelKey(getChannelFromUrl());
+    if (nextChannelKey !== currentChannelKey) clearChannelUi();
+    currentChannelKey = nextChannelKey;
+    refreshUi();
+    return;
+  }
+  if (autoScanEnabled && currentChannelKey) renderChannelLauncher();
+  if (analysis && currentChannelKey) scheduleOverlayRender();
+}
+
+function handleStorageChange(changes: Record<string, chrome.storage.StorageChange>, areaName: string): void {
+  if (disposed || areaName !== "local" || !changes[AUTO_SCAN_KEY]) return;
+  autoScanEnabled = changes[AUTO_SCAN_KEY].newValue === true;
+  if (autoScanEnabled) refreshUi();
+  else clearChannelUi();
+}
+
+function handleContentMessage(message: unknown, _sender: chrome.runtime.MessageSender, sendResponse: (response: unknown) => void): boolean {
+  if (disposed || !isContentMessage(message)) return false;
+  refreshUi();
+  sendResponse({ ok: true, isChannelPage: Boolean(getChannelFromUrl()), autoScanEnabled });
   return false;
 }
 
 function getChannelFromUrl(): SupportedChannelIdentifier | null {
   const url = new URL(location.href);
-  if (!["www.youtube.com", "youtube.com"].includes(url.hostname)) return null;
+  if (!(url.hostname === "youtube.com" || url.hostname.endsWith(".youtube.com"))) return null;
   const parts = url.pathname.split("/").filter(Boolean);
   const first = parts[0] || "";
   if (first.startsWith("@") && first.length > 1) return { type: "handle", value: first };
@@ -106,467 +176,877 @@ function getChannelFromUrl(): SupportedChannelIdentifier | null {
   return null;
 }
 
-function channelKey(channel: SupportedChannelIdentifier | null) { return channel ? `${channel.type}:${channel.value.toLowerCase()}` : ""; }
-function refreshUi() { getChannelFromUrl() ? ensureButton() : (removeButton(), closePanel()); }
-function ensureButton() {
-  if (document.getElementById(BUTTON_ID)) return;
-  const button = document.createElement("button");
-  button.id = BUTTON_ID; button.type = "button"; button.textContent = "Scan Channel";
-  button.addEventListener("click", handleScanClick); document.body.appendChild(button);
+function channelKey(channel: SupportedChannelIdentifier | null): string {
+  return channel ? `${channel.type}:${channel.value.toLowerCase()}` : "";
 }
-function removeButton() { document.getElementById(BUTTON_ID)?.remove(); }
 
-async function handleScanClick() {
+function refreshUi(): void {
+  if (disposed) return;
+  removeLegacyPanel();
   const channel = getChannelFromUrl();
-  if (!channel) return openMessage("Invalid channel URL", "Open a YouTube channel handle or channel ID page first.", true);
-  openMessage("Scanning channel", "Fetching recent public uploads...");
+  if (!channel) {
+    clearChannelUi();
+    return;
+  }
+  if (!autoScanEnabled) return;
+  renderChannelLauncher();
+  if (analysis && channelKey(channel) === lastScannedChannelKey) scheduleOverlayRender();
+  else void autoScanChannel(channel);
+}
+
+async function autoScanChannel(channel: SupportedChannelIdentifier): Promise<void> {
+  const key = channelKey(channel);
+  if (disposed || !key || key === lastScannedChannelKey || activeScans.has(key)) return;
+  if (!extensionContextAvailable()) {
+    dispose();
+    return;
+  }
+
+  activeScans.add(key);
+  const token = ++scanToken;
+  renderChannelLauncher();
+  showStatus("loading", "Analyzing channel");
+
   try {
     const response: unknown = await chrome.runtime.sendMessage({ type: "ANALYZE_CHANNEL", channel });
-    if (!isRecord(response) || response.ok !== true) throw new Error(isRecord(response) && typeof response.error === "string" ? response.error : "Could not analyze this channel.");
-    if (!isChannelAnalysisResponse(response.data)) throw new Error("Backend returned an invalid analysis response.");
-    analysis = buildAnalysis(response.data);
-    activeTab = "overview"; selectedVideoId = null; renderApp();
-    loadGrowthSummary(analysis.channel.id, true);
-  } catch (error: unknown) { openMessage("Scan failed", getErrorMessage(error), true); }
+    if (!isRecord(response) || response.ok !== true) {
+      throw new Error(isRecord(response) && typeof response.error === "string" ? response.error : "Could not analyze this channel.");
+    }
+    if (!isChannelAnalysisResponse(response.data)) throw new Error("The channel analysis was invalid.");
+    if (disposed || token !== scanToken || !autoScanEnabled || channelKey(getChannelFromUrl()) !== key) return;
+
+    const nextAnalysis = buildAnalysis(response.data);
+    const nextPulse = await loadChannelPulse(nextAnalysis.channel.id);
+    if (disposed || token !== scanToken || !autoScanEnabled || channelKey(getChannelFromUrl()) !== key) return;
+    analysis = nextAnalysis;
+    channelPulse = nextPulse;
+    lastScannedChannelKey = key;
+    renderVideoOverlays();
+    renderChannelLauncher();
+    showStatus("success", "Outliers ready", 1500);
+    if (openAnalyticsAfterScan) {
+      openAnalyticsAfterScan = false;
+      openChannelAnalytics();
+    }
+  } catch (error: unknown) {
+    if (isInvalidatedContext(error)) {
+      dispose();
+      return;
+    }
+    if (!disposed && token === scanToken && autoScanEnabled && channelKey(getChannelFromUrl()) === key) {
+      showStatus("error", "Couldn’t load channel analytics", 0, true);
+      console.warn("Stanley channel analysis failed:", getErrorMessage(error));
+    }
+  } finally {
+    activeScans.delete(key);
+    renderChannelLauncher();
+  }
 }
 
-function ensurePanel() {
-  panel = document.getElementById(PANEL_ID);
-  if (panel) return;
-  panel = document.createElement("aside"); panel.id = PANEL_ID;
-  panel.innerHTML = `<header class="yt-outlier-panel-header"><h2 class="yt-outlier-title">Channel analysis</h2><button class="yt-outlier-icon-button yt-outlier-close" type="button" aria-label="Close analysis" title="Close">&times;</button></header><div class="yt-outlier-body"></div>`;
-  panel.addEventListener("click", handlePanelClick);
-  panel.addEventListener("change", handlePanelChange);
-  panel.addEventListener("input", handlePanelInput);
-  document.body.appendChild(panel);
+async function loadChannelPulse(channelId: string): Promise<ChannelPulseData | null> {
+  if (!channelId) return null;
+  try {
+    const response: unknown = await chrome.runtime.sendMessage({ type: "GET_CHANNEL_SNAPSHOTS", channelId });
+    if (!isRecord(response) || response.ok !== true || !isChannelPulseData(response.data)) return null;
+    return response.data;
+  } catch (error: unknown) {
+    if (isInvalidatedContext(error)) throw error;
+    console.warn("Stanley pulse history could not be loaded:", getErrorMessage(error));
+    return null;
+  }
 }
 
-function openMessage(title: string, message: string, error = false) {
-  ensurePanel(); Charts.destroyAll();
-  panel?.querySelector<HTMLElement>(".yt-outlier-title")?.replaceChildren(title);
-  const body = panel?.querySelector<HTMLElement>(".yt-outlier-body");
-  if (body) body.innerHTML = `<p class="${error ? "yt-outlier-error" : "yt-outlier-muted"}">${escapeHtml(message)}</p>`;
-}
-function closePanel() { Charts.destroyAll(); document.getElementById(PANEL_ID)?.remove(); panel = null; }
-function clearAnalysis() { analysis = null as unknown as AnalysisResult; selectedVideoId = null; growthSummary = null; growthVideoId = null; growthError = ""; growthLoading = false; growthRequestToken++; Charts.destroyAll(); closePanel(); }
+function renderChannelLauncher(): void {
+  if (disposed || !autoScanEnabled || !getChannelFromUrl()) return;
+  const host = document.querySelector<HTMLElement>(
+    ".ytPageHeaderViewModelHeadline, ytd-c4-tabbed-header-renderer #inner-header-container, #channel-header-container #inner-header-container"
+  );
+  if (!host) return;
 
-function renderApp() {
-  ensurePanel(); Charts.destroyAll();
-  panel?.querySelector<HTMLElement>(".yt-outlier-title")?.replaceChildren(analysis.channel.title || "Channel analysis");
-  const body = panel?.querySelector<HTMLElement>(".yt-outlier-body");
-  if (body) body.innerHTML = `${renderChannelHeader()}${renderTabs()}<main class="yt-outlier-tab-content">${renderTab()}</main>${renderDrawer()}`;
-  requestAnimationFrame(renderCharts);
+  host.classList.add("stanley-channel-launcher-host");
+  let launcher = document.getElementById(CHANNEL_LAUNCHER_ID) as HTMLButtonElement | null;
+  if (launcher && launcher.parentElement !== host) launcher.remove();
+  if (!launcher?.isConnected) {
+    launcher = document.createElement("button");
+    launcher.id = CHANNEL_LAUNCHER_ID;
+    launcher.type = "button";
+    launcher.setAttribute("aria-haspopup", "dialog");
+    launcher.innerHTML = `
+      <img src="${escapeHtml(chrome.runtime.getURL("stanley-mascot-dashboard.png"))}" alt="" />
+      <span><strong>Stanley</strong><small>Analyze this channel</small></span>`;
+    launcher.addEventListener("click", handleChannelLauncherClick);
+    host.appendChild(launcher);
+  }
+
+  const channel = getChannelFromUrl();
+  const loading = Boolean(channel && activeScans.has(channelKey(channel)));
+  const state = loading ? "loading" : analysis ? "ready" : "idle";
+  if (launcher.dataset.state !== state) launcher.dataset.state = state;
+  const label = launcher.querySelector<HTMLElement>("small");
+  const nextLabel = loading ? "Analyzing…" : "Analyze this channel";
+  if (label && label.textContent !== nextLabel) label.textContent = nextLabel;
+  const accessibleLabel = loading ? "Stanley is analyzing this channel" : "Analyze this channel with Stanley";
+  if (launcher.getAttribute("aria-label") !== accessibleLabel) launcher.setAttribute("aria-label", accessibleLabel);
+  launcher.setAttribute("aria-busy", loading ? "true" : "false");
+  if (launcher.disabled !== loading) launcher.disabled = loading;
 }
 
-function renderChannelHeader() {
-  const channel = analysis.channel;
-  const m = analysis.metrics;
-  return `<section class="yt-outlier-channel">
-    ${channel.avatarUrl ? `<img class="yt-outlier-avatar" src="${attr(channel.avatarUrl)}" alt="">` : `<span class="yt-outlier-avatar"></span>`}
-    <div class="yt-outlier-channel-copy"><strong>${escapeHtml(channel.title || "Unknown channel")}</strong><span>${escapeHtml(channel.handle || "Handle unavailable")}</span></div>
-    <div class="yt-outlier-channel-facts"><span>${channel.subscriberCount === null ? "Subscribers hidden" : `${S.compactNumber(channel.subscriberCount)} subscribers`}</span><span>${analysis.videos.length} analyzed / ${analysis.eligible.length} long-form</span><span>${dateRange(m.dateStart, m.dateEnd)}</span><span>Scanned ${new Date(analysis.scannedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</span></div>
+function handleChannelLauncherClick(event: MouseEvent): void {
+  event.preventDefault();
+  event.stopPropagation();
+  const launcher = event.currentTarget instanceof HTMLButtonElement ? event.currentTarget : null;
+  if (analysis && channelKey(getChannelFromUrl()) === lastScannedChannelKey) {
+    activeAnalyticsTrigger = launcher;
+    openChannelAnalytics();
+    return;
+  }
+  const channel = getChannelFromUrl();
+  if (!channel) return;
+  activeAnalyticsTrigger = launcher;
+  openAnalyticsAfterScan = true;
+  renderChannelLauncher();
+  void autoScanChannel(channel);
+}
+
+function scheduleOverlayRender(): void {
+  if (disposed || overlayRenderTimer) return;
+  overlayRenderTimer = setTimeout(() => {
+    overlayRenderTimer = null;
+    renderVideoOverlays();
+  }, 120);
+}
+
+function renderVideoOverlays(): void {
+  if (disposed || !analysis || !autoScanEnabled || !getChannelFromUrl()) return;
+  const videosById = new Map(analysis.videos.map((video) => [video.id, video]));
+  const usedIds = new Set<string>();
+  const imageLinks = Array.from(document.querySelectorAll<HTMLAnchorElement>(VIDEO_LINK_SELECTOR))
+    .filter((link) => link.matches(".ytLockupViewModelContentImage, #thumbnail") || Boolean(link.querySelector("img")));
+
+  for (const imageLink of imageLinks) {
+    const videoId = videoIdFromHref(imageLink.href);
+    if (!videoId || usedIds.has(videoId)) continue;
+    const video = videosById.get(videoId);
+    if (!video) continue;
+    const placement = findTitlePlacement(imageLink, videoId);
+    if (!placement) continue;
+    usedIds.add(videoId);
+    upsertVideoBadge(placement, video);
+  }
+}
+
+function findTitlePlacement(imageLink: HTMLAnchorElement, videoId: string): TitlePlacement | null {
+  const card = imageLink.closest<HTMLElement>(".ytLockupViewModelHost, ytd-rich-grid-media, ytd-grid-video-renderer, ytd-video-renderer, ytd-rich-item-renderer");
+  if (!card) return null;
+  const titleLink = Array.from(card.querySelectorAll<HTMLAnchorElement>(VIDEO_LINK_SELECTOR)).find((link) => {
+    return link !== imageLink && videoIdFromHref(link.href) === videoId && Boolean(link.closest("h3") || link.id === "video-title");
+  });
+  if (!titleLink) return null;
+  const heading = titleLink.closest<HTMLElement>("h3") || titleLink.parentElement;
+  const host = heading?.parentElement;
+  return heading && host ? { heading, host } : null;
+}
+
+function upsertVideoBadge(placement: TitlePlacement, video: AnalyzedVideo): void {
+  const { host, heading } = placement;
+  host.classList.add("stanley-title-metric-host");
+  heading.classList.add("stanley-title-heading");
+  let existing = Array.from(host.children).find((child) => child instanceof HTMLButtonElement && child.classList.contains("stanley-outlier-badge")) as HTMLButtonElement | undefined;
+  if (existing && existing.dataset.videoId !== video.id) {
+    if (activeDetailButton === existing) closeDetailPopover(false);
+    existing.remove();
+    existing = undefined;
+  }
+
+  const label = formatOutlier(video.outlierMultiple);
+  const accessibleLabel = video.outlierMultiple === null
+    ? `Outlier score unavailable. View analytics for ${video.title}`
+    : `${label} channel baseline. View analytics for ${video.title}`;
+  const badge = existing || document.createElement("button");
+  badge.type = "button";
+  badge.className = "stanley-outlier-badge";
+  badge.dataset.stanleyOverlay = "true";
+  badge.dataset.videoId = video.id;
+  badge.dataset.tier = outlierTier(video.outlierMultiple);
+  badge.textContent = label;
+  badge.title = accessibleLabel;
+  badge.setAttribute("aria-label", accessibleLabel);
+  badge.setAttribute("aria-haspopup", "dialog");
+  badge.setAttribute("aria-expanded", activeDetailButton === badge ? "true" : "false");
+
+  if (!existing) {
+    badge.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      openVideoDetail(video, badge);
+    });
+    host.appendChild(badge);
+  }
+}
+
+function openVideoDetail(video: AnalyzedVideo, badge: HTMLButtonElement): void {
+  closeDetailPopover(false);
+  activeDetailButton = badge;
+  badge.setAttribute("aria-expanded", "true");
+
+  const recentTopVideos = topVideosInLastThirtyDays();
+  const verdict = videoPerformanceVerdict(video);
+  const recentSection = recentTopVideos.length ? `
+    <section class="stanley-recent-videos" aria-labelledby="stanley-recent-heading">
+      <header><h3 id="stanley-recent-heading">Recent channel leaders</h3><span>Past 30 days</span></header>
+      ${renderRecentVideoList(recentTopVideos)}
+    </section>` : "";
+  const popover = document.createElement("section");
+  popover.id = DETAIL_ID;
+  popover.setAttribute("role", "dialog");
+  popover.setAttribute("aria-modal", "false");
+  popover.setAttribute("aria-labelledby", "stanley-detail-title");
+  popover.innerHTML = `
+    <header class="stanley-detail-header">
+      <div class="stanley-detail-brand">
+        <img class="stanley-detail-mascot" src="${escapeHtml(chrome.runtime.getURL("stanley-mascot-dashboard.png"))}" alt="" />
+        <div><strong>Stanley</strong><span>Quick video check</span></div>
+      </div>
+      <button type="button" class="stanley-detail-close" aria-label="Close video analytics">&times;</button>
+    </header>
+    <div class="stanley-detail-video">
+      <h2 id="stanley-detail-title">${escapeHtml(video.title)}</h2>
+      <p>Published ${escapeHtml(formatDate(video.publishedAt))}</p>
+    </div>
+    <section class="stanley-detail-verdict" data-tier="${outlierTier(video.outlierMultiple)}">
+      <div><strong>${escapeHtml(verdict.label)}</strong><span>${escapeHtml(formatOutlier(video.outlierMultiple))} usual</span></div>
+      <p>${escapeHtml(verdict.explainer)}</p>
+    </section>
+    ${renderVideoComparison(video)}
+    ${recentSection}
+    <a class="stanley-app-link" href="${escapeHtml(stanleyHandoffUrl(video))}" target="_blank" rel="noopener noreferrer">
+      <span>Build a similar video in Stanley</span><span aria-hidden="true">↗</span>
+    </a>`;
+
+  popover.querySelector<HTMLButtonElement>(".stanley-detail-close")?.addEventListener("click", () => closeDetailPopover());
+  document.body.appendChild(popover);
+  positionDetailPopover(popover, badge);
+  popover.querySelector<HTMLButtonElement>(".stanley-detail-close")?.focus({ preventScroll: true });
+}
+
+function topVideosInLastThirtyDays(): AnalyzedVideo[] {
+  if (!analysis) return [];
+  const scannedAt = new Date(analysis.scannedAt).getTime();
+  if (!Number.isFinite(scannedAt)) return [];
+  const cutoff = scannedAt - THIRTY_DAYS_MS;
+  return [...analysis.eligible]
+    .filter((video) => {
+      const publishedAt = new Date(video.publishedAt).getTime();
+      return Number.isFinite(publishedAt) && publishedAt >= cutoff && publishedAt <= scannedAt;
+    })
+    .sort((a, b) => b.viewCount - a.viewCount || b.publishedAt.localeCompare(a.publishedAt))
+    .slice(0, 5);
+}
+
+function renderRecentVideoList(videos: AnalyzedVideo[]): string {
+  if (!videos.length) return '<p class="stanley-recent-empty">No long-form uploads found in this window.</p>';
+  return `<ol>${videos.map((video, index) => `
+    <li>
+      <span class="stanley-recent-rank">${index + 1}</span>
+      <span class="stanley-recent-copy"><strong>${escapeHtml(video.title)}</strong><small>${escapeHtml(compactNumber(video.viewCount))} views · ${escapeHtml(formatOutlier(video.outlierMultiple))} outlier</small></span>
+    </li>`).join("")}</ol>`;
+}
+
+function videoPerformanceVerdict(video: AnalyzedVideo): { label: string; explainer: string } {
+  const multiple = video.outlierMultiple;
+  const typical = video.baselineViews;
+  const comparison = typical === null
+    ? `It has ${compactNumber(video.viewCount)} views so far.`
+    : `It has ${compactNumber(video.viewCount)} views. This channel usually gets about ${compactNumber(typical)}.`;
+  if (!Number.isFinite(multiple)) return { label: "Not enough history yet", explainer: `${comparison} Stanley needs more uploads for a fair comparison.` };
+  if ((multiple ?? 0) >= 2) return { label: "This video is taking off", explainer: `${comparison} It is performing far above the usual result.` };
+  if ((multiple ?? 0) >= 1.1) return { label: "Doing better than usual", explainer: `${comparison} It is comfortably ahead of the normal range.` };
+  if ((multiple ?? 0) >= .9) return { label: "Close to the usual result", explainer: `${comparison} It is performing about where viewers normally take it.` };
+  return { label: "Below the usual result", explainer: `${comparison} It has not reached the channel’s normal view level yet.` };
+}
+
+function renderVideoComparison(video: AnalyzedVideo): string {
+  const typical = video.baselineViews;
+  const maximum = Math.max(video.viewCount, typical ?? 0, 1);
+  const videoWidth = Math.max(7, video.viewCount / maximum * 100);
+  const typicalWidth = typical === null ? 0 : Math.max(7, typical / maximum * 100);
+  const accessible = typical === null
+    ? `This video has ${compactNumber(video.viewCount)} views. A typical result is not available.`
+    : `This video has ${compactNumber(video.viewCount)} views compared with the typical ${compactNumber(typical)} views.`;
+  return `<section class="stanley-detail-comparison" aria-labelledby="stanley-comparison-heading">
+    <header><h3 id="stanley-comparison-heading">Views at a glance</h3><span>${escapeHtml(compactNumber(video.viewsPerDay))}/day</span></header>
+    <div class="stanley-comparison-chart" role="img" aria-label="${escapeHtml(accessible)}">
+      <div class="stanley-comparison-row">
+        <div><span>This video</span><strong>${escapeHtml(compactNumber(video.viewCount))}</strong></div>
+        <i><b data-series="video" data-tier="${outlierTier(video.outlierMultiple)}" style="width:${videoWidth.toFixed(1)}%"></b></i>
+      </div>
+      <div class="stanley-comparison-row">
+        <div><span>Typical</span><strong>${typical === null ? "—" : escapeHtml(compactNumber(typical))}</strong></div>
+        <i><b data-series="typical" style="width:${typicalWidth.toFixed(1)}%"></b></i>
+      </div>
+    </div>
   </section>`;
 }
 
-function renderTabs() {
-  return `<nav class="yt-outlier-tabs" role="tablist">${tabs.map((tab) => `<button type="button" role="tab" data-tab="${tab}" aria-selected="${activeTab === tab}">${tab.split("-").map(capitalize).join(" ")}</button>`).join("")}</nav>`;
+function stanleyHandoffUrl(video: AnalyzedVideo): string {
+  const prompt = `Help me develop an original YouTube video inspired by “${video.title},” keeping the same audience appeal and format while creating a distinctly new premise.`;
+  const url = new URL(STANLEY_APP_URL);
+  url.searchParams.set("stanleyPrompt", prompt);
+  url.searchParams.set("source", "youtube-extension");
+  url.searchParams.set("videoId", video.id);
+  return url.toString();
 }
 
-function renderTab() {
-  if (activeTab === "overview") return renderOverview();
-  if (activeTab === "performance") return renderPerformance();
-  if (activeTab === "videos") return renderVideos();
-  if (activeTab === "upload-patterns") return renderUploadPatterns();
-  return renderGrowthTracking();
+function openChannelAnalytics(): void {
+  if (!analysis) return;
+  closeDetailPopover(false);
+  closeChannelAnalytics(false);
+
+  const result = analysis;
+  const validOutliers = videosWithOutliers(result.eligible);
+  const topVideos = [...validOutliers]
+    .sort((a, b) => b.outlierMultiple - a.outlierMultiple || b.viewCount - a.viewCount)
+    .slice(0, 5);
+  const patterns = strongestPatternInsights(result);
+  const contentFormats = strongestContentFormats(result);
+  const momentum = channelMomentum(result);
+  const channelAvatar = result.channel.avatarUrl
+    ? `<img class="stanley-analysis-avatar" src="${escapeHtml(result.channel.avatarUrl)}" alt="${escapeHtml(result.channel.title)} profile picture" />`
+    : `<span class="stanley-analysis-avatar stanley-analysis-avatar-fallback" aria-hidden="true">${escapeHtml(result.channel.title.charAt(0).toUpperCase() || "C")}</span>`;
+  const backdrop = document.createElement("div");
+  backdrop.id = CHANNEL_BACKDROP_ID;
+  backdrop.innerHTML = `
+    <section id="${CHANNEL_ANALYTICS_ID}" role="dialog" aria-modal="true" aria-labelledby="stanley-channel-analysis-title">
+      <header class="stanley-analysis-header">
+        <div class="stanley-analysis-brand">
+          ${channelAvatar}
+          <div>
+            <h1 id="stanley-channel-analysis-title">${escapeHtml(result.channel.title)}</h1>
+            <p class="stanley-analysis-context">
+              <span>Channel analysis</span>
+              <strong data-direction="${momentum.direction}">${escapeHtml(momentum.label.replace("Channel is ", ""))} ${escapeHtml(momentum.value)}</strong>
+              <span>${escapeHtml(momentumPlainText(momentum.direction))}</span>
+            </p>
+          </div>
+        </div>
+        <button type="button" class="stanley-analysis-close" aria-label="Close channel analysis">&times;</button>
+      </header>
+
+      <div class="stanley-analysis-body">
+        <dl class="stanley-analysis-metric-rail">
+          ${analysisMetric("Typical views", result.metrics.medianViews === null ? "—" : compactNumber(result.metrics.medianViews), "The middle result across long-form uploads")}
+          ${analysisMetric("Best video", result.metrics.highestOutlier ? formatOutlier(result.metrics.highestOutlier.outlierMultiple) : "—", result.metrics.highestOutlier?.title || "Not enough history")}
+          ${analysisMetric("Breakouts", `${result.metrics.above2}`, `${result.metrics.above2} of ${validOutliers.length} uploads performed above 2× the channel baseline`)}
+        </dl>
+
+        ${renderStanleyPulse(result, channelPulse)}
+
+        <div class="stanley-performance-grid">
+          <section class="stanley-channel-growth" aria-labelledby="stanley-growth-heading">
+            <header>
+              <div><h2 id="stanley-growth-heading">Channel growth</h2><span>Uploads compared with usual</span></div>
+              <div class="stanley-range-control" role="group" aria-label="Channel growth period">
+                <button type="button" data-growth-days="30" aria-pressed="false">30 days</button>
+                <button type="button" data-growth-days="180" aria-pressed="true">6 months</button>
+                <button type="button" data-growth-days="365" aria-pressed="false">1 year</button>
+              </div>
+            </header>
+            <div class="stanley-growth-chart-host">${renderChannelGrowth(result, 180)}</div>
+          </section>
+
+          <section class="stanley-top-videos" aria-labelledby="stanley-top-videos-heading">
+            <header><h2 id="stanley-top-videos-heading">Top videos</h2><span>Ranked by outlier</span></header>
+            ${renderTopVideos(topVideos)}
+          </section>
+        </div>
+
+        ${renderPatternDNA(contentFormats, result.eligible.length)}
+
+        <section class="stanley-next-plan" aria-labelledby="stanley-next-plan-heading">
+          <header><h2 id="stanley-next-plan-heading">Next upload plan</h2><span>Three practical moves</span></header>
+          <div class="stanley-next-moves">${patterns.map(renderNextMove).join("")}</div>
+        </section>
+      </div>
+
+      <footer class="stanley-analysis-footer">
+        <p>Based on public video data.</p>
+        <a href="${escapeHtml(channelHandoffUrl(result))}" target="_blank" rel="noopener noreferrer"><span>Use these ideas in Stanley</span><span aria-hidden="true">↗</span></a>
+      </footer>
+    </section>`;
+
+  backdrop.addEventListener("click", (event) => {
+    if (event.target === backdrop) closeChannelAnalytics();
+  });
+  backdrop.querySelector<HTMLButtonElement>(".stanley-analysis-close")?.addEventListener("click", () => closeChannelAnalytics());
+  const growthHost = backdrop.querySelector<HTMLElement>(".stanley-growth-chart-host");
+  backdrop.querySelectorAll<HTMLButtonElement>("[data-growth-days]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const days = Number(button.dataset.growthDays);
+      if (!growthHost || !Number.isFinite(days)) return;
+      backdrop.querySelectorAll<HTMLButtonElement>("[data-growth-days]").forEach((option) => option.setAttribute("aria-pressed", option === button ? "true" : "false"));
+      growthHost.innerHTML = renderChannelGrowth(result, days);
+    });
+  });
+  document.documentElement.classList.add("stanley-channel-analysis-open");
+  document.body.appendChild(backdrop);
+  backdrop.querySelector<HTMLButtonElement>(".stanley-analysis-close")?.focus({ preventScroll: true });
 }
 
-async function loadGrowthSummary(channelId: string | undefined, refresh = false) {
-  if (!channelId) return;
-  if (!refresh && growthSummaryCache.has(channelId)) { growthSummary = growthSummaryCache.get(channelId) || null; ensureGrowthVideo(); renderApp(); return; }
-  const token = ++growthRequestToken; growthLoading = true; growthError = "";
-  if (activeTab === "growth-tracking") renderApp();
-  const response: unknown = await chrome.runtime.sendMessage({ type: "GET_CHANNEL_SNAPSHOTS", channelId }).catch((error: unknown) => ({ ok: false, error: getErrorMessage(error) }));
-  if (token !== growthRequestToken || analysis?.channel.id !== channelId) return;
-  growthLoading = false;
-  if (!isRecord(response) || response.ok !== true) growthError = isRecord(response) && typeof response.error === "string" ? response.error : "Could not load growth snapshots.";
-  else if (isRecord(response.data)) { growthSummary = response.data as unknown as GrowthSummary; growthSummaryCache.set(channelId, growthSummary); ensureGrowthVideo(); }
-  if (panel) renderApp();
+function closeChannelAnalytics(restoreFocus = true): void {
+  document.getElementById(CHANNEL_BACKDROP_ID)?.remove();
+  document.documentElement.classList.remove("stanley-channel-analysis-open");
+  if (restoreFocus && activeAnalyticsTrigger?.isConnected) activeAnalyticsTrigger.focus({ preventScroll: true });
+  if (restoreFocus) activeAnalyticsTrigger = null;
 }
 
-function ensureGrowthVideo() {
-  const videos = growthSummary?.videos || [];
-  if (!videos.some((video) => video.videoId === growthVideoId)) growthVideoId = videos.find((video) => video.snapshotCount >= 2)?.videoId || videos[0]?.videoId || null;
-  if (growthVideoId) loadVideoSnapshots(growthVideoId);
+function videosWithOutliers(videos: AnalyzedVideo[]): Array<AnalyzedVideo & { outlierMultiple: number }> {
+  return videos.filter((video): video is AnalyzedVideo & { outlierMultiple: number } => Number.isFinite(video.outlierMultiple));
 }
 
-async function loadVideoSnapshots(videoId: string) {
-  if (!videoId || videoSnapshotCache.has(videoId)) return;
-  videoSnapshotCache.set(videoId, null);
-  const response = await chrome.runtime.sendMessage({ type: "GET_VIDEO_SNAPSHOTS", videoId }).catch(() => null);
-  if (response?.ok) videoSnapshotCache.set(videoId, response.data.snapshots || []); else videoSnapshotCache.delete(videoId);
-  if (panel && (growthVideoId === videoId || selectedVideoId === videoId)) renderApp();
+function renderTopVideos(videos: Array<AnalyzedVideo & { outlierMultiple: number }>): string {
+  if (!videos.length) return '<p class="stanley-analysis-empty">More videos are needed.</p>';
+  return `<ol>${videos.map((video, index) => {
+    const thumbnail = video.thumbnailUrl
+      ? `<img src="${escapeHtml(video.thumbnailUrl)}" alt="" />`
+      : '<span class="stanley-top-video-thumb-fallback" aria-hidden="true">▶</span>';
+    return `<li>
+      <a href="${escapeHtml(video.youtubeUrl)}" target="_blank" rel="noopener noreferrer" aria-label="Open ${escapeHtml(video.title)} on YouTube">
+        <span class="stanley-top-video-rank">${String(index + 1).padStart(2, "0")}</span>
+        <span class="stanley-top-video-thumb">${thumbnail}</span>
+        <span class="stanley-top-video-copy"><strong>${escapeHtml(video.title)}</strong><small>${escapeHtml(compactNumber(video.viewCount))} views</small></span>
+        <strong class="stanley-top-video-score">${escapeHtml(formatOutlier(video.outlierMultiple))}</strong>
+      </a>
+    </li>`;
+  }).join("")}</ol>`;
 }
 
-function renderOverview() {
-  const m = analysis.metrics;
-  const cards: MetricCard[] = [
-    ["Median views", S.compactNumber(m.medianViews)], ["Mean views", S.compactNumber(m.meanViews)],
-    ["Highest-viewed", m.highestViewed ? `${S.compactNumber(m.highestViewed.viewCount)} · ${shorten(m.highestViewed.title, 28)}` : "Unavailable"],
-    ["Highest outlier", m.highestOutlier ? formatMultiple(m.highestOutlier.outlierMultiple) : "Unavailable"],
-    ["Median views/day", S.compactNumber(m.medianViewsPerDay)], ["Uploads/month", formatDecimal(m.uploadsPerMonth)],
-    ["Above 2x baseline", String(m.above2)], ["Above 5x baseline", String(m.above5)],
-    ["Consistency", m.consistency === null ? "Unavailable" : `${Math.round(m.consistency)}/100`, "Higher means recent uploads perform within a more consistent range. This is based on variation in log-transformed public view counts. Custom descriptive metric."]
-  ];
-  return `<section class="yt-outlier-metrics">${cards.map(metricCard).join("")}</section>
-    ${chartCard("recent-chart", "Recent upload performance", "Performance across eligible uploads in chronological order.", metricToggle("recent-metric", recentMetric))}
-    <div class="yt-outlier-chart-grid">${chartCard("distribution-chart", "Outlier distribution", "Eligible videos grouped by their prior-upload baseline multiple.")}${chartCard("top-chart", "Top outliers", "Select a bar to inspect that video.")}</div>`;
+function renderStanleyPulse(result: AnalysisResult, pulse: ChannelPulseData | null): string {
+  const historyReady = Boolean(pulse && pulse.summary.recordedScans >= 2 && pulse.summary.videosWithComparisons > 0 && pulse.summary.fastestGrowingVideo);
+  const mascotUrl = escapeHtml(chrome.runtime.getURL("stanley-mascot-dashboard.png"));
+  if (!historyReady || !pulse?.summary.fastestGrowingVideo) {
+    const currentLeader = [...result.eligible].sort((a, b) => b.viewsPerDay - a.viewsPerDay)[0] || null;
+    const pace = currentLeader ? `${compactNumber(currentLeader.viewsPerDay)}/day` : "Learning";
+    const leaderCopy = currentLeader ? `${currentLeader.title} has the strongest current pace.` : "Stanley needs another upload scan.";
+    return `<section class="stanley-pulse" data-state="learning" aria-labelledby="stanley-pulse-heading">
+      <div class="stanley-pulse-intro">
+        <span class="stanley-pulse-mascot" aria-hidden="true"><img src="${mascotUrl}" alt="" /><i></i></span>
+        <div><h2 id="stanley-pulse-heading">Stanley Pulse</h2><strong>Learning this channel</strong><p>${escapeHtml(leaderCopy)} Check back after a later scan to see live acceleration.</p></div>
+      </div>
+      <dl>
+        ${pulseMetric("Current pace", pace)}
+        ${pulseMetric("Uploads scanned", String(result.eligible.length))}
+        ${pulseMetric("Live history", pulse ? `${pulse.summary.recordedScans} scan${pulse.summary.recordedScans === 1 ? "" : "s"}` : "Starting")}
+      </dl>
+    </section>`;
+  }
+
+  const leader = pulse.summary.fastestGrowingVideo;
+  const acceleration = pulse.videos.find((video) => video.videoId === leader.videoId)?.acceleration || null;
+  const state = acceleration?.classification === "Accelerating" ? "hot" : acceleration?.classification === "Decelerating" ? "cooling" : "steady";
+  const headline = state === "hot" ? `${leader.title} is speeding up` : state === "cooling" ? `${leader.title} is still leading` : `${leader.title} is moving fastest`;
+  const detail = state === "hot"
+    ? `Its viewing pace increased since Stanley’s previous scan.`
+    : state === "cooling"
+      ? `It still leads the channel, but its viewing pace is easing.`
+      : `It is holding the channel’s strongest live pace.`;
+  return `<section class="stanley-pulse" data-state="${state}" aria-labelledby="stanley-pulse-heading">
+    <div class="stanley-pulse-intro">
+      <span class="stanley-pulse-mascot" aria-hidden="true"><img src="${mascotUrl}" alt="" /><i></i></span>
+      <div><h2 id="stanley-pulse-heading">Stanley Pulse</h2><strong>${escapeHtml(headline)}</strong><p>${escapeHtml(detail)}</p></div>
+    </div>
+    <dl>
+      ${pulseMetric("Views per hour", leader.viewsPerHour === null ? "—" : compactNumber(leader.viewsPerHour))}
+      ${pulseMetric("Channel gain", `+${compactNumber(pulse.summary.totalViewGain)}`)}
+      ${pulseMetric("Videos compared", String(pulse.summary.videosWithComparisons))}
+    </dl>
+  </section>`;
 }
 
-function renderPerformance() {
-  return `${chartCard("baseline-chart", "Views versus baseline", "Actual public views compared with each prior-upload median baseline.")}
-    ${chartCard("age-chart", "Video age versus performance", "How public performance varies with time since upload.", metricToggle("age-metric", ageMetric))}
-    <div class="yt-outlier-chart-grid">${chartCard("rolling-chart", "Rolling baseline trend", rollingDirectionDescription())}${chartCard("concentration-chart", "Performance concentration", "Share of analyzed public views contributed by ranked videos.")}</div>`;
+function pulseMetric(label: string, value: string): string {
+  return `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`;
 }
 
-function chartCard(id: string, title: string, description: string, controls = "") {
-  const hasData = analysis.eligible.length > 0;
-  return `<section class="yt-outlier-chart-card"><div class="yt-outlier-section-heading"><div><h3>${title}</h3><p>${description}</p></div>${controls}</div>${hasData ? `<div class="yt-outlier-chart-wrap"><canvas id="${id}" aria-label="${title}"></canvas></div>` : `<div class="yt-outlier-empty">No eligible videos to chart.</div>`}</section>`;
+function strongestContentFormats(result: AnalysisResult): ContentFormat[] {
+  const formats = result.uploadPatterns.formats.filter((format) => Number.isFinite(format.medianOutlier));
+  const repeatable = formats.filter((format) => format.count >= 2);
+  return [...(repeatable.length ? repeatable : formats)]
+    .sort((a, b) => (b.medianOutlier ?? 0) - (a.medianOutlier ?? 0) || b.count - a.count)
+    .slice(0, 3);
 }
 
-function metricToggle(name: string, selected: string) {
-  return `<select class="yt-outlier-select" data-control="${name}" aria-label="Chart metric"><option value="viewCount" ${selected === "viewCount" ? "selected" : ""}>Total views</option><option value="viewsPerDay" ${selected === "viewsPerDay" ? "selected" : ""}>Views per day</option><option value="outlierMultiple" ${selected === "outlierMultiple" ? "selected" : ""}>Outlier multiple</option></select>`;
+function renderPatternDNA(formats: ContentFormat[], uploadCount: number): string {
+  if (!formats.length) {
+    return `<section class="stanley-pattern-dna" aria-labelledby="stanley-dna-heading">
+      <header><h2 id="stanley-dna-heading">Pattern DNA</h2><span>Repeatable video formats</span></header>
+      <p class="stanley-dna-empty">Stanley needs more comparable uploads to find a pattern.</p>
+    </section>`;
+  }
+  const leader = formats[0]!;
+  const repeatable = leader.count >= 2;
+  const summary = repeatable
+    ? `${leader.label} are this channel’s strongest repeatable format.`
+    : `${leader.label} are the clearest early signal so far.`;
+  const highest = Math.max(...formats.map((format) => format.medianOutlier ?? 0), 1);
+  return `<section class="stanley-pattern-dna" aria-labelledby="stanley-dna-heading">
+    <header><div><h2 id="stanley-dna-heading">Pattern DNA</h2><span>Repeatable video formats</span></div><p>${escapeHtml(summary)}</p></header>
+    <ol>${formats.map((format, index) => renderPatternGene(format, index, uploadCount, highest)).join("")}</ol>
+  </section>`;
 }
 
-function groupedMetricToggle(name: string, selected: string) {
-  return `<select class="yt-outlier-select" data-control="${name}" aria-label="Chart metric">${options({ medianViews: "Median views", medianViewsPerDay: "Median views per day", medianOutlier: "Median outlier" }, selected)}</select>`;
+function renderPatternGene(format: ContentFormat, index: number, uploadCount: number, highest: number): string {
+  const strength = Math.max(14, Math.min(100, ((format.medianOutlier ?? 0) / highest) * 100));
+  const sample = format.sampleVideo ? `Best example: ${format.sampleVideo.title}` : format.label;
+  return `<li title="${escapeHtml(sample)}">
+    <span class="stanley-dna-mark" data-gene="${index}" aria-hidden="true">${Array.from({ length: 8 }, (_, dot) => `<i style="--delay:${dot * 45}ms"></i>`).join("")}</span>
+    <div class="stanley-dna-copy"><strong>${escapeHtml(format.label)}</strong><small>${format.count} of ${uploadCount} uploads</small><span><i style="--strength:${strength.toFixed(1)}%"></i></span></div>
+    <b>${escapeHtml(formatOutlier(format.medianOutlier))}</b>
+  </li>`;
 }
 
-function renderUploadPatterns() {
-  const p = analysis.uploadPatterns;
-  const e = p.engagement;
-  return `<div class="yt-outlier-patterns">
-    ${patternSection("Duration", `${chartCard("duration-chart", "Performance by video duration", "Long-form uploads grouped by runtime. Sample counts are shown for every bucket.", groupedMetricToggle("duration-metric", durationMetric))}${groupSummary(p.duration)}`)}
-    ${patternSection("Weekday", `${chartCard("weekday-chart", "Performance by upload weekday", "Upload weekday is calculated in UTC. Small samples are descriptive only.", groupedMetricToggle("weekday-metric", weekdayMetric))}${groupSummary(p.weekday)}`)}
-    ${patternSection("Upload frequency", `${frequencyMetrics(p.frequency)}${chartCardWithData("frequency-chart", "Gaps between consecutive uploads", "Uses all valid public uploads in the current scan sample.", p.frequency.gaps.length, "At least two valid public uploads are required to calculate gaps.")}`)}
-    ${patternSection("Title patterns", `<div class="yt-outlier-chart-grid">${chartCardWithData("title-scatter-chart", "Title length versus outlier", "Each point represents an eligible long-form upload.", p.title.scatter.length, "No eligible videos have a valid outlier score.")}${chartCardWithData("title-buckets-chart", "Performance by title length", "Median outlier by title-character bucket, with sample counts.", p.title.scatter.length, "No eligible videos have a valid outlier score.")}</div>${titlePatternTable(p.title.patterns)}`)}
-    ${patternSection("Engagement ratios", `${engagementMetrics(e)}<div class="yt-outlier-chart-grid">${chartCardWithData("like-scatter-chart", "Like rate versus outlier", "Public likes divided by public views.", e.likeScatter.length, "No videos have both valid like data and an outlier score.")}${chartCardWithData("comment-scatter-chart", "Comment rate versus outlier", "Public comments divided by public views.", e.commentScatter.length, "No videos have both valid comment data and an outlier score.")}</div><p class="yt-outlier-note">Public engagement ratios do not represent retention, watch time, or viewer satisfaction.</p>`)}
-    ${patternSection("Observed patterns", observedPatterns(p.observedPatterns))}
+function strongestPatternInsights(result: AnalysisResult): PatternInsight[] {
+  const insights: PatternInsight[] = [];
+  const contentFormat = strongestContentFormats(result).find((format) => format.count >= 2);
+  if (contentFormat) {
+    insights.push({
+      label: "Format",
+      value: `${contentFormat.label} · ${formatOutlier(contentFormat.medianOutlier)}`,
+      score: Math.min(100, Math.max(18, (contentFormat.medianOutlier ?? 0) / 2 * 100)),
+      detail: `${contentFormat.count} uploads use this repeatable format.`,
+    });
+  }
+  const titlePattern = [...result.uploadPatterns.title.patterns]
+    .filter((pattern) => pattern.matchingCount >= 2 && Number.isFinite(pattern.matchingMedianOutlier) && Number.isFinite(pattern.nonMatchingMedianOutlier))
+    .sort((a, b) => ((b.matchingMedianOutlier ?? 0) - (b.nonMatchingMedianOutlier ?? 0)) - ((a.matchingMedianOutlier ?? 0) - (a.nonMatchingMedianOutlier ?? 0)))[0];
+  if (titlePattern && (titlePattern.matchingMedianOutlier ?? 0) > (titlePattern.nonMatchingMedianOutlier ?? 0)) {
+    insights.push({
+      label: "Title",
+      value: `${titlePattern.label} · ${formatOutlier(titlePattern.matchingMedianOutlier)}`,
+      score: Math.min(100, Math.max(18, (titlePattern.matchingMedianOutlier ?? 0) / 2 * 100)),
+      detail: `${titlePattern.matchingCount} matching uploads; ${formatOutlier(titlePattern.nonMatchingMedianOutlier)} without it.`,
+    });
+  }
+
+  const duration = [...result.uploadPatterns.duration]
+    .filter((group) => group.count >= 2 && Number.isFinite(group.medianOutlier))
+    .sort((a, b) => (b.medianOutlier ?? 0) - (a.medianOutlier ?? 0))[0];
+  if (duration) {
+    insights.push({
+      label: "Length",
+      value: `${duration.label} · ${formatOutlier(duration.medianOutlier)}`,
+      score: Math.min(100, Math.max(18, (duration.medianOutlier ?? 0) / 2 * 100)),
+      detail: `${duration.count} uploads in this length range.`,
+    });
+  }
+
+  const weekday = [...result.uploadPatterns.weekday]
+    .filter((group) => group.count >= 2 && Number.isFinite(group.medianViewsPerDay))
+    .sort((a, b) => (b.medianViewsPerDay ?? 0) - (a.medianViewsPerDay ?? 0))[0];
+  if (weekday) {
+    insights.push({
+      label: "Day",
+      value: `${weekday.label} · ${compactNumber(weekday.medianViewsPerDay ?? 0)}/day`,
+      score: 72,
+      detail: `${weekday.count} uploads published on ${weekday.label}.`,
+    });
+  }
+
+  for (const observed of result.uploadPatterns.observedPatterns) {
+    if (insights.length >= 3) break;
+    insights.push({ label: "Signal", value: "Worth testing", score: 48, detail: observed });
+  }
+  while (insights.length < 3) {
+    insights.push({ label: "Signal", value: "More data needed", score: 24, detail: "Keep publishing so Stanley can compare more videos." });
+  }
+  return insights.slice(0, 3);
+}
+
+function channelMomentum(result: AnalysisResult): {
+  direction: "up" | "down" | "steady" | "limited";
+  label: string;
+  value: string;
+  videos: Array<AnalyzedVideo & { outlierMultiple: number }>;
+} {
+  const videos = videosWithOutliers(result.eligible).slice(0, 6);
+  const recent = videosWithOutliers(result.eligible.slice(0, 5));
+  const previous = videosWithOutliers(result.eligible.slice(5, 10));
+  const recentMedian = stats.median(recent.map((video) => video.outlierMultiple));
+  const previousMedian = stats.median(previous.map((video) => video.outlierMultiple));
+  if (recentMedian === null || previousMedian === null || previousMedian <= 0) {
+    return { direction: "limited", label: "Not enough data", value: recentMedian === null ? "—" : formatOutlier(recentMedian), videos };
+  }
+  const change = (recentMedian - previousMedian) / previousMedian;
+  const direction = change > .15 ? "up" : change < -.15 ? "down" : "steady";
+  const label = direction === "up" ? "Channel is growing" : direction === "down" ? "Channel is slowing" : "Channel is steady";
+  const changeLabel = `${change >= 0 ? "+" : ""}${Math.round(change * 100)}%`;
+  return { direction, label, value: changeLabel, videos };
+}
+
+function momentumPlainText(direction: "up" | "down" | "steady" | "limited"): string {
+  if (direction === "up") return "Recent videos are beating the usual range.";
+  if (direction === "down") return "Recent videos are below the usual range.";
+  if (direction === "steady") return "Recent videos are performing normally.";
+  return "More videos are needed to show a trend.";
+}
+
+function renderChannelGrowth(result: AnalysisResult, days: number): string {
+  const scannedAt = new Date(result.scannedAt).getTime();
+  const cutoff = scannedAt - days * 24 * 60 * 60 * 1000;
+  const available = videosWithOutliers(result.eligible)
+    .filter((video) => {
+      const publishedAt = new Date(video.publishedAt).getTime();
+      return Number.isFinite(publishedAt) && publishedAt >= cutoff && publishedAt <= scannedAt;
+    })
+    .sort((a, b) => a.publishedAt.localeCompare(b.publishedAt));
+  if (!available.length) return '<div class="stanley-growth-empty"><strong>No uploads in this range</strong><span>Try a longer time period.</span></div>';
+  const sampleCount = Math.min(10, available.length);
+  const videos = sampleCount === available.length
+    ? available
+    : Array.from({ length: sampleCount }, (_, index) => available[Math.round(index * (available.length - 1) / (sampleCount - 1))]!).filter((video, index, all) => index === 0 || video.id !== all[index - 1]?.id);
+  const width = 520;
+  const floorY = 174;
+  const maximum = Math.max(...videos.map((video) => video.outlierMultiple), 1.25);
+  const denominator = Math.log1p(maximum);
+  const points = videos.map((video, index) => ({
+    x: videos.length === 1 ? width / 2 : 34 + index * ((width - 68) / (videos.length - 1)),
+    y: floorY - (Math.log1p(video.outlierMultiple) / denominator) * 124,
+    video,
+  }));
+  const linePath = points.reduce((path, point, index) => {
+    if (index === 0) return `M ${point.x.toFixed(1)} ${point.y.toFixed(1)}`;
+    const previous = points[index - 1]!;
+    const midpoint = (previous.x + point.x) / 2;
+    return `${path} C ${midpoint.toFixed(1)} ${previous.y.toFixed(1)}, ${midpoint.toFixed(1)} ${point.y.toFixed(1)}, ${point.x.toFixed(1)} ${point.y.toFixed(1)}`;
+  }, "");
+  const areaPath = `${linePath} L ${points.at(-1)!.x.toFixed(1)} ${floorY} L ${points[0]!.x.toFixed(1)} ${floorY} Z`;
+  const baselineY = floorY - (Math.log1p(1) / denominator) * 124;
+  const label = videos.map((video) => `${formatDate(video.publishedAt)}, ${formatOutlier(video.outlierMultiple)}`).join(". ");
+  const rangeTrend = channelRangeTrend(available);
+  const dateIndexes = [...new Set([0, Math.floor((points.length - 1) / 2), points.length - 1])];
+  return `<div class="stanley-growth-readout" data-direction="${rangeTrend.direction}"><strong>${escapeHtml(rangeTrend.label)}</strong><span>${escapeHtml(rangeTrend.detail)}</span></div>
+  <div class="stanley-curve-wrap" role="img" aria-label="Channel growth for the selected period. Each point compares an upload with the channel's usual result. ${escapeHtml(label)}">
+    <svg class="stanley-curve-chart" viewBox="0 0 ${width} 210" aria-hidden="true">
+      <path class="stanley-curve-area" d="${areaPath}" />
+      <line class="stanley-curve-baseline" x1="18" y1="${baselineY.toFixed(1)}" x2="502" y2="${baselineY.toFixed(1)}" />
+      <text class="stanley-curve-baseline-label" x="20" y="${Math.max(12, baselineY - 7).toFixed(1)}">1× usual</text>
+      <path class="stanley-curve-line" d="${linePath}" />
+      ${points.map((point, index) => `<g class="stanley-curve-point" style="--stanley-point-delay:${index * 70}ms">
+        <circle cx="${point.x.toFixed(1)}" cy="${point.y.toFixed(1)}" r="5" />
+        ${index === points.length - 1 ? `<text class="stanley-curve-value" x="${point.x.toFixed(1)}" y="${Math.max(14, point.y - 13).toFixed(1)}">${escapeHtml(formatOutlier(point.video.outlierMultiple))}</text>` : ""}
+      </g>`).join("")}
+      ${dateIndexes.map((index) => {
+        const point = points[index]!;
+        const date = new Intl.DateTimeFormat("en", { month: "short", day: "numeric" }).format(new Date(point.video.publishedAt));
+        return `<text class="stanley-growth-date" x="${point.x.toFixed(1)}" y="201">${escapeHtml(date)}</text>`;
+      }).join("")}
+    </svg>
   </div>`;
 }
 
-function patternSection(title: string, content: string) { return `<section class="yt-outlier-pattern-section"><h2>${title}</h2>${content}</section>`; }
-function chartCardWithData(id: string, title: string, description: string, count: number, emptyText: string) { return `<section class="yt-outlier-chart-card"><div class="yt-outlier-section-heading"><div><h3>${title}</h3><p>${description}</p></div></div>${count ? `<div class="yt-outlier-chart-wrap"><canvas id="${id}" aria-label="${title}"></canvas></div>` : `<div class="yt-outlier-empty">${emptyText}</div>`}</section>`; }
-function groupSummary(groups: GroupSummary[]) { return `<div class="yt-outlier-sample-grid">${groups.map((group) => `<div><strong>${escapeHtml(group.label)}</strong><span>${group.count} ${group.count === 1 ? "video" : "videos"}</span>${group.limitedSample ? `<em>Limited sample</em>` : ""}</div>`).join("")}</div>`; }
-function frequencyMetrics(frequency: Frequency) { return `<div class="yt-outlier-metrics yt-outlier-pattern-metrics">${([
-  ["Median days between uploads", formatDays(frequency.medianDays)], ["Mean days between uploads", formatDays(frequency.meanDays)],
-  ["Longest recent upload gap", formatDays(frequency.longestDays)], ["Shortest recent upload gap", formatDays(frequency.shortestDays)],
-  ["Uploads per 30 days", formatDecimal(frequency.uploadsPer30Days)]
-] as MetricCard[]).map(metricCard).join("")}</div>`; }
-function engagementMetrics(e: AnalysisResult["uploadPatterns"]["engagement"]) { return `<div class="yt-outlier-metrics yt-outlier-pattern-metrics">${([
-  ["Median like rate", formatRate(e.medianLikeRate)], ["Median comment rate", formatRate(e.medianCommentRate)],
-  ["Highest like-rate video", e.highestLikeRateVideo ? `${formatRate(e.highestLikeRateVideo.likeRate)} · ${shorten(e.highestLikeRateVideo.title, 24)}` : "Unavailable"],
-  ["Highest comment-rate video", e.highestCommentRateVideo ? `${formatRate(e.highestCommentRateVideo.commentRate)} · ${shorten(e.highestCommentRateVideo.title, 24)}` : "Unavailable"],
-  ["Videos with valid like data", String(e.validLikeCount)], ["Videos with valid comment data", String(e.validCommentCount)]
-] as MetricCard[]).map(metricCard).join("")}</div>`; }
-function titlePatternTable(patterns: AnalysisResult["uploadPatterns"]["title"]["patterns"]) { return `<div class="yt-outlier-table-wrap"><table class="yt-outlier-table yt-outlier-pattern-table"><thead><tr><th>Pattern</th><th>Matching</th><th>Non-matching</th><th>Matching median outlier</th><th>Non-matching median outlier</th><th>Matching median views/day</th><th>Sample</th></tr></thead><tbody>${patterns.map((pattern) => `<tr><td>${escapeHtml(pattern.label)}</td><td>${pattern.matchingCount}</td><td>${pattern.nonMatchingCount}</td><td>${formatMultiple(pattern.matchingMedianOutlier)}</td><td>${formatMultiple(pattern.nonMatchingMedianOutlier)}</td><td>${S.compactNumber(pattern.matchingMedianViewsPerDay)}</td><td>${pattern.limitedSample ? `<span class="yt-outlier-limited">Limited sample</span>` : "Sufficient"}</td></tr>`).join("")}</tbody></table></div>`; }
-function observedPatterns(insights: string[]) { return `${insights.length ? `<ul class="yt-outlier-insights">${insights.map((insight) => `<li>${escapeHtml(insight)}</li>`).join("")}</ul>` : `<div class="yt-outlier-empty">Not enough eligible data to describe patterns.</div>`}<p class="yt-outlier-note">These are descriptive patterns from public channel data. They do not establish causation.</p>`; }
-
-function renderGrowthTracking() {
-  if (growthLoading) return `<div class="yt-outlier-empty"><strong>Loading growth snapshots…</strong><span>Based on extension snapshots</span></div>`;
-  if (growthError) return `<div class="yt-outlier-empty"><strong>Growth data unavailable</strong><span>${escapeHtml(growthError)}</span></div>`;
-  if (!growthSummary) { queueMicrotask(() => loadGrowthSummary(analysis?.channel.id)); return `<div class="yt-outlier-empty"><strong>Loading growth snapshots…</strong></div>`; }
-  const scans = growthSummary.channelSnapshots || [];
-  if (!scans.length) return growthEmpty("Growth tracking starts after the first successful scan.");
-  if (scans.length === 1) return `${trackingNote()}${growthEmpty("One snapshot has been recorded. Scan this channel again later to create a real comparison.")}${renderSnapshotTable(scans)}`;
-  const summary = growthSummary.summary;
-  const fastest = summary.fastestGrowingVideo;
-  const largest = summary.largestAbsoluteGain;
-  return `${trackingNote()}<section class="yt-outlier-metrics yt-outlier-growth-metrics">${([
-    ["Recorded scans", String(summary.recordedScans)], ["Time span covered", growthSpan(summary.firstCapturedAt, summary.lastCapturedAt)],
-    ["Tracked views gained", signedNumber(summary.totalViewGain)], ["Median views/hour", signedNumber(summary.medianViewsPerHour)],
-    ["Fastest-growing video", fastest ? shorten(fastest.title, 28) : "Unavailable"], ["Largest view gain", largest ? signedNumber(largest.viewGain) : "Unavailable"],
-    ["Videos with comparisons", String(summary.videosWithComparisons)]
-  ] as MetricCard[]).map(metricCard).join("")}</section>
-  ${growthChartCard("momentum-chart", "Channel momentum", "Total observed view gain, median video velocity, and matched videos for each scan interval.")}
-  ${renderFastestGrowth()}
-  ${renderSelectedGrowth()}
-  ${renderSnapshotTable(scans)}
-  ${renderObservedChanges()}`;
+function channelRangeTrend(videos: Array<AnalyzedVideo & { outlierMultiple: number }>): { direction: "up" | "down" | "steady" | "limited"; label: string; detail: string } {
+  if (videos.length < 4) return { direction: "limited", label: `${videos.length} upload${videos.length === 1 ? "" : "s"}`, detail: "More uploads are needed for a trend." };
+  const midpoint = Math.floor(videos.length / 2);
+  const earlier = stats.median(videos.slice(0, midpoint).map((video) => video.outlierMultiple));
+  const recent = stats.median(videos.slice(midpoint).map((video) => video.outlierMultiple));
+  if (earlier === null || recent === null || earlier <= 0) return { direction: "limited", label: "Trend unavailable", detail: "More comparable uploads are needed." };
+  const change = (recent - earlier) / earlier;
+  if (change > .12) return { direction: "up", label: `Up ${Math.round(change * 100)}%`, detail: "Recent uploads are improving." };
+  if (change < -.12) return { direction: "down", label: `Down ${Math.abs(Math.round(change * 100))}%`, detail: "Recent uploads are losing momentum." };
+  return { direction: "steady", label: "Holding steady", detail: "Recent uploads are near the earlier pace." };
 }
 
-function trackingNote() { return `<div class="yt-outlier-integrity"><strong>Observed since tracking began</strong><span>Based on extension snapshots · Observed growth between scans</span><span>No historical data exists before the first recorded scan</span></div>`; }
-function growthEmpty(message: string) { return `<div class="yt-outlier-empty"><strong>${escapeHtml(message)}</strong><span>No historical data exists before the first recorded scan.</span></div>`; }
-function growthChartCard(id: string, title: string, description: string, controls = "") { return `<section class="yt-outlier-chart-card"><div class="yt-outlier-section-heading"><div><h3>${title}</h3><p>${description}</p></div>${controls}</div><div class="yt-outlier-chart-wrap"><canvas id="${id}" aria-label="${title}"></canvas></div></section>`; }
-
-function renderFastestGrowth() {
-  const intervals = (growthSummary?.videos || []).map((video) => video.latestInterval).filter((item): item is LatestInterval => item !== null);
-  const valid = intervals.filter((item) => Number.isFinite(item[rankingMetric as keyof LatestInterval]));
-  const metricValue = (item: LatestInterval): number => Number(item[rankingMetric as keyof LatestInterval] || 0);
-  const rows = [...valid].sort((a, b) => metricValue(b) - metricValue(a)).slice(0, 10);
-  const controls = `<select class="yt-outlier-select" data-control="ranking-metric" aria-label="Ranking metric">${options({ viewGain: "Views gained", viewsPerHour: "Views per hour", likeGain: "Likes gained", commentGain: "Comments gained" }, rankingMetric)}</select>`;
-  return `<section class="yt-outlier-chart-card"><div class="yt-outlier-section-heading"><div><h3>Fastest-growing videos</h3><p>Most recent valid interval. Public counter corrections remain visible.</p></div>${controls}</div>${rows.length ? `<div class="yt-outlier-chart-wrap"><canvas id="fastest-chart"></canvas></div><div class="yt-outlier-growth-list">${rows.map((item) => `<button type="button" data-growth-video="${attr(item.videoId)}">${item.thumbnailUrl ? `<img src="${attr(item.thumbnailUrl)}" alt="">` : ""}<span><strong>${escapeHtml(item.title)}</strong><small>${G.formatElapsed(item.elapsedHours)} · gain ${signedNumber(Number(item[itemMetricGain(rankingMetric)]))} · ${signedNumber(Number(item[rankingRate(rankingMetric)]))}/h${item.corrected ? " · corrected" : ""}</small></span></button>`).join("")}</div>` : `<div class="yt-outlier-empty">At least two snapshots with this metric are required.</div>`}</section>`;
+function renderNextMove(insight: PatternInsight, index: number): string {
+  const signal = insight.value.split(" · ")[0] || insight.value;
+  const copy = insight.label === "Format"
+    ? `Build around ${signal.toLowerCase()}.`
+    : insight.label === "Title"
+    ? `Try this title pattern: ${signal}.`
+    : insight.label === "Length"
+      ? `Aim for a ${signal.toLowerCase()} video.`
+      : insight.label === "Day"
+        ? `Test your next upload on ${signal}.`
+        : insight.detail;
+  const heading = insight.label === "Format" ? "Choose the format" : insight.label === "Title" ? "Package the idea" : insight.label === "Length" ? "Plan the runtime" : insight.label === "Day" ? "Choose the timing" : "Run one clear test";
+  return `<article title="${escapeHtml(insight.detail)}">
+    <span>${String(index + 1).padStart(2, "0")}</span>
+    <div><strong>${escapeHtml(heading)}</strong><p>${escapeHtml(copy)}</p></div>
+  </article>`;
 }
 
-function renderSelectedGrowth() {
-  const videos = growthSummary?.videos || [];
-  const selected = videos.find((video) => video.videoId === growthVideoId);
-  const snapshots = growthVideoId ? videoSnapshotCache.get(growthVideoId) : undefined;
-  const controls = `<div class="yt-outlier-growth-controls"><select class="yt-outlier-select" data-control="growth-video">${videos.map((video) => `<option value="${attr(video.videoId)}" ${video.videoId === growthVideoId ? "selected" : ""}>${escapeHtml(shorten(video.title, 45))}</option>`).join("")}</select><select class="yt-outlier-select" data-control="growth-metric">${options({ viewCount: "Cumulative views", viewGain: "Views gained", viewsPerHour: "Views gained per hour", likeGain: "Likes gained", commentGain: "Comments gained" }, growthMetric)}</select></div>`;
-  if (!selected) return `<section class="yt-outlier-chart-card"><h3>Selected-video growth</h3><div class="yt-outlier-empty">No tracked videos are available.</div></section>`;
-  if (snapshots === null || snapshots === undefined) return `<section class="yt-outlier-chart-card"><div class="yt-outlier-section-heading"><div><h3>Selected-video growth</h3><p>Observed growth between extension snapshots</p></div>${controls}</div><div class="yt-outlier-empty">Loading video snapshots…</div></section>`;
-  if (snapshots.length < 2) return `<section class="yt-outlier-chart-card"><div class="yt-outlier-section-heading"><div><h3>Selected-video growth</h3><p>Observed growth between extension snapshots</p></div>${controls}</div><div class="yt-outlier-empty">One snapshot has been recorded. Scan this channel again later to create a real comparison.</div></section>`;
-  const acceleration = G.acceleration(snapshots, C.growthAcceleration);
-  return `${growthChartCard("video-growth-chart", "Selected-video growth", "Observed growth between extension snapshots", controls)}<p class="yt-outlier-note">Recent observed velocity change: ${acceleration ? `${acceleration.classification} (${signedNumber(acceleration.change)} views/hour)` : "Requires at least three valid snapshots."}</p>`;
+function analysisMetric(label: string, value: string, detail: string): string {
+  return `<div title="${escapeHtml(detail)}"><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`;
 }
 
-function renderSnapshotTable(scans: ChannelSnapshot[]) {
-  return `<section class="yt-outlier-growth-section"><h3>Snapshot history</h3><p class="yt-outlier-note">Scan timestamps are stored in UTC.</p><div class="yt-outlier-table-wrap"><table class="yt-outlier-table"><thead><tr><th>Captured</th><th>Analyzed videos</th><th>Subscribers</th><th>Channel views</th></tr></thead><tbody>${[...scans].reverse().map((scan) => `<tr><td>${formatTimestamp(scan.capturedAt)}</td><td>${scan.analyzedVideoCount}</td><td>${S.fullNumber(scan.subscriberCount)}</td><td>${S.fullNumber(scan.totalChannelViews)}</td></tr>`).join("")}</tbody></table></div></section>`;
+function channelHandoffUrl(result: AnalysisResult): string {
+  const formats = strongestContentFormats(result).map((format) => format.label.toLowerCase()).join(", ");
+  const patternContext = formats ? ` Its strongest repeatable formats are ${formats}.` : "";
+  const prompt = `Turn the strongest repeatable patterns from ${result.channel.title}’s recent uploads into three original YouTube video concepts for my channel.${patternContext}`;
+  const url = new URL(STANLEY_APP_URL);
+  url.searchParams.set("stanleyPrompt", prompt);
+  url.searchParams.set("source", "youtube-extension");
+  return url.toString();
 }
 
-function renderObservedChanges() {
-  const titleChanges = growthSummary?.titleChanges || []; const thumbnailChanges = growthSummary?.thumbnailChanges || [];
-  const changeList = (items: Array<{ value: string | null; title?: string; changedAt: string | null; firstObservedAt: string }>, thumbnail: boolean) => items.length ? `<div class="yt-outlier-change-list">${items.map((item) => `<div>${thumbnail && item.value ? `<img src="${attr(item.value)}" alt="">` : ""}<span><strong>${escapeHtml(thumbnail ? item.title : item.value || "Unavailable")}</strong><small>${thumbnail ? `${escapeHtml(shorten(item.title, 35))} · ` : ""}${item.changedAt ? `Changed ${formatTimestamp(item.changedAt)}` : `First observed ${formatTimestamp(item.firstObservedAt)}`}</small></span></div>`).join("")}</div>` : `<p class="yt-outlier-muted">No ${thumbnail ? "thumbnail" : "title"} snapshots have been observed.</p>`;
-  return `<section class="yt-outlier-growth-section"><h3>Changes observed since tracking began</h3><p class="yt-outlier-note">This is observed snapshot history, not complete historical data. Thumbnail URL identity ignores common CDN query and host variation; replacements at the same URL cannot be detected.</p><div class="yt-outlier-chart-grid"><div><h4>Title history</h4>${changeList(titleChanges, false)}</div><div><h4>Thumbnail history</h4>${changeList(thumbnailChanges, true)}</div></div></section>`;
+function positionDetailPopover(popover: HTMLElement, badge: HTMLButtonElement): void {
+  const badgeRect = badge.getBoundingClientRect();
+  const popoverRect = popover.getBoundingClientRect();
+  const margin = 12;
+  const left = Math.min(Math.max(margin, badgeRect.left), window.innerWidth - popoverRect.width - margin);
+  const below = badgeRect.bottom + 10;
+  const highestTop = Math.max(margin, window.innerHeight - popoverRect.height - margin);
+  const top = below + popoverRect.height <= window.innerHeight - margin
+    ? below
+    : Math.min(Math.max(margin, badgeRect.top - 24), highestTop);
+  popover.style.left = `${Math.round(left)}px`;
+  popover.style.top = `${Math.round(top)}px`;
 }
 
-function renderVideos() {
-  const videos = getVisibleVideos();
-  return `<div class="yt-outlier-video-tools"><input class="yt-outlier-search" type="search" data-control="title-search" value="${attr(titleSearch)}" placeholder="Search titles" aria-label="Search video titles"><select class="yt-outlier-select" data-control="video-filter">${filterOptions()}</select><select class="yt-outlier-select" data-control="video-sort">${sortOptions()}</select></div>
-    <div class="yt-outlier-table-wrap"><table class="yt-outlier-table"><thead><tr><th>Video</th><th>Published</th><th>Age</th><th>Duration</th><th>Views</th><th>Views/day</th><th>Baseline</th><th>Outlier</th><th>Like rate</th><th>Comment rate</th></tr></thead><tbody>${videos.map(videoRow).join("")}</tbody></table>${videos.length ? "" : `<div class="yt-outlier-empty">No videos match these filters.</div>`}</div>`;
+function closeDetailPopover(restoreFocus = true): void {
+  document.getElementById(DETAIL_ID)?.remove();
+  if (activeDetailButton) {
+    activeDetailButton.setAttribute("aria-expanded", "false");
+    if (restoreFocus && activeDetailButton.isConnected) activeDetailButton.focus({ preventScroll: true });
+  }
+  activeDetailButton = null;
 }
 
-function videoRow(video: AnalyzedVideo) {
-  return `<tr tabindex="0" data-video-id="${attr(video.id)}"><td><div class="yt-outlier-table-video">${video.thumbnailUrl ? `<img src="${attr(video.thumbnailUrl)}" alt="">` : ""}<strong>${escapeHtml(video.title)}</strong></div></td><td>${formatDate(video.publishedAt)}</td><td>${S.formatAge(video.ageHours)}</td><td>${S.formatDuration(video.durationSeconds)}</td><td>${S.compactNumber(video.viewCount)}</td><td>${S.compactNumber(video.viewsPerDay)}</td><td>${S.compactNumber(video.baselineViews)}</td><td>${formatMultiple(video.outlierMultiple)}</td><td>${formatRate(video.likeRate)}</td><td>${formatRate(video.commentRate)}</td></tr>`;
+function handleViewportChange(): void {
+  closeDetailPopover(false);
 }
 
-function renderDrawer() {
-  const video = analysis?.videos.find((item) => item.id === selectedVideoId);
-  if (!video) return "";
-  loadVideoSnapshots(video.id);
-  const medians = medianComparisons();
-  return `<div class="yt-outlier-drawer-backdrop" data-action="close-drawer"></div><aside class="yt-outlier-drawer" aria-label="Video details"><button class="yt-outlier-icon-button" type="button" data-action="close-drawer" aria-label="Close details">&times;</button>
-    ${video.thumbnailUrl ? `<img class="yt-outlier-drawer-thumb" src="${attr(video.thumbnailUrl)}" alt="">` : ""}<h3>${escapeHtml(video.title)}</h3>
-    <dl class="yt-outlier-detail-grid">${detail("Upload date", new Date(video.publishedAt).toLocaleString())}${detail("Age", S.formatAge(video.ageHours))}${detail("Duration", S.formatDuration(video.durationSeconds))}${detail("Views", S.fullNumber(video.viewCount))}${detail("Views/day", S.fullNumber(video.viewsPerDay))}${detail("Baseline", S.fullNumber(video.baselineViews))}${detail("Outlier", formatMultiple(video.outlierMultiple))}${detail("View rank", rankText(video.viewRank))}${detail("Outlier rank", rankText(video.outlierRank))}${detail("Like rate", formatRate(video.likeRate))}${detail("Comment rate", formatRate(video.commentRate))}</dl>
-    <h4>Compared with channel median</h4><dl class="yt-outlier-detail-grid">${comparisonDetail("Views", video.viewCount, medians.views)}${comparisonDetail("Views/day", video.viewsPerDay, medians.viewsPerDay)}${comparisonDetail("Like rate", video.likeRate, medians.likeRate, true)}${comparisonDetail("Comment rate", video.commentRate, medians.commentRate, true)}${comparisonDetail("Duration", video.durationSeconds, medians.duration)}</dl>
-    <section class="yt-outlier-mini-chart"><h4>Nearby eligible uploads</h4><div class="yt-outlier-chart-wrap"><canvas id="comparison-chart"></canvas></div></section>
-    ${renderDrawerGrowth(video.id)}
-    <a class="yt-outlier-primary-link" href="${attr(video.youtubeUrl)}" target="_blank" rel="noopener noreferrer">Open on YouTube</a></aside>`;
+function handleDocumentClick(event: MouseEvent): void {
+  const target = event.target instanceof Node ? event.target : null;
+  const popover = document.getElementById(DETAIL_ID);
+  if (!target || !popover || popover.contains(target) || activeDetailButton?.contains(target)) return;
+  closeDetailPopover(false);
 }
 
-function renderDrawerGrowth(videoId: string) {
-  const snapshots = videoSnapshotCache.get(videoId);
-  if (snapshots === undefined || snapshots === null) return `<section><h4>Observed growth between scans</h4><p class="yt-outlier-muted">Loading extension snapshots…</p></section>`;
-  if (snapshots.length < 2) return `<section><h4>Observed growth between scans</h4><p class="yt-outlier-muted">One snapshot has been recorded. Scan this channel again later to create a real comparison.</p></section>`;
-  const value = G.intervals(snapshots).at(-1); const current = snapshots.at(-1); const previous = snapshots.at(-2);
-  if (!value || !current || !previous) return `<section><h4>Observed growth between scans</h4><p class="yt-outlier-muted">A valid spaced comparison is unavailable.</p></section>`;
-  const acceleration = G.acceleration(snapshots, C.growthAcceleration);
-  return `<section><h4>Observed growth between scans</h4><dl class="yt-outlier-detail-grid">${detail("Current views", S.fullNumber(current.viewCount))}${detail("Previous recorded views", S.fullNumber(previous.viewCount))}${detail("View gain", signedNumber(value.viewGain))}${detail("Hours since scan", formatDecimal(value.elapsedHours))}${detail("Views gained/hour", signedNumber(value.viewsPerHour))}${detail("Like gain", signedNumber(value.likeGain))}${detail("Comment gain", signedNumber(value.commentGain))}${detail("Velocity change", acceleration?.classification || "Requires 3 snapshots")}</dl>${value.corrected ? `<p class="yt-outlier-correction" title="YouTube may correct public counts after audits.">Public counter correction observed; the negative value is preserved.</p>` : ""}<div class="yt-outlier-mini-chart"><div class="yt-outlier-chart-wrap"><canvas id="drawer-growth-chart"></canvas></div></div></section>`;
+function handleDocumentKeydown(event: KeyboardEvent): void {
+  if (event.key !== "Escape") return;
+  if (document.getElementById(CHANNEL_BACKDROP_ID)) closeChannelAnalytics();
+  else if (document.getElementById(DETAIL_ID)) closeDetailPopover();
 }
 
-function handlePanelClick(event: MouseEvent) {
-  const target = event.target instanceof Element ? event.target : null; if (!target) return;
-  const close = target.closest(".yt-outlier-close"); if (close) return closePanel();
-  const tab = target.closest<HTMLElement>("[data-tab]"); if (tab) { activeTab = tab.dataset.tab || "overview"; if (activeTab === "growth-tracking") loadGrowthSummary(analysis.channel.id); else renderApp(); return; }
-  const growthVideo = target.closest<HTMLElement>("[data-growth-video]"); if (growthVideo?.dataset.growthVideo) { growthVideoId = growthVideo.dataset.growthVideo; loadVideoSnapshots(growthVideoId); renderApp(); return; }
-  const videoTarget = target.closest<HTMLElement>("[data-video-id]"); if (videoTarget) { selectedVideoId = videoTarget.dataset.videoId || null; renderApp(); return; }
-  if (target.closest('[data-action="close-drawer"]')) { selectedVideoId = null; renderApp(); }
-}
-function handlePanelChange(event: Event) {
-  const target = event.target instanceof HTMLSelectElement ? event.target : null; if (!target) return;
-  const control = target.dataset.control;
-  if (control === "recent-metric") recentMetric = target.value as AnalysisMetric;
-  if (control === "age-metric") ageMetric = target.value as AnalysisMetric;
-  if (control === "duration-metric") durationMetric = target.value as GroupMetric;
-  if (control === "weekday-metric") weekdayMetric = target.value as GroupMetric;
-  if (control === "video-sort") videoSort = target.value;
-  if (control === "video-filter") videoFilter = target.value;
-  if (control === "ranking-metric") rankingMetric = target.value as GrowthMetric;
-  if (control === "growth-metric") growthMetric = target.value as GrowthMetric;
-  if (control === "growth-video") { growthVideoId = target.value; loadVideoSnapshots(growthVideoId); }
-  renderApp();
-}
-function handlePanelInput(event: Event) {
-  const target = event.target instanceof HTMLInputElement ? event.target : null;
-  if (target?.dataset.control !== "title-search") return;
-  titleSearch = target.value;
-  renderApp();
-  requestAnimationFrame(() => {
-    const search = panel?.querySelector<HTMLInputElement>('[data-control="title-search"]');
-    if (search) { search.focus(); search.setSelectionRange(search.value.length, search.value.length); }
+function showStatus(kind: StatusKind, message: string, hideAfter = 0, retry = false): void {
+  if (disposed) return;
+  if (statusTimer) {
+    clearTimeout(statusTimer);
+    statusTimer = null;
+  }
+  let status = document.getElementById(STATUS_ID);
+  if (!status) {
+    status = document.createElement("div");
+    status.id = STATUS_ID;
+    status.setAttribute("role", "status");
+    status.setAttribute("aria-live", "polite");
+    document.body.appendChild(status);
+  }
+  status.dataset.kind = kind;
+  status.innerHTML = `<span class="stanley-status-icon" aria-hidden="true"></span><span>${escapeHtml(message)}</span>${retry ? '<button type="button">Retry</button>' : ""}`;
+  status.querySelector<HTMLButtonElement>("button")?.addEventListener("click", () => {
+    lastScannedChannelKey = "";
+    status?.remove();
+    refreshUi();
   });
+  if (hideAfter > 0) statusTimer = setTimeout(() => status?.remove(), hideAfter);
 }
 
-function renderCharts() {
-  if (!analysis || !panel) return;
-  if (activeTab === "overview") { renderRecent(); renderDistribution(); renderTop(); }
-  if (activeTab === "performance") { renderBaseline(); renderAge(); renderRolling(); renderConcentration(); }
-  if (activeTab === "upload-patterns") { renderDuration(); renderWeekday(); renderFrequency(); renderTitleScatter(); renderTitleBuckets(); renderEngagementScatters(); }
-  if (activeTab === "growth-tracking") { renderMomentum(); renderFastestChart(); renderVideoGrowth(); }
-  if (selectedVideoId) renderComparison();
-  if (selectedVideoId) renderDrawerGrowthChart();
+function clearChannelUi(): void {
+  scanToken += 1;
+  analysis = null;
+  channelPulse = null;
+  lastScannedChannelKey = "";
+  openAnalyticsAfterScan = false;
+  activeScans.clear();
+  removeInjectedUi();
 }
 
-function renderRecent() {
-  const videos = [...analysis.eligible].reverse();
-  const values = videos.map((video) => video[recentMetric]);
-  const rolling = S.rollingMedian(values);
-  const p = Charts.colors();
-  const options = commonOptions("Upload order", metricName(recentMetric), videos);
-  options.plugins.tooltip = { enabled: false, external: (context: { chart: { canvas: HTMLCanvasElement; width: number }; tooltip: TooltipLike }) => renderRecentTooltip(context, videos) };
-  Charts.render("recent", byId("recent-chart"), { type: "line", data: { labels: videos.map((_, index) => String(index + 1)), datasets: [{ label: metricName(recentMetric), data: values, borderColor: p.primary, backgroundColor: p.primary, pointRadius: 4 }, { label: "Rolling median", data: rolling, borderColor: p.accent, borderDash: [6, 4], pointRadius: 0 }] }, options });
-}
-function renderDistribution() {
-  const counts = Object.fromEntries(C.outlierBuckets.map((item) => [item.key, 0]));
-  analysis.eligible.forEach((video) => { const key = S.bucket(video.outlierMultiple, C.outlierBuckets); if (key) counts[key] = (counts[key] || 0) + 1; });
-  const p = Charts.colors(); Charts.render("distribution", byId("distribution-chart"), { type: "bar", data: { labels: C.outlierBuckets.map((item) => item.label), datasets: [{ label: "Videos", data: Object.values(counts), backgroundColor: p.primary }] }, options: commonOptions("Outlier bucket", "Videos") });
-}
-function renderTop() {
-  const videos = analysis.eligible.filter((video): video is AnalyzedVideo & { outlierMultiple: number } => Number.isFinite(video.outlierMultiple)).sort((a, b) => b.outlierMultiple - a.outlierMultiple).slice(0, 10).reverse();
-  const p = Charts.colors(); const chart = Charts.render("top", byId("top-chart"), { type: "bar", data: { labels: videos.map((video) => shorten(video.title, 24)), datasets: [{ label: "Outlier multiple", data: videos.map((video) => video.outlierMultiple), backgroundColor: p.accent }] }, options: { ...commonOptions("Outlier multiple", "Video", videos, true), indexAxis: "y", onClick: (_event: unknown, elements: ChartItem[]) => { const element = elements[0]; const video = element ? videos[element.dataIndex] : undefined; if (video) { selectedVideoId = video.id; renderApp(); } } } });
-  return chart;
-}
-function renderBaseline() {
-  const videos = analysis.eligible.filter((video): video is AnalyzedVideo & { baselineViews: number } => Number.isFinite(video.baselineViews));
-  const max = Math.max(1, ...videos.flatMap((video) => [video.baselineViews, video.viewCount])); const p = Charts.colors();
-  Charts.render("baseline", byId("baseline-chart"), { type: "scatter", data: { datasets: [{ label: "Videos", data: videos.map((video) => ({ x: video.baselineViews, y: video.viewCount, video })), backgroundColor: p.primary }, { label: "Actual = baseline", data: [{ x: 0, y: 0 }, { x: max, y: max }], borderColor: p.muted, borderDash: [6, 4], pointRadius: 0, type: "line" }] }, options: scatterOptions("Baseline views", "Actual views") });
-}
-function renderAge() {
-  const videos = analysis.eligible.filter((video) => Number.isFinite(video[ageMetric])); const p = Charts.colors();
-  Charts.render("age", byId("age-chart"), { type: "scatter", data: { datasets: [{ label: metricName(ageMetric), data: videos.map((video) => ({ x: video.ageDays, y: video[ageMetric], video })), backgroundColor: p.primary }] }, options: scatterOptions("Video age (days)", metricName(ageMetric)) });
-}
-function renderRolling() {
-  const videos = [...analysis.eligible].reverse().filter((video) => Number.isFinite(video.baselineViews)); const p = Charts.colors();
-  Charts.render("rolling", byId("rolling-chart"), { type: "line", data: { labels: videos.map((_, index) => String(index + 1)), datasets: [{ label: "Rolling baseline", data: videos.map((video) => video.baselineViews), borderColor: p.primary, backgroundColor: p.primary }] }, options: commonOptions("Upload order", "Baseline views", videos) });
-}
-function renderConcentration() {
-  const sorted = [...analysis.videos].sort((a, b) => b.viewCount - a.viewCount); const total = sorted.reduce((sum, video) => sum + video.viewCount, 0); const sums = (start: number, end?: number) => sorted.slice(start, end).reduce((sum, video) => sum + video.viewCount, 0);
-  const values = [sums(0, 1), sums(1, 3), sums(3, 5), sums(5)].map((value) => S.safeDivide(value, total) === null ? 0 : value / total * 100);
-  Charts.render("concentration", byId("concentration-chart"), { type: "doughnut", data: { labels: ["Top 1", "Videos 2-3", "Videos 4-5", "Remaining"], datasets: [{ data: values, backgroundColor: ["#065fd4", "#2ba640", "#f4b400", "#8a8a8a"] }] }, options: { plugins: { tooltip: { callbacks: { label: (context: { label: string; raw: number }) => `${context.label}: ${context.raw.toFixed(1)}%` } } } } });
-}
-function renderComparison() {
-  const chronological = [...analysis.eligible].reverse(); const index = chronological.findIndex((video) => video.id === selectedVideoId); if (index < 0) return;
-  const videos = chronological.slice(Math.max(0, index - 5), index + 6); const p = Charts.colors();
-  Charts.render("comparison", byId("comparison-chart"), { type: "bar", data: { labels: videos.map((video) => shorten(video.title, 12)), datasets: [{ label: "Views", data: videos.map((video) => video.viewCount), backgroundColor: videos.map((video) => video.id === selectedVideoId ? p.accent : p.primary) }] }, options: commonOptions("Nearby uploads", "Views", videos) });
+function removeInjectedUi(): void {
+  closeDetailPopover(false);
+  closeChannelAnalytics(false);
+  activeAnalyticsTrigger = null;
+  document.querySelectorAll<HTMLElement>(OVERLAY_SELECTOR).forEach((element) => element.remove());
+  document.querySelectorAll<HTMLElement>(".stanley-title-heading").forEach((element) => element.classList.remove("stanley-title-heading"));
+  document.querySelectorAll<HTMLElement>(".stanley-title-metric-host").forEach((element) => element.classList.remove("stanley-title-metric-host"));
+  document.querySelectorAll<HTMLElement>(".stanley-overlay-host").forEach((element) => element.classList.remove("stanley-overlay-host"));
+  document.querySelectorAll<HTMLElement>(".stanley-channel-launcher-host").forEach((element) => element.classList.remove("stanley-channel-launcher-host"));
+  document.getElementById(CHANNEL_LAUNCHER_ID)?.remove();
+  document.getElementById(STATUS_ID)?.remove();
+  removeLegacyPanel();
 }
 
-function renderDuration() { renderGroupedBar("duration", byId("duration-chart"), analysis.uploadPatterns.duration, durationMetric); }
-function renderWeekday() { renderGroupedBar("weekday", byId("weekday-chart"), analysis.uploadPatterns.weekday, weekdayMetric); }
-function renderGroupedBar(key: string, canvas: Element | null | undefined, groups: GroupSummary[], metric: GroupMetric) {
-  const p = Charts.colors();
-  Charts.render(key, canvas, { type: "bar", data: { labels: groups.map((group) => `${group.label} (n=${group.count})`), datasets: [{ label: groupedMetricName(metric), data: groups.map((group) => group[metric]), backgroundColor: groups.map((group) => group.limitedSample ? p.warning : p.primary) }] }, options: { ...commonOptions("Group", groupedMetricName(metric)), plugins: { tooltip: { callbacks: { afterBody: (items: ChartItem[]) => { const group = groups[items[0]?.dataIndex ?? -1]; return group ? [`Sample: ${group.count}`, ...(group.limitedSample ? ["Limited sample"] : [])] : []; } } } } } });
-}
-function renderFrequency() {
-  const gaps = analysis.uploadPatterns.frequency.gaps; if (!gaps.length) return;
-  const p = Charts.colors();
-  Charts.render("frequency", byId("frequency-chart"), { type: "bar", data: { labels: gaps.map((gap) => formatDate(gap.publishedAt)), datasets: [{ label: "Days since previous upload", data: gaps.map((gap) => gap.days), backgroundColor: p.primary }] }, options: { ...commonOptions("Upload date", "Gap (days)"), plugins: { tooltip: { callbacks: { afterBody: (items: ChartItem[]) => { const gap = gaps[items[0]?.dataIndex ?? -1]; return gap ? [`Upload #${gap.uploadNumber}`, `Previous: ${shorten(gap.previousVideo.title, 44)}`, `Current: ${shorten(gap.video.title, 44)}`] : []; } } } } } });
-}
-function renderTitleScatter() {
-  const points = analysis.uploadPatterns.title.scatter; if (!points.length) return;
-  const p = Charts.colors(); Charts.render("title-scatter", byId("title-scatter-chart"), { type: "scatter", data: { datasets: [{ label: "Videos", data: points, backgroundColor: p.primary }] }, options: titleScatterOptions("Title character count", "Outlier multiple") });
-}
-function renderTitleBuckets() { renderGroupedBar("title-buckets", byId("title-buckets-chart"), analysis.uploadPatterns.title.buckets, "medianOutlier"); }
-function renderEngagementScatters() {
-  const e = analysis.uploadPatterns.engagement; const p = Charts.colors();
-  if (e.likeScatter.length) Charts.render("like-scatter", byId("like-scatter-chart"), { type: "scatter", data: { datasets: [{ label: "Videos", data: e.likeScatter, backgroundColor: p.primary }] }, options: engagementScatterOptions("Like rate", "Outlier multiple") });
-  if (e.commentScatter.length) Charts.render("comment-scatter", byId("comment-scatter-chart"), { type: "scatter", data: { datasets: [{ label: "Videos", data: e.commentScatter, backgroundColor: p.accent }] }, options: engagementScatterOptions("Comment rate", "Outlier multiple") });
+function removeLegacyPanel(): void {
+  document.getElementById(LEGACY_PANEL_ID)?.remove();
 }
 
-function renderMomentum() {
-  const items = growthSummary?.momentum || []; if (!items.length) return;
-  const p = Charts.colors();
-  Charts.render("momentum", byId("momentum-chart"), { type: "line", data: { labels: items.map((item) => formatTimestamp(item.capturedAt)), datasets: [
-    { label: "Total observed view gain", data: items.map((item) => item.totalViewGain), borderColor: p.primary, backgroundColor: p.primary, yAxisID: "y" },
-    { label: "Median views/hour", data: items.map((item) => item.medianViewsPerHour), borderColor: p.accent, backgroundColor: p.accent, yAxisID: "y" },
-    { label: "Videos included", data: items.map((item) => item.videosIncluded), borderColor: p.warning, backgroundColor: p.warning, yAxisID: "count" }
-  ] }, options: { scales: { x: { title: { text: "Scan timestamp" } }, y: { title: { text: "Observed growth" }, beginAtZero: true }, count: { position: "right", title: { text: "Videos included" }, beginAtZero: true, grid: { drawOnChartArea: false } } } } });
+function videoIdFromHref(href: string): string | null {
+  try {
+    return new URL(href, location.origin).searchParams.get("v");
+  } catch {
+    return null;
+  }
 }
 
-function renderFastestChart() {
-  const valueFor = (item: LatestInterval): number => Number(item[rankingMetric as keyof LatestInterval] || 0);
-  const items = (growthSummary?.videos || []).map((video) => video.latestInterval).filter((item): item is LatestInterval => item !== null && Number.isFinite(item[rankingMetric as keyof LatestInterval]))
-    .sort((a, b) => valueFor(b) - valueFor(a)).slice(0, 10).reverse();
-  if (!items.length) return;
-  const p = Charts.colors();
-  Charts.render("fastest", byId("fastest-chart"), { type: "bar", data: { labels: items.map((item) => shorten(item.title, 26)), datasets: [{ label: growthMetricLabel(rankingMetric), data: items.map(valueFor), backgroundColor: items.map((item) => Number(item[itemMetricGain(rankingMetric)] || 0) < 0 ? p.warning : p.primary) }] }, options: { indexAxis: "y", scales: { x: { title: { text: growthMetricLabel(rankingMetric) } }, y: { title: { text: "Video" } } }, plugins: { tooltip: { callbacks: { afterBody: (points: ChartItem[]) => { const item = items[points[0]?.dataIndex ?? -1]; return item ? [`Interval: ${G.formatElapsed(item.elapsedHours)}`, `Gain: ${signedNumber(Number(item[itemMetricGain(rankingMetric)]))}`, `Gain/hour: ${signedNumber(Number(item[rankingRate(rankingMetric)]))}`, ...(item.corrected ? ["Public count correction observed"] : [])] : []; } } } } } });
+function isChannelPulseData(value: unknown): value is ChannelPulseData {
+  if (!isRecord(value) || !isRecord(value.summary) || !Array.isArray(value.videos)) return false;
+  const summary = value.summary;
+  return typeof summary.recordedScans === "number"
+    && typeof summary.totalViewGain === "number"
+    && isNullableFiniteNumber(summary.medianViewsPerHour)
+    && (summary.fastestGrowingVideo === null || isPulseLeader(summary.fastestGrowingVideo))
+    && (summary.largestAbsoluteGain === null || isPulseLeader(summary.largestAbsoluteGain))
+    && typeof summary.videosWithComparisons === "number"
+    && value.videos.every(isPulseVideo);
 }
 
-function renderVideoGrowth() {
-  const snapshots = growthVideoId ? videoSnapshotCache.get(growthVideoId) : undefined; if (!snapshots || snapshots.length < 2) return;
-  renderSnapshotLine("video-growth", byId("video-growth-chart"), snapshots, growthMetric);
+function isPulseLeader(value: unknown): value is PulseLeader {
+  return isRecord(value)
+    && typeof value.videoId === "string"
+    && typeof value.title === "string"
+    && (value.thumbnailUrl === null || typeof value.thumbnailUrl === "string")
+    && isNullableFiniteNumber(value.viewGain)
+    && isNullableFiniteNumber(value.viewsPerHour)
+    && typeof value.elapsedHours === "number";
 }
 
-function renderDrawerGrowthChart() {
-  const snapshots = selectedVideoId ? videoSnapshotCache.get(selectedVideoId) : undefined; if (!snapshots || snapshots.length < 2) return;
-  renderSnapshotLine("drawer-growth", byId("drawer-growth-chart"), snapshots, "viewCount");
+function isPulseVideo(value: unknown): value is PulseVideo {
+  if (!isRecord(value)
+    || typeof value.videoId !== "string"
+    || typeof value.title !== "string"
+    || !(value.thumbnailUrl === null || typeof value.thumbnailUrl === "string")) return false;
+  if (value.acceleration === null) return true;
+  if (!isRecord(value.acceleration)) return false;
+  return typeof value.acceleration.change === "number"
+    && typeof value.acceleration.velocity1 === "number"
+    && typeof value.acceleration.velocity2 === "number"
+    && ["Accelerating", "Decelerating", "Stable"].includes(String(value.acceleration.classification));
 }
 
-function renderSnapshotLine(key: string, canvas: Element | null | undefined, snapshots: VideoSnapshot[], metric: GrowthMetric) {
-  const sorted = G.dedupeSnapshots(snapshots); const values = metric === "viewCount" ? sorted.map((item) => item.viewCount) : [null, ...G.intervals(sorted).map((item) => item[metric as keyof typeof item] as number | null)];
-  const p = Charts.colors();
-  Charts.render(key, canvas, { type: "line", data: { labels: sorted.map((item) => formatTimestamp(item.capturedAt)), datasets: [{ label: growthMetricLabel(metric), data: values, borderColor: p.primary, backgroundColor: p.primary, pointBackgroundColor: values.map((value) => Number.isFinite(value) && (value ?? 0) < 0 ? p.warning : p.primary), spanGaps: false }] }, options: { scales: { x: { title: { text: "Snapshot timestamp" } }, y: { title: { text: growthMetricLabel(metric) }, beginAtZero: metric === "viewCount" } }, plugins: { tooltip: { callbacks: { afterBody: (points: ChartItem[]) => Number(points[0]?.raw) < 0 ? ["Public counts can decrease after audits or corrections."] : [] } } } } });
+function isNullableFiniteNumber(value: unknown): value is number | null {
+  return value === null || (typeof value === "number" && Number.isFinite(value));
 }
 
-function itemMetricGain(metric: GrowthMetric): keyof LatestInterval { return metric === "viewsPerHour" || metric === "viewCount" ? "viewGain" : metric; }
-function rankingRate(metric: GrowthMetric): keyof LatestInterval { return metric === "likeGain" ? "likesPerHour" : metric === "commentGain" ? "commentsPerHour" : "viewsPerHour"; }
-function growthMetricLabel(metric: GrowthMetric) { return ({ viewCount: "Cumulative views", viewGain: "Views gained", viewsPerHour: "Views gained per hour", likeGain: "Likes gained", commentGain: "Comments gained" })[metric]; }
-
-function commonOptions(xTitle: string, yTitle: string, videos: AnalyzedVideo[] = [], horizontal = false): CommonOptions {
-  const x = { title: { text: xTitle } }, y = { title: { text: yTitle }, beginAtZero: true };
-  return { scales: horizontal ? { x: y, y: { ...x, ticks: { callback: (value: unknown, index: number) => videos[index] ? shorten(videos[index]?.title, 22) : value } } } : { x, y }, plugins: { tooltip: { callbacks: { afterBody: (items: ChartItem[]) => { const video = videos[items[0]?.dataIndex ?? -1]; return video ? tooltipLines(video) : []; } } } } };
-}
-function scatterOptions(xTitle: string, yTitle: string) { return { scales: { x: { title: { text: xTitle }, beginAtZero: true, ticks: {} as Record<string, unknown> }, y: { title: { text: yTitle }, beginAtZero: true } }, plugins: { tooltip: { callbacks: { label: (item: ScatterContext) => tooltipLines(item.raw.video) } } } }; }
-function titleScatterOptions(xTitle: string, yTitle: string) { const result = scatterOptions(xTitle, yTitle); result.plugins.tooltip.callbacks.label = (item: ScatterContext) => { const video = item.raw.video; return [video.title, `Characters: ${video.titleMetadata.characterCount}`, `Views: ${S.fullNumber(video.viewCount)}`, `Views/day: ${S.fullNumber(video.viewsPerDay)}`, `Outlier: ${formatMultiple(video.outlierMultiple)}`]; }; return result; }
-function engagementScatterOptions(xTitle: string, yTitle: string) { const result = scatterOptions(xTitle, yTitle); result.scales.x.ticks = { callback: (value: unknown) => `${(Number(value) * 100).toFixed(1)}%` }; result.plugins.tooltip.callbacks.label = (item: ScatterContext) => { const video = item.raw.video; return [video.title, `${xTitle}: ${formatRate(item.raw.x ?? null)}`, `Views: ${S.fullNumber(video.viewCount)}`, `Outlier: ${formatMultiple(video.outlierMultiple)}`]; }; return result; }
-function tooltipLines(video: AnalyzedVideo) { return [video.title, `Uploaded: ${formatDate(video.publishedAt)}`, `Age: ${S.formatAge(video.ageHours)}`, `Views: ${S.fullNumber(video.viewCount)}`, `Views/day: ${S.fullNumber(video.viewsPerDay)}`, `Baseline: ${S.fullNumber(video.baselineViews)}`, `Outlier: ${formatMultiple(video.outlierMultiple)}`]; }
-function renderRecentTooltip({ chart, tooltip }: { chart: { canvas: HTMLCanvasElement; width: number }; tooltip: TooltipLike }, videos: AnalyzedVideo[]) {
-  let node = panel?.querySelector<HTMLElement>(".yt-outlier-chart-tooltip") || null;
-  if (!node) { node = document.createElement("div"); node.className = "yt-outlier-chart-tooltip"; chart.canvas.parentNode?.appendChild(node); }
-  if (!tooltip || tooltip.opacity === 0) { node.hidden = true; return; }
-  const dataIndex = tooltip.dataPoints?.[0]?.dataIndex;
-  const video = dataIndex === undefined ? undefined : videos[dataIndex]; if (!video) return;
-  node.hidden = false;
-  node.innerHTML = `${video.thumbnailUrl ? `<img src="${attr(video.thumbnailUrl)}" alt="">` : ""}<strong>${escapeHtml(video.title)}</strong>${tooltipLines(video).slice(1).map((line) => `<span>${escapeHtml(line)}</span>`).join("")}`;
-  node.style.left = `${Math.min(tooltip.caretX + 12, chart.width - 240)}px`; node.style.top = `${Math.max(0, tooltip.caretY - 60)}px`;
+function outlierTier(value: number | null): OutlierTier {
+  if (!Number.isFinite(value)) return "unrated";
+  if ((value ?? 0) >= 2) return "breakout";
+  if ((value ?? 0) >= 1) return "above";
+  return "below";
 }
 
-function getVisibleVideos(): AnalyzedVideo[] {
-  const now = new Date(analysis.scannedAt).getTime();
-  const filtered = analysis.videos.filter((video) => {
-    if (titleSearch && !video.title.toLowerCase().includes(titleSearch.toLowerCase())) return false;
-    if (videoFilter === "long" && video.isLikelyShort) return false;
-    if (videoFilter === "shorts" && !video.isLikelyShort) return false;
-    if (videoFilter.startsWith("above") && (!Number.isFinite(video.outlierMultiple) || (video.outlierMultiple ?? 0) < Number(videoFilter.slice(5)))) return false;
-    const days = ({ days30: 30, days90: 90, year: 365 } as Record<string, number>)[videoFilter];
-    return !days || now - new Date(video.publishedAt).getTime() <= days * 86400000;
-  });
-  const getters: Record<string, (video: AnalyzedVideo) => number> = { views: (v) => -v.viewCount, outlier: (v) => -(v.outlierMultiple ?? -Infinity), vpd: (v) => -v.viewsPerDay, recent: (v) => -new Date(v.publishedAt).getTime(), oldest: (v) => new Date(v.publishedAt).getTime(), longest: (v) => -v.durationSeconds, shortest: (v) => v.durationSeconds, likes: (v) => -(v.likeRate ?? -Infinity), comments: (v) => -(v.commentRate ?? -Infinity) };
-  const getter = getters[videoSort] || getters.views!;
-  return filtered.sort((a, b) => getter(a) - getter(b) || b.publishedAt.localeCompare(a.publishedAt));
+function formatOutlier(value: number | null): string {
+  if (!Number.isFinite(value)) return "—";
+  const numeric = value ?? 0;
+  return `${numeric >= 10 ? numeric.toFixed(0) : numeric.toFixed(1)}×`;
 }
 
-function medianComparisons() { const e = analysis.eligible; return { views: S.median(e.map((v) => v.viewCount)), viewsPerDay: S.median(e.map((v) => v.viewsPerDay)), likeRate: S.median(e.map((v) => v.likeRate)), commentRate: S.median(e.map((v) => v.commentRate)), duration: S.median(e.map((v) => v.durationSeconds)) }; }
-function rollingDirectionDescription() { const values = [...analysis.eligible].reverse().map((v) => v.baselineViews).filter(Number.isFinite); const normalized = S.safeDivide(S.linearRegressionSlope(values), S.mean(values)); const direction = normalized === null ? "unavailable" : normalized > C.baselineDirection.rising ? "rising" : normalized < C.baselineDirection.declining ? "declining" : "stable"; return `Recent baseline direction: ${direction}. A descriptive trend across eligible uploads.`; }
-function metricCard([label, value, tooltip]: MetricCard) { return `<div class="yt-outlier-metric" ${tooltip ? `title="${attr(tooltip)}"` : ""}><span>${label}${tooltip ? " <sup>?</sup>" : ""}</span><strong>${escapeHtml(value)}</strong></div>`; }
-function detail(label: string, value: string) { return `<div><dt>${label}</dt><dd>${escapeHtml(value)}</dd></div>`; }
-function comparisonDetail(label: string, value: number | null, baseline: number | null, rate = false) { const difference = value !== null && baseline !== null ? value - baseline : null; const percent = S.percentageDifference(value, baseline); const formatted = difference === null ? "Unavailable" : `${difference >= 0 ? "+" : ""}${rate ? (difference * 100).toFixed(2) + " pp" : S.compactNumber(difference)}${percent === null ? "" : ` (${percent >= 0 ? "+" : ""}${percent.toFixed(1)}%)`}`; return detail(label, formatted); }
-function filterOptions() { return options({ all: "All videos", long: "Long-form only", shorts: "Likely Shorts", above1: "Above 1x", above2: "Above 2x", above5: "Above 5x", days30: "Last 30 days", days90: "Last 90 days", year: "Last year" }, videoFilter); }
-function sortOptions() { return options({ views: "Highest views", outlier: "Highest outlier", vpd: "Highest views/day", recent: "Most recent", oldest: "Oldest", longest: "Longest", shortest: "Shortest", likes: "Highest like rate", comments: "Highest comment rate" }, videoSort); }
-function options(entries: Record<string, string>, selected: string) { return Object.entries(entries).map(([value, label]) => `<option value="${value}" ${value === selected ? "selected" : ""}>${label}</option>`).join(""); }
-function byId(id: string) { return panel?.querySelector(`#${id}`); }
-function formatRate(value: number | null) { return Number.isFinite(value) ? `${((value ?? 0) * 100).toFixed(2)}%` : "Unavailable"; }
-function formatMultiple(value: number | null) { return Number.isFinite(value) ? `${(value ?? 0).toFixed(2)}x` : "Unavailable"; }
-function formatDecimal(value: number | null) { return Number.isFinite(value) ? (value ?? 0).toFixed(1) : "Unavailable"; }
-function rankText(value: number | null) { return Number.isFinite(value) ? `#${value}` : "Unavailable"; }
-function metricName(metric: AnalysisMetric) { return ({ viewCount: "Total views", viewsPerDay: "Views per day", outlierMultiple: "Outlier multiple" })[metric]; }
-function groupedMetricName(metric: GroupMetric) { return ({ medianViews: "Median views", medianViewsPerDay: "Median views per day", medianOutlier: "Median outlier" })[metric]; }
-function formatDays(value: number | null) { return Number.isFinite(value) ? `${(value ?? 0).toFixed((value ?? 0) >= 10 ? 1 : 2)} days` : "Unavailable"; }
-function signedNumber(value: number | null) { return Number.isFinite(value) ? `${(value ?? 0) > 0 ? "+" : ""}${S.compactNumber(value)}` : "Unavailable"; }
-function formatTimestamp(value: string | null) { return value ? new Date(value).toLocaleString([], { year: "numeric", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "Unavailable"; }
-function growthSpan(start: string | null, end: string | null) { const hours = start && end ? (Date.parse(end) - Date.parse(start)) / 3600000 : null; return G.formatElapsed(hours); }
-function formatDate(value: string) { return new Date(value).toLocaleDateString([], { year: "numeric", month: "short", day: "numeric" }); }
-function dateRange(start: string | null, end: string | null) { return start && end ? `${formatDate(start)} - ${formatDate(end)}` : "Date range unavailable"; }
-function capitalize(value: string) { return value.charAt(0).toUpperCase() + value.slice(1); }
-function shorten(value: unknown, length: number) { const text = String(value || ""); return text.length > length ? `${text.slice(0, length - 1)}...` : text; }
-function escapeHtml(value: unknown) { return String(value ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#039;"); }
-function attr(value: unknown) { return escapeHtml(value); }
-})();
+function compactNumber(value: number): string {
+  return stats.compactNumber(Number.isFinite(value) ? value : 0);
+}
+
+function formatDate(value: string): string {
+  const date = new Date(value);
+  return Number.isFinite(date.getTime()) ? date.toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" }) : "Unknown";
+}
+
+function escapeHtml(value: unknown): string {
+  return String(value ?? "").replace(/[&<>'"]/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[character] || character);
+}

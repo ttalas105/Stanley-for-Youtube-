@@ -44,7 +44,8 @@ The YouTube API key is read only by the backend. `PORT` defaults to `3000`; `EXT
 2. Open `chrome://extensions` and enable Developer Mode.
 3. Choose **Load unpacked** and select `extension/dist`.
 4. Start the backend with `npm start`.
-5. Open a supported YouTube handle or `/channel/UC…` page and click **Scan Channel**.
+5. Open the extension once and click **Start**.
+6. Browse to a supported YouTube handle or `/channel/UC…` page. Stanley appears in the channel header with an **Analyze this channel** action and adds an outlier ratio beside each video title. The channel analysis covers standout evidence, momentum changes, repeatable patterns, and a prefilled handoff to the Stanley web app.
 
 Successful scans are stored in `server/data/snapshots.json` by default. Growth comparisons require multiple scans at least 30 minutes apart.
 

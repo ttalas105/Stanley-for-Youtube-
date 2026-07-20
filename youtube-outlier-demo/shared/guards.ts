@@ -29,7 +29,7 @@ export function isBackgroundMessage(value: unknown): value is BackgroundMessage 
 }
 
 export function isContentMessage(value: unknown): value is ContentMessage {
-  return isRecord(value) && (value.type === "PING_CONTENT_SCRIPT" || value.type === "START_SCAN");
+  return isRecord(value) && value.type === "PING_CONTENT_SCRIPT";
 }
 
 function isNullableNumber(value: unknown): value is number | null {

@@ -3,62 +3,316 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>YouTube Outlier Demo</title>
+    <title>Stanley for YouTube</title>
     <style>
-      body {
-        width: 280px;
-        margin: 0;
-        padding: 14px;
+      :root {
+        color-scheme: dark;
+        --canvas: #0d121b;
+        --purple: #6355ff;
+        --purple-hover: #766aff;
+        --purple-focus: #9d96ff;
+        --green: #58d49a;
+        --ready-surface: #121d1a;
+        --ready-border: #28523f;
+        --ready-text: #a8e5c8;
+        --danger: #ff95a6;
+      }
+
+      * {
         box-sizing: border-box;
-        background: #111111;
-        color: #f5f5f5;
-        font: 14px/1.4 Arial, sans-serif;
       }
 
-      h1 {
-        margin: 0 0 8px;
-        font-size: 16px;
-        line-height: 1.25;
+      body {
+        width: 328px;
+        margin: 0;
+        overflow: hidden;
+        background: var(--canvas);
+        color: #f4f6f9;
+        font: 14px/1.5 Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       }
 
-      p {
-        margin: 0 0 10px;
-        color: #c9c9c9;
+      main {
+        min-height: 388px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 27px 24px 24px;
       }
 
-      code {
-        color: #ffffff;
+      .brand {
+        display: grid;
+        justify-items: center;
+        gap: 5px;
+        text-align: center;
       }
 
-      button {
+      .brand h1 {
+        display: flex;
+        align-items: baseline;
+        gap: 6px;
+        margin: 0;
+        color: #f4f6f9;
+        line-height: 1;
+      }
+
+      .brand-name {
+        font-family: Georgia, serif;
+        font-size: 23px;
+        font-weight: 650;
+        letter-spacing: -.03em;
+      }
+
+      .product-name {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        color: #a3adbc;
+        font-size: 11px;
+        font-weight: 640;
+        letter-spacing: -.01em;
+      }
+
+      .youtube-mark {
+        width: 13px;
+        height: 13px;
+        flex: 0 0 auto;
+      }
+
+      #subtitle {
+        margin: 0;
+        color: #8e98aa;
+        font-size: 11px;
+        font-weight: 520;
+        transition: color 180ms ease-out, opacity 180ms ease-out, transform 180ms ease-out;
+      }
+
+      .stanley {
+        position: relative;
         width: 100%;
-        border: 0;
-        border-radius: 6px;
-        padding: 10px 12px;
-        background: #ffffff;
-        color: #111111;
-        font: 700 14px/1.2 Arial, sans-serif;
-        cursor: pointer;
+        height: 224px;
+        display: grid;
+        place-items: center;
       }
 
-      button:disabled {
-        opacity: 0.6;
+      .stanley::before {
+        content: "";
+        position: absolute;
+        width: 230px;
+        height: 230px;
+        border-radius: 50%;
+        background: radial-gradient(circle, rgba(99, 85, 255, .18), rgba(99, 85, 255, .04) 48%, transparent 70%);
+        transition: background 200ms ease-out;
+      }
+
+      .stanley img {
+        position: relative;
+        z-index: 1;
+        width: 166px;
+        height: 166px;
+        object-fit: contain;
+        transition: filter 220ms ease-out, transform 220ms cubic-bezier(.16, 1, .3, 1);
+      }
+
+      .activation-ring {
+        position: absolute;
+        width: 138px;
+        height: 138px;
+        border: 1px solid rgba(157, 150, 255, .55);
+        border-radius: 50%;
+        opacity: 0;
+        pointer-events: none;
+      }
+
+      #start {
+        width: 100%;
+        min-height: 46px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 9px;
+        padding: 0 16px;
+        border: 1px solid transparent;
+        border-radius: 9px;
+        background: var(--purple);
+        color: #fff;
+        cursor: pointer;
+        font: 700 13px/1 Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        transition: background-color 160ms ease-out, border-color 160ms ease-out, color 160ms ease-out, transform 160ms ease-out, opacity 160ms ease-out;
+      }
+
+      #start:hover:not(:disabled) {
+        background: var(--purple-hover);
+        transform: translateY(-1px);
+      }
+
+      #start:active:not(:disabled) {
+        transform: translateY(0);
+      }
+
+      #start:focus-visible {
+        outline: 2px solid var(--purple-focus);
+        outline-offset: 3px;
+      }
+
+      .start-arrow,
+      .loading-spinner {
+        width: 16px;
+        height: 16px;
+        flex: 0 0 auto;
+      }
+
+      .start-arrow {
+        transition: transform 160ms ease-out;
+      }
+
+      #start:hover:not(:disabled) .start-arrow {
+        transform: translateX(2px);
+      }
+
+      .loading-spinner {
+        display: none;
+        border: 2px solid rgba(255, 255, 255, .35);
+        border-top-color: #fff;
+        border-radius: 50%;
+        animation: spin .7s linear infinite;
+      }
+
+      .ready-check {
+        width: 17px;
+        height: 17px;
+        display: none;
+        flex: 0 0 auto;
+        color: var(--green);
+      }
+
+      #start[data-loading="true"] {
+        opacity: .68;
         cursor: wait;
       }
 
+      #start[data-loading="true"] .start-arrow {
+        display: none;
+      }
+
+      #start[data-loading="true"] .loading-spinner {
+        display: block;
+      }
+
+      body[data-state="activating"] .stanley img {
+        animation: stanley-activate 360ms cubic-bezier(.16, 1, .3, 1) both;
+        filter: drop-shadow(0 0 10px rgba(99, 85, 255, .28));
+      }
+
+      body[data-state="activating"] .activation-ring {
+        animation: activation-ring 420ms cubic-bezier(.16, 1, .3, 1) both;
+      }
+
+      body[data-state="activating"] #subtitle {
+        color: #aaa4ea;
+      }
+
+      body[data-state="running"] .stanley::before {
+        background: radial-gradient(circle, rgba(88, 212, 154, .11), rgba(99, 85, 255, .05) 48%, transparent 70%);
+      }
+
+      body[data-state="running"] .stanley img {
+        animation: stanley-ready 300ms cubic-bezier(.16, 1, .3, 1) both;
+        filter: drop-shadow(0 0 9px rgba(88, 212, 154, .18));
+      }
+
+      body[data-state="running"] #start {
+        border-color: var(--ready-border);
+        background: var(--ready-surface);
+        color: var(--ready-text);
+        cursor: default;
+      }
+
+      body[data-state="running"] .start-arrow,
+      body[data-state="running"] .loading-spinner {
+        display: none;
+      }
+
+      body[data-state="running"] .ready-check {
+        display: block;
+        animation: ready-check-in 220ms cubic-bezier(.16, 1, .3, 1) both;
+      }
+
       #status {
-        min-height: 20px;
-        margin-top: 10px;
-        color: #c9c9c9;
+        max-width: 100%;
+        min-height: 16px;
+        margin: 10px 0 0;
+        color: var(--danger);
+        font-size: 11px;
+        text-align: center;
+      }
+
+      #status:empty {
+        min-height: 0;
+        margin: 0;
+      }
+
+      @keyframes spin {
+        to { transform: rotate(360deg); }
+      }
+
+      @keyframes stanley-activate {
+        0% { transform: scale(1); }
+        45% { transform: scale(.965); }
+        100% { transform: scale(1.035); }
+      }
+
+      @keyframes activation-ring {
+        0% { opacity: 0; transform: scale(.78); }
+        28% { opacity: .8; }
+        100% { opacity: 0; transform: scale(1.45); }
+      }
+
+      @keyframes stanley-ready {
+        from { transform: scale(.98); }
+        to { transform: scale(1.035); }
+      }
+
+      @keyframes ready-check-in {
+        from { opacity: 0; transform: scale(.72); }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        *, *::before, *::after {
+          animation-duration: .01ms !important;
+          animation-iteration-count: 1 !important;
+          transition-duration: .01ms !important;
+        }
       }
     </style>
   </head>
-  <body>
-    <h1>YouTube Outlier Demo</h1>
-    <p>Open a YouTube channel page like <code>/@MrBeast/videos</code>.</p>
-    <button id="scan" type="button">Scan current channel</button>
-    <p id="status"></p>
-    <p>Keep the local backend running on <code>localhost:3000</code>.</p>
+  <body data-state="idle">
+    <main aria-labelledby="popup-title">
+      <header class="brand">
+        <h1 id="popup-title">
+          <span class="brand-name">Stanley</span>
+          <span class="product-name">
+            <svg class="youtube-mark" viewBox="0 0 24 24" aria-hidden="true">
+              <path fill="#ff1744" d="M23.5 6.2a3 3 0 0 0-2.1-2.1C19.5 3.6 12 3.6 12 3.6s-7.5 0-9.4.5A3 3 0 0 0 .5 6.2 31 31 0 0 0 0 12a31 31 0 0 0 .5 5.8 3 3 0 0 0 2.1 2.1c1.9.5 9.4.5 9.4.5s7.5 0 9.4-.5a3 3 0 0 0 2.1-2.1A31 31 0 0 0 24 12a31 31 0 0 0-.5-5.8Z"/>
+              <path fill="#fff" d="m9.6 15.6 6.3-3.6-6.3-3.6v7.2Z"/>
+            </svg>
+            for YouTube
+          </span>
+        </h1>
+        <p id="subtitle">Channel outliers while you browse.</p>
+      </header>
+      <div class="stanley" aria-hidden="true">
+        <span class="activation-ring"></span>
+        <img src="stanley-mascot-dashboard.png" alt="">
+      </div>
+      <button id="start" type="button">
+        <svg class="ready-check" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m5 12 4 4L19 6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span id="start-label">Start Stanley</span>
+        <svg class="start-arrow" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 12h14m-5-5 5 5-5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span class="loading-spinner" aria-hidden="true"></span>
+      </button>
+      <p id="status" role="status" aria-live="polite"></p>
+    </main>
     <script src="popup.js"></script>
   </body>
 </html>

@@ -71,9 +71,7 @@ export type BackgroundMessage =
   | { type: "GET_CHANNEL_SNAPSHOTS"; channelId: string }
   | { type: "GET_VIDEO_SNAPSHOTS"; videoId: string };
 
-export type ContentMessage =
-  | { type: "PING_CONTENT_SCRIPT" }
-  | { type: "START_SCAN" };
+export type ContentMessage = { type: "PING_CONTENT_SCRIPT" };
 
 export type ExtensionResponse<T> =
   | { ok: true; data: T }

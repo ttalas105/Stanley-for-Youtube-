@@ -1,31 +1,69 @@
 import { getErrorMessage, isRecord } from "../shared/guards";
 
-const scanButton = document.querySelector<HTMLButtonElement>("#scan");
+const AUTO_SCAN_KEY = "autoScanEnabled";
+const startButton = document.querySelector<HTMLButtonElement>("#start");
+const startLabel = document.querySelector<HTMLSpanElement>("#start-label");
+const subtitle = document.querySelector<HTMLParagraphElement>("#subtitle");
 const statusText = document.querySelector<HTMLParagraphElement>("#status");
 
-if (!scanButton || !statusText) throw new Error("Popup markup is missing required controls.");
+if (!startButton || !startLabel || !subtitle || !statusText) throw new Error("Popup markup is missing required controls.");
 
-scanButton.addEventListener("click", async () => {
-  scanButton.disabled = true;
-  setStatus("Checking this tab...");
+void initialize();
+
+startButton.addEventListener("click", async () => {
+  const transitionStartedAt = performance.now();
+  document.body.dataset.state = "activating";
+  startButton.disabled = true;
+  startButton.dataset.loading = "true";
+  startButton.setAttribute("aria-busy", "true");
+  startLabel.textContent = "Starting...";
+  setStatus("");
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (!tab?.id || !isYouTubeUrl(tab.url)) {
-      setStatus("Open a YouTube channel page first.");
-      return;
-    }
-    await ensureContentScript(tab.id);
-    const response: unknown = await chrome.tabs.sendMessage(tab.id, { type: "START_SCAN" });
-    if (!isRecord(response) || response.ok !== true) {
-      throw new Error(isRecord(response) && typeof response.error === "string" ? response.error : "Could not start the scan.");
-    }
-    setStatus("Scan started. Check the side panel on YouTube.");
+    if (tab?.id && isYouTubeUrl(tab.url)) await ensureContentScript(tab.id);
+    await chrome.storage.local.set({ [AUTO_SCAN_KEY]: true });
+    await finishActivationTransition(transitionStartedAt);
+    renderRunning();
   } catch (error: unknown) {
-    setStatus(getErrorMessage(error) || "Could not start the scan.");
+    document.body.dataset.state = "idle";
+    startButton.disabled = false;
+    startLabel.textContent = "Start Stanley";
+    setStatus(getErrorMessage(error) || "Could not start automatic analysis.");
   } finally {
-    scanButton.disabled = false;
+    delete startButton.dataset.loading;
+    startButton.removeAttribute("aria-busy");
   }
 });
+
+async function initialize(): Promise<void> {
+  try {
+    const stored = await chrome.storage.local.get(AUTO_SCAN_KEY);
+    if (stored[AUTO_SCAN_KEY] === true) {
+      renderRunning();
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (tab?.id && isYouTubeUrl(tab.url)) await ensureContentScript(tab.id);
+    }
+  } catch (error: unknown) {
+    setStatus(getErrorMessage(error) || "Could not read extension settings.");
+  }
+}
+
+function renderRunning(): void {
+  document.body.dataset.state = "running";
+  if (startLabel) startLabel.textContent = "Stanley ready";
+  if (subtitle) subtitle.textContent = "Channel scanning is on.";
+  if (startButton) {
+    startButton.disabled = true;
+    startButton.setAttribute("aria-label", "Stanley ready");
+  }
+  setStatus("");
+}
+
+async function finishActivationTransition(startedAt: number): Promise<void> {
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  const remaining = 320 - (performance.now() - startedAt);
+  if (remaining > 0) await new Promise<void>((resolve) => setTimeout(resolve, remaining));
+}
 
 function isYouTubeUrl(url: string | undefined): boolean {
   if (!url) return false;
@@ -37,10 +75,11 @@ function isYouTubeUrl(url: string | undefined): boolean {
 
 async function ensureContentScript(tabId: number): Promise<void> {
   try {
-    await chrome.tabs.sendMessage(tabId, { type: "PING_CONTENT_SCRIPT" });
+    const response: unknown = await chrome.tabs.sendMessage(tabId, { type: "PING_CONTENT_SCRIPT" });
+    if (!isRecord(response) || response.ok !== true) throw new Error("Content script did not respond.");
   } catch {
     await chrome.scripting.insertCSS({ target: { tabId }, files: ["content.css"] });
-    await chrome.scripting.executeScript({ target: { tabId }, files: ["vendor/chart.umd.min.js", "content.js"] });
+    await chrome.scripting.executeScript({ target: { tabId }, files: ["content.js"] });
   }
 }
 
