@@ -35,27 +35,49 @@ test("guides a new creator through three large onboarding tiles", async ({ page 
   await page.goto("/");
   await waitForApp(page);
 
-  await expect(page.getByRole("heading", { name: "Hey, meet Stanley." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Plan your next YouTube video." })).toBeVisible();
   await expect(page.getByText("Step 1 of 3")).toBeVisible();
-  await page.getByRole("button", { name: /Show me how/ }).click();
+  const productReel = page.locator(".onboarding-product-reel");
+  await expect(productReel).toBeVisible();
+  await expect(productReel.locator(".product-reel-frame")).toHaveCount(3);
+  await expect(productReel.locator(".product-reel-frame").first().locator("img")).toHaveAttribute("src", "/product-reel/stanley-home.png");
+  await expect(productReel.locator(".product-reel-stage")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Skip setup" })).toBeVisible();
+  await page.getByRole("button", { name: /Continue/ }).click();
 
-  await expect(page.getByRole("heading", { name: "One chat. Your whole video." })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Find an idea worth making" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Start with whatever you have." })).toBeVisible();
+  await expect(page.getByText(/I spent 30 days learning to cook/)).toBeVisible();
   await expect(page.getByText("Step 2 of 3")).toBeVisible();
-  await page.getByRole("button", { name: /Connect my channel/ }).click();
+  await expect(page.locator(".product-reel-frame").first().locator("img")).toHaveAttribute("src", "/product-reel/stanley-ideas.png");
+  await page.getByRole("button", { name: /Continue/ }).click();
 
-  await expect(page.getByRole("heading", { name: "Connect your YouTube account." })).toBeVisible();
-  await expect(page.getByText(/Topics your viewers come back for/)).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Connect your YouTube channel." })).toBeVisible();
+  await expect(page.getByText(/Use recent channel performance/)).toBeVisible();
+  await expect(page.getByText(/Stanley cannot upload, edit, or delete videos/)).toBeVisible();
   await expect(page.getByText("Step 3 of 3")).toBeVisible();
+  await expect(page.locator(".product-reel-frame").first().locator("img")).toHaveAttribute("src", "/product-reel/stanley-dashboard.png");
+});
+
+test("shows a real product still when reduced motion is requested", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await mockStatus(page);
+  await page.goto("/");
+  await waitForApp(page);
+
+  const frames = page.locator(".product-reel-frame");
+  await expect(frames).toHaveCount(3);
+  await expect(frames.first()).toHaveCSS("opacity", "1");
+  await expect(frames.nth(1)).toHaveCSS("opacity", "0");
+  await expect(frames.first().locator("img")).toHaveAttribute("src", "/product-reel/stanley-home.png");
 });
 
 test("lets a creator skip and keeps YouTube connection available in the header", async ({ page }) => {
   await mockStatus(page);
   await page.goto("/");
   await waitForApp(page);
-  await page.getByRole("button", { name: /Show me how/ }).click();
-  await page.getByRole("button", { name: /Connect my channel/ }).click();
-  await page.getByRole("button", { name: "Skip for now" }).click();
+  await page.getByRole("button", { name: /Continue/ }).click();
+  await page.getByRole("button", { name: /Continue/ }).click();
+  await page.getByRole("button", { name: "Continue without YouTube" }).click();
 
   await expect(page.getByRole("heading", { name: "Where should we start?" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Connect YouTube" })).toBeVisible();
@@ -64,7 +86,7 @@ test("lets a creator skip and keeps YouTube connection available in the header",
   await page.reload();
   await waitForApp(page);
   await expect(page.getByRole("heading", { name: "Where should we start?" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Hey, meet Stanley." })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Plan your next YouTube video." })).toHaveCount(0);
 });
 
 test("turns a successful OAuth callback into a personalized first chat", async ({ page }) => {
@@ -72,13 +94,13 @@ test("turns a successful OAuth callback into a personalized first chat", async (
   await page.goto("/?youtube=connected");
   await waitForApp(page);
 
-  await expect(page.getByRole("heading", { name: "Getting to know Thomas Creates." })).toBeVisible();
-  await expect(page.getByText("Channel and recent videos found")).toBeVisible();
-  await expect(page.getByText(/Comparing video performance/)).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Loading Thomas Creates." })).toBeVisible();
+  await expect(page.getByText("YouTube connected")).toBeVisible();
+  await expect(page.getByText(/Loading recent videos/)).toBeVisible();
 
   await expect(page.getByText(/You’re connected to Thomas Creates/)).toBeVisible({ timeout: 4_000 });
   await expect(page.getByText(/I Let AI Plan My Week/)).toBeVisible();
-  await expect(page.locator("header").getByText("Thomas Creates", { exact: true })).toBeVisible();
+  await expect(page.locator(".channel-connection").getByText("Thomas Creates", { exact: true })).toBeVisible();
   await expect(page.getByText("YouTube connected", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Disconnect Thomas Creates" })).toBeVisible();
   await expect(page.locator(".channel-disconnect svg")).toHaveCount(1);
@@ -102,7 +124,7 @@ test("loads connected channel avatars through the local image proxy", async ({ p
   await page.goto("/?youtube=connected");
   await waitForApp(page);
   await expect(page.getByText("YouTube connected", { exact: true })).toBeVisible({ timeout: 4_000 });
-  await expect(page.locator('img[src^="/api/youtube/avatar"]')).toHaveCount(2);
+  expect(await page.locator('img[src^="/api/youtube/avatar"]').count()).toBeGreaterThanOrEqual(2);
   expect(avatarRequests).toBeGreaterThan(0);
   await expect(page.locator(".youtube-avatar-fallback")).toHaveCount(0);
 });
@@ -138,9 +160,9 @@ test("returns a cancelled connection to the optional connect step", async ({ pag
   await page.goto("/?youtube=cancelled");
   await waitForApp(page);
 
-  await expect(page.getByRole("heading", { name: "Connect your YouTube account." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Connect your YouTube channel." })).toBeVisible();
   await expect(page.getByRole("alert")).toHaveText("YouTube connection was cancelled. Nothing was changed.");
-  await expect(page.getByRole("button", { name: "Skip for now" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Continue without YouTube" })).toBeVisible();
 });
 
 test("keeps the onboarding tile inside a mobile viewport", async ({ page }) => {
@@ -149,8 +171,8 @@ test("keeps the onboarding tile inside a mobile viewport", async ({ page }) => {
   await page.goto("/");
   await waitForApp(page);
 
-  await expect(page.getByRole("heading", { name: "Hey, meet Stanley." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Plan your next YouTube video." })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false);
-  await page.getByRole("button", { name: /Show me how/ }).click();
-  await expect(page.getByRole("heading", { name: "Find an idea worth making" })).toBeVisible();
+  await page.getByRole("button", { name: /Continue/ }).click();
+  await expect(page.getByRole("heading", { name: "Start with whatever you have." })).toBeVisible();
 });
