@@ -1109,6 +1109,565 @@
   }
 }
 
+/* Dashboard refinement: compact decisions, side-by-side period signals, and a Stanley signal loom. */
+.performanceBrief:not(.creatorTwinBrief):not(.performanceBriefScanning) {
+  grid-template-columns: 1fr;
+  grid-template-areas:
+    "header"
+    "twin"
+    "stages";
+}
+
+.performanceBrief:not(.creatorTwinBrief) .briefHeader {
+  min-height: 74px;
+  padding: 20px 24px 16px;
+  border-bottom: 1px solid #252d3b;
+}
+
+.performanceBrief:not(.creatorTwinBrief) .briefHeader h2 {
+  font-size: 1.35rem;
+}
+
+.performanceBrief:not(.creatorTwinBrief) .twinBeacon {
+  min-height: 94px;
+  grid-template-columns: 58px minmax(0, 1fr) auto auto;
+  grid-template-rows: auto;
+  align-items: center;
+  gap: 18px;
+  padding: 18px 24px;
+  border-bottom: 1px solid #252d3b;
+  background: #121425;
+}
+
+.performanceBrief:not(.creatorTwinBrief) .twinBeacon::after {
+  display: none;
+}
+
+.performanceBrief:not(.creatorTwinBrief) .twinRadar {
+  grid-column: auto;
+  width: 52px;
+  height: 52px;
+  margin: 0;
+  border: 1px solid #554d8c;
+  border-radius: 14px;
+  background: #1b1831;
+}
+
+.performanceBrief:not(.creatorTwinBrief) .twinRadar::before,
+.performanceBrief:not(.creatorTwinBrief) .twinRadar::after {
+  display: none;
+}
+
+.performanceBrief:not(.creatorTwinBrief) .twinBeaconCopy {
+  grid-column: auto;
+}
+
+.performanceBrief:not(.creatorTwinBrief) .twinBeaconCopy small {
+  font-size: .62rem;
+}
+
+.performanceBrief:not(.creatorTwinBrief) .twinBeaconCopy strong {
+  margin-top: 4px;
+  font-size: 1rem;
+  line-height: 1.25;
+}
+
+.performanceBrief:not(.creatorTwinBrief) .twinBeaconData {
+  margin: 0;
+  padding: 0 22px;
+  border-top: 0;
+  border-left: 1px solid #34304d;
+}
+
+.performanceBrief:not(.creatorTwinBrief) .twinBeaconData strong {
+  font-size: 1rem;
+}
+
+.performanceBrief:not(.creatorTwinBrief) .twinBeaconData small {
+  margin-top: 3px;
+}
+
+.performanceBrief:not(.creatorTwinBrief) .twinBeaconAction {
+  grid-column: auto;
+  align-self: center;
+  min-height: 38px;
+  margin: 0;
+}
+
+.performanceBrief:not(.creatorTwinBrief) .briefStages {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0;
+  padding: 0;
+}
+
+.performanceBrief:not(.creatorTwinBrief) .briefStage,
+.performanceBrief:not(.creatorTwinBrief) .outcomeStage {
+  min-height: 270px;
+  padding: 24px;
+}
+
+.performanceBrief:not(.creatorTwinBrief) .briefStage + .briefStage {
+  border-left: 1px solid #252d3b;
+}
+
+.performanceBrief:not(.creatorTwinBrief) .outcomeStage {
+  grid-column: auto;
+}
+
+.performanceBrief:not(.creatorTwinBrief) .sourceBars {
+  margin-top: 22px;
+}
+
+.performanceBrief:not(.creatorTwinBrief) .outcomeStage .outcomeMetrics {
+  grid-template-columns: 1fr;
+  gap: 0;
+  margin-top: 15px;
+}
+
+.performanceBrief:not(.creatorTwinBrief) .outcomeStage .outcomeMetrics > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 0;
+  border-bottom: 1px solid #242c39;
+}
+
+.performanceBrief:not(.creatorTwinBrief) .outcomeStage .outcomeMetrics > div:last-child {
+  border-bottom: 0;
+}
+
+.performanceBrief:not(.creatorTwinBrief) .outcomeStage .outcomeMetrics dd {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.creatorTwinBrief {
+  min-height: 0;
+}
+
+.creatorTwinBrief .twinBriefHeader {
+  min-height: 106px;
+  padding: 18px 22px;
+}
+
+.creatorTwinBrief .twinBriefIdentity {
+  grid-template-columns: 66px minmax(0, 1fr);
+  gap: 14px;
+}
+
+.creatorTwinBrief .twinBriefIdentity > img {
+  width: 62px;
+  height: 62px;
+  box-shadow: 0 0 0 3px rgba(111, 99, 231, .11);
+}
+
+.creatorTwinBrief .twinBriefIdentity h2 {
+  font-size: 1.75rem;
+}
+
+.creatorTwinBrief .twinBriefIdentity p {
+  margin-top: 5px;
+}
+
+.creatorTwinBrief .twinBriefGrid {
+  grid-template-columns: minmax(250px, .78fr) minmax(0, 1.22fr);
+  gap: 20px;
+  padding: 22px;
+}
+
+.creatorTwinBrief .twinMatchSummary {
+  grid-template-columns: 98px minmax(0, 1fr);
+  gap: 16px;
+}
+
+.creatorTwinBrief .twinMatchRing {
+  width: 92px;
+}
+
+.creatorTwinBrief .twinMatchTrack,
+.creatorTwinBrief .twinMatchProgress {
+  stroke-width: 8;
+}
+
+.creatorTwinBrief .twinMatchRing strong {
+  font-size: 1.4rem;
+}
+
+.creatorTwinBrief .twinStatRail div {
+  padding: 9px 0;
+}
+
+.creatorTwinBrief .twinVideoGraph {
+  padding-left: 20px;
+}
+
+.creatorTwinBrief .twinVideoGraph header {
+  margin-bottom: 14px;
+}
+
+.creatorTwinBrief .twinVideoGraph > div {
+  gap: 13px;
+}
+
+.creatorTwinBrief .twinPatternStrip {
+  grid-template-columns: minmax(180px, .72fr) minmax(340px, 1.35fr) auto;
+  align-items: center;
+  gap: 20px;
+  padding-top: 18px;
+}
+
+.creatorTwinBrief .twinPatternLead strong {
+  font-size: .72rem;
+  line-height: 1.45;
+}
+
+.creatorTwinBrief .twinPatternAction {
+  align-content: center;
+}
+
+.changeBrief > header {
+  padding-bottom: 10px;
+}
+
+.changeBrief > div > button {
+  min-height: 74px;
+  align-items: center;
+  padding: 14px 0;
+}
+
+.changeBrief .severity {
+  margin-bottom: 6px;
+}
+
+.changeBrief strong {
+  font-size: .76rem;
+}
+
+.twinLabScanMinimal,
+.performanceBriefScanning .twinLabScanMinimal,
+.twinLabScanMinimal .twinLabStage,
+.performanceBriefScanning .twinLabScanMinimal .twinLabStage {
+  min-height: 480px;
+}
+
+.twinLabScanMinimal .twinLabStage,
+.performanceBriefScanning .twinLabScanMinimal .twinLabStage {
+  background:
+    radial-gradient(circle at 50% 42%, rgba(115, 102, 233, .16), transparent 29%),
+    #111221;
+}
+
+.scanLoom {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: min(760px, calc(100% - 64px));
+  display: grid;
+  grid-template-columns: minmax(110px, 1fr) minmax(70px, .72fr) 112px minmax(70px, .72fr) minmax(110px, 1fr);
+  align-items: center;
+  translate: -50% calc(-50% - 36px);
+}
+
+.scanSignature {
+  height: 176px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 13px;
+}
+
+.scanSignature i {
+  height: 7px;
+  display: block;
+  border-radius: 99px;
+  background: #34354c;
+  opacity: .56;
+  transition: background-color 180ms cubic-bezier(.22, 1, .36, 1), opacity 180ms cubic-bezier(.22, 1, .36, 1), transform 180ms cubic-bezier(.22, 1, .36, 1);
+}
+
+.scanSignatureSource {
+  align-items: flex-end;
+}
+
+.scanSignatureSource i:nth-child(1),
+.scanSignatureMatch i:nth-child(4) { width: 44%; }
+.scanSignatureSource i:nth-child(2),
+.scanSignatureMatch i:nth-child(3) { width: 72%; }
+.scanSignatureSource i:nth-child(3),
+.scanSignatureMatch i:nth-child(2) { width: 92%; }
+.scanSignatureSource i:nth-child(4),
+.scanSignatureMatch i:nth-child(1) { width: 61%; }
+.scanSignatureSource i:nth-child(5),
+.scanSignatureMatch i:nth-child(5) { width: 79%; }
+
+.scanSignature i[data-scanned] {
+  background: #9489f2;
+  opacity: 1;
+  transform: scaleX(1.025);
+}
+
+.scanSignatureMatch i[data-scanned] {
+  background: #65cfa1;
+}
+
+.scanThreads {
+  position: relative;
+  height: 154px;
+  overflow: hidden;
+}
+
+.scanThreads i {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  height: 1px;
+  overflow: visible;
+  background: linear-gradient(90deg, rgba(122, 110, 230, .06), rgba(143, 131, 241, .5));
+  transform-origin: center;
+}
+
+.scanThreadsOut i {
+  background: linear-gradient(90deg, rgba(143, 131, 241, .5), rgba(101, 207, 161, .08));
+}
+
+.scanThreads i:nth-child(1) { top: 34%; transform: rotate(9deg); }
+.scanThreads i:nth-child(2) { top: 50%; }
+.scanThreads i:nth-child(3) { top: 66%; transform: rotate(-9deg); }
+.scanThreadsOut i:nth-child(1) { transform: rotate(-9deg); }
+.scanThreadsOut i:nth-child(3) { transform: rotate(9deg); }
+
+.scanThreads i::after {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #c7c1ff;
+  box-shadow: 0 0 8px rgba(163, 150, 255, .78);
+  content: "";
+  translate: -50% -50%;
+  animation: scanThreadFlow 1.35s linear infinite;
+}
+
+.scanThreads i:nth-child(2)::after { animation-delay: -.9s; }
+.scanThreads i:nth-child(3)::after { animation-delay: -.45s; }
+.scanThreadsOut i::after {
+  background: #8ee1bb;
+  box-shadow: 0 0 8px rgba(101, 207, 161, .68);
+}
+
+.scanCore {
+  position: relative;
+  width: 104px;
+  height: 104px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid #58508d;
+  border-radius: 16px;
+  background: #1a1830;
+  animation: scanCoreBreathe 1.8s cubic-bezier(.22, 1, .36, 1) infinite alternate;
+}
+
+.scanCore::after {
+  position: absolute;
+  z-index: 3;
+  top: -20%;
+  left: 10%;
+  width: 80%;
+  height: 1px;
+  background: #b7afff;
+  box-shadow: 0 0 8px rgba(164, 154, 250, .72);
+  content: "";
+  animation: scanCoreLine 1.6s cubic-bezier(.45, 0, .55, 1) infinite;
+}
+
+.twinLabScanMinimal .scanLoom .stanleyScanner {
+  width: 92px;
+  height: 92px;
+  translate: none;
+}
+
+.twinLabScanMinimal .scanLoom .stanleyScanner img {
+  width: 86px;
+  height: 86px;
+  animation: none;
+}
+
+.scanProgressHud {
+  bottom: 34px;
+}
+
+.scanProgressHud[data-phase="reading"] .scanProgressSteps span:first-child,
+.scanProgressHud[data-phase="comparing"] .scanProgressSteps span:nth-child(-n + 2),
+.scanProgressHud[data-phase="matching"] .scanProgressSteps span {
+  color: #aca4ee;
+}
+
+@keyframes scanThreadFlow {
+  from { left: 0; opacity: 0; }
+  18%, 82% { opacity: 1; }
+  to { left: 100%; opacity: 0; }
+}
+
+@keyframes scanCoreLine {
+  0% { top: 5%; opacity: 0; }
+  20%, 80% { opacity: .9; }
+  100% { top: 95%; opacity: 0; }
+}
+
+@keyframes scanCoreBreathe {
+  from { border-color: #4c466f; background-color: #18162b; }
+  to { border-color: #756be0; background-color: #201d3b; }
+}
+
+@media (max-width: 900px) {
+  .performanceBrief:not(.creatorTwinBrief) .briefStages {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .performanceBrief:not(.creatorTwinBrief) .outcomeStage {
+    grid-column: 1 / -1;
+    min-height: 0;
+    border-top: 1px solid #252d3b;
+    border-left: 0;
+  }
+
+  .performanceBrief:not(.creatorTwinBrief) .outcomeStage .outcomeMetrics {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 20px;
+  }
+
+  .performanceBrief:not(.creatorTwinBrief) .outcomeStage .outcomeMetrics > div {
+    display: block;
+    border-bottom: 0;
+  }
+
+  .creatorTwinBrief .twinPatternStrip {
+    grid-template-columns: 1fr 1.6fr auto;
+  }
+}
+
+@media (max-width: 680px) {
+  .performanceBrief:not(.creatorTwinBrief) .briefHeader {
+    padding: 17px 18px 14px;
+  }
+
+  .performanceBrief:not(.creatorTwinBrief) .twinBeacon {
+    grid-template-columns: 48px minmax(0, 1fr) auto;
+    gap: 13px;
+    padding: 15px 18px;
+  }
+
+  .performanceBrief:not(.creatorTwinBrief) .twinRadar {
+    width: 46px;
+    height: 46px;
+    border-radius: 12px;
+  }
+
+  .performanceBrief:not(.creatorTwinBrief) .twinBeaconData {
+    display: none;
+  }
+
+  .performanceBrief:not(.creatorTwinBrief) .twinBeaconAction {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+
+  .performanceBrief:not(.creatorTwinBrief) .briefStages {
+    grid-template-columns: 1fr;
+  }
+
+  .performanceBrief:not(.creatorTwinBrief) .briefStage,
+  .performanceBrief:not(.creatorTwinBrief) .outcomeStage {
+    grid-column: auto;
+    min-height: 0;
+    border-top: 1px solid #252d3b;
+    border-left: 0;
+  }
+
+  .performanceBrief:not(.creatorTwinBrief) .briefStage:first-child {
+    border-top: 0;
+  }
+
+  .performanceBrief:not(.creatorTwinBrief) .outcomeStage .outcomeMetrics {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+
+  .performanceBrief:not(.creatorTwinBrief) .outcomeStage .outcomeMetrics > div {
+    display: flex;
+    border-bottom: 1px solid #242c39;
+  }
+
+  .creatorTwinBrief .twinBriefHeader {
+    align-items: flex-start;
+  }
+
+  .creatorTwinBrief .twinBriefGrid,
+  .creatorTwinBrief .twinPatternStrip {
+    grid-template-columns: 1fr;
+  }
+
+  .creatorTwinBrief .twinVideoGraph {
+    padding: 18px 0 0;
+    border-top: 1px solid #252d3b;
+    border-left: 0;
+  }
+
+  .scanLoom {
+    width: min(500px, calc(100% - 30px));
+    grid-template-columns: minmax(68px, 1fr) 42px 82px 42px minmax(68px, 1fr);
+  }
+
+  .scanSignature {
+    height: 142px;
+    gap: 10px;
+  }
+
+  .scanSignature i {
+    height: 6px;
+  }
+
+  .scanCore {
+    width: 78px;
+    height: 78px;
+    border-radius: 14px;
+  }
+
+  .twinLabScanMinimal .scanLoom .stanleyScanner,
+  .twinLabScanMinimal .scanLoom .stanleyScanner img {
+    width: 70px;
+    height: 70px;
+  }
+
+  .scanThreads {
+    height: 120px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scanSignature i,
+  .scanCore,
+  .scanCore::after,
+  .scanThreads i::after {
+    animation: none !important;
+    transition: none !important;
+  }
+
+  .scanCore::after {
+    top: 50%;
+    opacity: .45;
+  }
+
+  .scanThreads i::after {
+    left: 50%;
+    opacity: .7;
+  }
+}
+
 /* Top videos: period performance and combined analytics */
 .ledgerSection {
   container-type: inline-size;
@@ -7242,5 +7801,1400 @@
   .scanProgressMeta > i > b {
     animation: none !important;
     transform: scaleY(.72);
+  }
+}
+
+/* Final compact sizing after legacy dashboard layers. */
+.creatorTwinBrief {
+  min-height: 0;
+}
+
+.changeBrief > header {
+  padding-bottom: 10px;
+}
+
+.changeBrief > div > button {
+  min-height: 74px;
+  align-items: center;
+  padding: 14px 0;
+}
+
+.twinLabScanMinimal,
+.performanceBriefScanning .twinLabScanMinimal,
+.twinLabScanMinimal .twinLabStage,
+.performanceBriefScanning .twinLabScanMinimal .twinLabStage {
+  min-height: 460px;
+}
+
+.twinLabScanMinimal .twinLabStage,
+.performanceBriefScanning .twinLabScanMinimal .twinLabStage {
+  background:
+    radial-gradient(circle at 50% 42%, rgba(115, 102, 233, .16), transparent 29%),
+    #111221;
+}
+
+@media (max-width: 560px) {
+  .twinLabScanMinimal,
+  .performanceBriefScanning .twinLabScanMinimal,
+  .twinLabScanMinimal .twinLabStage,
+  .performanceBriefScanning .twinLabScanMinimal .twinLabStage {
+    min-height: 400px;
+  }
+}
+
+/* Restore the original Creator Twin rail while keeping the refined density. */
+.performanceBrief:not(.creatorTwinBrief):not(.performanceBriefScanning) {
+  grid-template-columns: minmax(245px, .58fr) minmax(0, 1.62fr);
+  grid-template-areas:
+    "twin header"
+    "twin stages";
+}
+
+.performanceBrief:not(.creatorTwinBrief) .briefHeader {
+  min-height: 82px;
+  padding: 20px 24px 15px;
+  border-bottom: 0;
+}
+
+.performanceBrief:not(.creatorTwinBrief) .briefHeader h2 {
+  font-size: 1.48rem;
+}
+
+.performanceBrief:not(.creatorTwinBrief) .twinBeacon {
+  min-height: 100%;
+  grid-template-columns: 1fr;
+  grid-template-rows: auto auto auto 1fr;
+  align-items: start;
+  gap: 0;
+  padding: 28px 26px 24px;
+  border-right: 1px solid #292f40;
+  border-bottom: 0;
+  background:
+    radial-gradient(circle at 22% 12%, rgba(111, 99, 231, .2), transparent 31%),
+    #111322;
+}
+
+.performanceBrief:not(.creatorTwinBrief) .twinMascotStage {
+  grid-column: 1;
+  position: relative;
+  width: 100%;
+  height: 116px;
+  display: grid;
+  place-items: center;
+  margin: 0 0 22px;
+}
+
+.performanceBrief:not(.creatorTwinBrief) .twinMascotStage::after {
+  position: absolute;
+  bottom: -18px;
+  left: 50%;
+  width: 1px;
+  height: 30px;
+  background: linear-gradient(#776de0, rgba(119, 109, 224, 0));
+  content: "";
+}
+
+.twinMascotHalo {
+  position: absolute;
+  width: 106px;
+  height: 106px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(124, 111, 240, .26), rgba(88, 74, 188, .08) 48%, transparent 72%);
+  animation: twinHaloBreathe 2.4s cubic-bezier(.22, 1, .36, 1) infinite alternate;
+}
+
+.twinMascotStage img {
+  position: relative;
+  z-index: 1;
+  width: 84px;
+  height: 84px;
+  display: block;
+  object-fit: contain;
+  animation: stanleyIdle 3.4s cubic-bezier(.16, 1, .3, 1) infinite;
+}
+
+.performanceBrief:not(.creatorTwinBrief) .twinBeaconCopy {
+  grid-column: 1;
+}
+
+.performanceBrief:not(.creatorTwinBrief) .twinBeaconCopy strong {
+  max-width: 14ch;
+  margin-top: 7px;
+  font-size: 1.24rem;
+  line-height: 1.12;
+  text-wrap: balance;
+}
+
+.twinPatternStack {
+  display: grid;
+  margin-top: 20px;
+  padding-top: 8px;
+  border-top: 1px solid #393451;
+}
+
+.twinPatternStack > span {
+  position: relative;
+  min-height: 52px;
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-content: center;
+  gap: 2px 9px;
+  padding: 9px 0;
+}
+
+.twinPatternStack > span + span {
+  border-top: 1px solid rgba(57, 52, 81, .7);
+}
+
+.twinPatternStack i {
+  width: 8px;
+  height: 8px;
+  grid-row: 1 / 3;
+  align-self: center;
+  border-radius: 50%;
+  background: #8e83ed;
+  box-shadow: 0 0 0 4px rgba(111, 99, 231, .1);
+}
+
+.twinPatternStack b,
+.twinPatternStack small {
+  display: block;
+}
+
+.twinPatternStack b {
+  color: #e5e3f3;
+  font-size: .65rem;
+  font-weight: 680;
+}
+
+.twinPatternStack small {
+  color: #858fa1;
+  font-size: .55rem;
+  line-height: 1.35;
+}
+
+.performanceBrief:not(.creatorTwinBrief) .twinBeaconAction {
+  grid-column: 1;
+  align-self: end;
+  width: 100%;
+  margin-top: 24px;
+}
+
+.performanceBrief:not(.creatorTwinBrief) .briefStages {
+  grid-template-columns: minmax(0, .94fr) minmax(0, 1.06fr);
+  gap: 14px 24px;
+  padding: 0 24px 20px;
+}
+
+.performanceBrief:not(.creatorTwinBrief) .briefStage {
+  min-height: 220px;
+  padding: 17px 0;
+}
+
+.performanceBrief:not(.creatorTwinBrief) .briefStage + .briefStage {
+  border-left: 0;
+}
+
+.performanceBrief:not(.creatorTwinBrief) .outcomeStage {
+  grid-column: 1 / -1;
+  min-height: 112px;
+  padding: 14px 0 0;
+  border-top: 1px solid #252d3b;
+  border-left: 0;
+}
+
+.performanceBrief:not(.creatorTwinBrief) .sourceBars {
+  margin-top: 19px;
+}
+
+.performanceBrief:not(.creatorTwinBrief) .outcomeStage .outcomeMetrics {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 28px;
+  margin-top: 10px;
+}
+
+.performanceBrief:not(.creatorTwinBrief) .outcomeStage .outcomeMetrics > div {
+  display: block;
+  padding: 9px 0;
+  border-bottom: 0;
+}
+
+.performanceBrief:not(.creatorTwinBrief) .outcomeStage .outcomeMetrics dd {
+  margin-top: 6px;
+}
+
+.changeBrief > div > button {
+  min-height: 82px;
+  padding: 12px 0;
+}
+
+.changeBrief b {
+  display: block;
+  margin-top: 7px;
+  color: #b6aff8;
+  font-size: .62rem;
+  font-weight: 620;
+  line-height: 1.45;
+}
+
+@keyframes twinHaloBreathe {
+  from { opacity: .72; transform: scale(.94); }
+  to { opacity: 1; transform: scale(1.04); }
+}
+
+@media (max-width: 900px) {
+  .performanceBrief:not(.creatorTwinBrief):not(.performanceBriefScanning) {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "header"
+      "twin"
+      "stages";
+  }
+
+  .performanceBrief:not(.creatorTwinBrief) .twinBeacon {
+    min-height: 104px;
+    grid-template-columns: 68px minmax(0, 1fr) auto;
+    grid-template-rows: auto auto;
+    align-items: center;
+    gap: 16px;
+    padding: 17px 22px;
+    border-top: 1px solid #292f40;
+    border-right: 0;
+    border-bottom: 1px solid #292f40;
+  }
+
+  .performanceBrief:not(.creatorTwinBrief) .twinMascotStage {
+    grid-column: 1;
+    grid-row: 1;
+    width: 64px;
+    height: 64px;
+    margin: 0;
+  }
+
+  .performanceBrief:not(.creatorTwinBrief) .twinMascotStage::after {
+    display: none;
+  }
+
+  .twinMascotHalo {
+    width: 64px;
+    height: 64px;
+  }
+
+  .twinMascotStage img {
+    width: 56px;
+    height: 56px;
+  }
+
+  .performanceBrief:not(.creatorTwinBrief) .twinBeaconCopy {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .performanceBrief:not(.creatorTwinBrief) .twinBeaconCopy strong {
+    max-width: none;
+    margin-top: 4px;
+    font-size: 1rem;
+  }
+
+  .twinPatternStack {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 16px;
+    margin: 3px 0 0;
+    padding: 13px 0 0;
+    border-top: 1px solid #393451;
+    border-left: 0;
+  }
+
+  .twinPatternStack > span {
+    min-height: 48px;
+    padding: 0;
+  }
+
+  .twinPatternStack > span + span {
+    border-top: 0;
+  }
+
+  .performanceBrief:not(.creatorTwinBrief) .twinBeaconAction {
+    grid-column: 3;
+    grid-row: 1;
+    width: auto;
+    margin: 0;
+  }
+}
+
+@media (max-width: 680px) {
+  .performanceBrief:not(.creatorTwinBrief) .twinBeacon {
+    grid-template-columns: 48px minmax(0, 1fr);
+    gap: 13px;
+    padding: 15px 18px;
+  }
+
+  .performanceBrief:not(.creatorTwinBrief) .twinMascotStage {
+    width: 48px;
+    height: 48px;
+  }
+
+  .twinMascotHalo {
+    width: 52px;
+    height: 52px;
+  }
+
+  .twinMascotStage img {
+    width: 46px;
+    height: 46px;
+  }
+
+  .twinPatternStack {
+    grid-column: 1 / -1;
+    grid-row: auto;
+    grid-template-columns: 1fr;
+    gap: 0;
+    margin-top: 8px;
+    padding: 8px 0 0;
+    border-top: 1px solid #393451;
+    border-left: 0;
+  }
+
+  .twinPatternStack > span {
+    min-height: 46px;
+    padding: 7px 0;
+  }
+
+  .twinPatternStack > span + span {
+    border-top: 1px solid rgba(57, 52, 81, .7);
+  }
+
+  .performanceBrief:not(.creatorTwinBrief) .twinBeaconAction {
+    grid-column: 1 / -1;
+    grid-row: auto;
+    width: 100%;
+    margin-top: 0;
+  }
+
+  .performanceBrief:not(.creatorTwinBrief) .briefStages {
+    grid-template-columns: 1fr;
+  }
+
+  .performanceBrief:not(.creatorTwinBrief) .briefStage,
+  .performanceBrief:not(.creatorTwinBrief) .outcomeStage {
+    grid-column: auto;
+    min-height: 0;
+    padding-block: 20px;
+  }
+
+  .performanceBrief:not(.creatorTwinBrief) .outcomeStage .outcomeMetrics {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+
+  .performanceBrief:not(.creatorTwinBrief) .outcomeStage .outcomeMetrics > div {
+    display: flex;
+    border-bottom: 1px solid #242c39;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .twinMascotHalo,
+  .twinMascotStage img {
+    animation: none !important;
+  }
+}
+
+/* Creator Twin Pattern Convergence scan. */
+.patternConvergence {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: min(720px, calc(100% - 64px));
+  height: 260px;
+  translate: -50% calc(-50% - 26px);
+}
+
+.convergenceNode {
+  position: absolute;
+  z-index: 2;
+  width: 22.8%;
+  min-width: 112px;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  color: #72778a;
+  opacity: .52;
+  transition:
+    color 220ms cubic-bezier(.22, 1, .36, 1),
+    opacity 220ms cubic-bezier(.22, 1, .36, 1),
+    transform 220ms cubic-bezier(.22, 1, .36, 1);
+}
+
+.convergenceNode > i {
+  width: 9px;
+  height: 9px;
+  flex: 0 0 auto;
+  border: 1px solid #565a72;
+  border-radius: 50%;
+  background: #202237;
+  transition:
+    background-color 180ms cubic-bezier(.22, 1, .36, 1),
+    border-color 180ms cubic-bezier(.22, 1, .36, 1),
+    box-shadow 180ms cubic-bezier(.22, 1, .36, 1);
+}
+
+.convergenceNode span,
+.convergenceNode b,
+.convergenceNode small {
+  min-width: 0;
+  display: block;
+}
+
+.convergenceNode b {
+  color: currentColor;
+  font-size: .72rem;
+  font-weight: 680;
+  line-height: 1.15;
+}
+
+.convergenceNode small {
+  margin-top: 4px;
+  color: #777f92;
+  font-size: .56rem;
+  line-height: 1.25;
+}
+
+.convergenceTopics {
+  top: 15%;
+  left: 0;
+}
+
+.convergenceFormat {
+  bottom: 15%;
+  left: 0;
+}
+
+.convergenceMomentum {
+  top: 50%;
+  right: 0;
+  translate: 0 -50%;
+}
+
+.convergenceNode[data-active] {
+  color: #d5d0ff;
+  opacity: 1;
+  transform: translateX(3px);
+}
+
+.convergenceMomentum[data-active] {
+  transform: translateX(-3px);
+}
+
+.convergenceNode[data-active] > i {
+  border-color: #b3aaff;
+  background: #8f83ef;
+  box-shadow: 0 0 0 5px rgba(111, 99, 231, .1), 0 0 12px rgba(143, 131, 239, .52);
+}
+
+.convergenceNode[data-arrived] > i {
+  border-color: #8fe0bb;
+  background: #65cfa1;
+  box-shadow: 0 0 0 5px rgba(101, 207, 161, .08);
+}
+
+.convergenceTraces {
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.convergenceTraceBase,
+.convergenceTraceFlow {
+  fill: none;
+  stroke-linecap: round;
+}
+
+.convergenceTraceBase {
+  stroke: rgba(120, 113, 183, .18);
+  stroke-width: 1;
+}
+
+.convergenceTraceFlow {
+  stroke: #a89ef8;
+  stroke-width: 1.8;
+  stroke-dasharray: .12 1;
+  stroke-dashoffset: 1.12;
+  opacity: 0;
+  filter: drop-shadow(0 0 4px rgba(151, 139, 244, .62));
+}
+
+.convergenceTraceFlow[data-active] {
+  opacity: 1;
+  animation: convergenceSignalTravel 530ms cubic-bezier(.16, 1, .3, 1) forwards;
+}
+
+.convergenceTraceFlow[data-arrived] {
+  opacity: .24;
+}
+
+.convergenceCore {
+  position: absolute;
+  z-index: 3;
+  top: 50%;
+  left: 50%;
+  width: 112px;
+  height: 112px;
+  display: grid;
+  place-items: center;
+  translate: -50% -50%;
+}
+
+.convergenceCore .stanleyScanner,
+.convergenceCore .stanleyScanner img {
+  width: 92px;
+  height: 92px;
+  translate: none;
+  animation: none;
+}
+
+.convergenceHalo,
+.convergenceConfirmation {
+  position: absolute;
+  inset: 0;
+  border: 1px solid rgba(139, 128, 235, .42);
+  border-radius: 50%;
+}
+
+.convergenceHalo {
+  background: radial-gradient(circle, rgba(116, 101, 231, .18), rgba(83, 70, 181, .05) 54%, transparent 72%);
+  transition:
+    border-color 240ms cubic-bezier(.22, 1, .36, 1),
+    transform 240ms cubic-bezier(.22, 1, .36, 1);
+}
+
+.convergenceConfirmation {
+  border-color: #65cfa1;
+  opacity: 0;
+  transform: scale(.72);
+  box-shadow: 0 0 18px rgba(101, 207, 161, .18);
+}
+
+.convergenceCore > small {
+  position: absolute;
+  top: calc(100% + 14px);
+  left: 50%;
+  color: #8fe0bb;
+  font-size: .62rem;
+  font-weight: 680;
+  opacity: 0;
+  white-space: nowrap;
+  translate: -50% 4px;
+}
+
+.twinLabStage[data-complete] .convergenceHalo {
+  border-color: rgba(101, 207, 161, .72);
+  transform: scale(.88);
+}
+
+.twinLabStage[data-complete] .convergenceConfirmation {
+  animation: convergenceConfirmPulse 420ms cubic-bezier(.16, 1, .3, 1) both;
+}
+
+.twinLabStage[data-complete] .convergenceCore > small {
+  opacity: 1;
+  translate: -50% 0;
+  transition: opacity 180ms cubic-bezier(.22, 1, .36, 1), translate 180ms cubic-bezier(.22, 1, .36, 1);
+}
+
+.scanProgressHud.convergenceProgress {
+  bottom: 36px;
+  width: min(360px, calc(100% - 48px));
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
+}
+
+.convergenceProgress .scanProgressTrack {
+  height: 3px;
+  background: rgba(130, 121, 213, .13);
+}
+
+.convergenceProgress .scanProgressTrack > i::after {
+  width: 6px;
+  height: 6px;
+}
+
+.convergenceProgress .scanProgressSteps {
+  margin-top: 10px;
+  color: #656a7e;
+  font-size: .55rem;
+}
+
+.convergenceProgress[data-phase="topics"] .scanProgressSteps span:first-child,
+.convergenceProgress[data-phase="format"] .scanProgressSteps span:nth-child(-n + 2),
+.convergenceProgress[data-phase="momentum"] .scanProgressSteps span,
+.convergenceProgress[data-phase="found"] .scanProgressSteps span {
+  color: #b4adf4;
+}
+
+.convergenceProgress[data-phase="found"] .scanProgressTrack > i {
+  background: #65cfa1;
+  box-shadow: 0 0 7px rgba(101, 207, 161, .48);
+}
+
+@keyframes convergenceSignalTravel {
+  to { stroke-dashoffset: 0; }
+}
+
+@keyframes convergenceConfirmPulse {
+  0% { opacity: 0; transform: scale(.72); }
+  45% { opacity: 1; }
+  100% { opacity: 0; transform: scale(1.34); }
+}
+
+@media (max-width: 560px) {
+  .patternConvergence {
+    width: min(300px, calc(100% - 40px));
+    height: 286px;
+    translate: -50% calc(-50% - 14px);
+  }
+
+  .convergenceTraces {
+    display: none;
+  }
+
+  .convergenceCore {
+    top: 17%;
+  }
+
+  .convergenceNode,
+  .convergenceTopics,
+  .convergenceFormat,
+  .convergenceMomentum {
+    right: auto;
+    left: 50%;
+    width: 200px;
+    min-width: 0;
+    translate: -50% 0;
+  }
+
+  .convergenceTopics { top: 48%; }
+  .convergenceFormat { top: 65%; bottom: auto; }
+  .convergenceMomentum { top: 82%; }
+
+  .convergenceNode[data-active],
+  .convergenceMomentum[data-active] {
+    transform: translateX(3px);
+  }
+
+  .scanProgressHud.convergenceProgress {
+    bottom: 22px;
+    width: min(300px, calc(100% - 40px));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .convergenceNode,
+  .convergenceNode > i,
+  .convergenceHalo,
+  .convergenceCore > small,
+  .convergenceProgress .scanProgressTrack > i,
+  .convergenceProgress .scanProgressSteps span {
+    transition: none !important;
+  }
+
+  .convergenceTraceFlow[data-active],
+  .twinLabStage[data-complete] .convergenceConfirmation {
+    animation: none !important;
+  }
+
+  .convergenceTraceFlow {
+    display: none;
+  }
+
+  .twinLabStage[data-complete] .convergenceConfirmation {
+    opacity: .62;
+    transform: scale(1);
+  }
+}
+
+/* Inline Creator Twin rail states and report expansion. */
+.performanceBrief:not(.creatorTwinBrief) .twinBeacon:disabled {
+  color: inherit;
+  cursor: progress;
+  opacity: 1;
+}
+
+.performanceBrief:not(.creatorTwinBrief) .twinBeacon[data-state="scanning"],
+.performanceBrief:not(.creatorTwinBrief) .twinBeacon[data-state="found"],
+.performanceBrief:not(.creatorTwinBrief) .twinBeacon[data-state="error"] {
+  background:
+    radial-gradient(circle at 50% 10%, rgba(111, 99, 231, .18), transparent 29%),
+    #111322;
+}
+
+.twinRailStanley {
+  position: relative;
+  z-index: 2;
+}
+
+.twinBeacon[data-state="found"] .twinRailStanley {
+  animation: none;
+  opacity: 1;
+  transform: none;
+}
+
+.twinBeacon[data-state="found"] .twinMascotHalo {
+  animation: twinRailFoundHalo 420ms cubic-bezier(.16, 1, .3, 1) both;
+}
+
+.twinBeacon[data-state="scanning"] .twinMascotHalo {
+  animation: none;
+  border: 1px solid rgba(132, 121, 229, .18);
+}
+
+.twinBeacon[data-state="scanning"][data-complete] .twinMascotHalo {
+  animation: twinRailScanConfirm 380ms cubic-bezier(.16, 1, .3, 1) both;
+}
+
+.twinRailPatternScan > span {
+  color: #737b8e;
+  opacity: .5;
+  transition: color 180ms cubic-bezier(.22, 1, .36, 1), opacity 180ms cubic-bezier(.22, 1, .36, 1);
+}
+
+.twinRailPatternScan > span[data-active] {
+  color: #dedaff;
+  opacity: 1;
+}
+
+.twinRailPatternScan > span[data-active] > i {
+  background: #9589f2;
+  box-shadow: 0 0 0 4px rgba(111, 99, 231, .1), 0 0 10px rgba(143, 131, 239, .5);
+}
+
+.twinRailPatternScan > span[data-arrived] > i,
+.twinRailPatternsComplete > span > i {
+  background: #65cfa1;
+  box-shadow: 0 0 0 4px rgba(101, 207, 161, .08);
+}
+
+.twinRailPatternsComplete {
+  animation: twinRailFoundContent 220ms 70ms cubic-bezier(.16, 1, .3, 1) both;
+}
+
+.twinRailPatternsComplete > span small {
+  color: #7fb99d;
+}
+
+.twinRailSignalSpine {
+  position: absolute;
+  z-index: 0;
+  top: 116px;
+  left: 50%;
+  width: 1px;
+  height: 176px;
+  overflow: hidden;
+  background: linear-gradient(rgba(137, 126, 230, .42), rgba(137, 126, 230, .04));
+  pointer-events: none;
+}
+
+.twinRailSignalSpine > i {
+  position: absolute;
+  top: var(--rail-signal-origin);
+  left: 50%;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #bcb4ff;
+  box-shadow: 0 0 8px rgba(151, 139, 244, .76);
+  opacity: 0;
+  translate: -50% 0;
+}
+
+.twinRailSignalSpine > i:nth-child(1) { --rail-signal-origin: 150px; --rail-signal-distance: -142px; }
+.twinRailSignalSpine > i:nth-child(2) { --rail-signal-origin: 112px; --rail-signal-distance: -104px; }
+.twinRailSignalSpine > i:nth-child(3) { --rail-signal-origin: 74px; --rail-signal-distance: -66px; }
+
+.twinRailSignalSpine > i[data-active] {
+  animation: twinRailSignalTravel 520ms cubic-bezier(.16, 1, .3, 1) both;
+}
+
+.twinRailSignalSpine > i[data-arrived] {
+  opacity: 0;
+}
+
+.performanceBrief:not(.creatorTwinBrief) .twinBeaconAction.twinRailProgress {
+  min-height: 44px;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 9px 12px;
+  padding: 0;
+  border: 0;
+  color: #9d95ed;
+}
+
+.twinRailProgress > span {
+  position: relative;
+  height: 3px;
+  grid-column: 1 / -1;
+  overflow: hidden;
+  background: rgba(130, 121, 213, .14);
+}
+
+.twinRailProgress > span > i {
+  width: 100%;
+  height: 100%;
+  display: block;
+  background: #9489f2;
+  box-shadow: 0 0 7px rgba(126, 112, 237, .58);
+  transform: scaleX(0);
+  transform-origin: left center;
+  transition: transform 90ms linear;
+}
+
+.twinRailProgress > small {
+  grid-column: 1 / -1;
+  color: #9d95ed;
+  font-size: .58rem;
+  font-weight: 660;
+}
+
+.twinRailProgress[data-phase="found"] > span > i {
+  background: #65cfa1;
+  box-shadow: 0 0 7px rgba(101, 207, 161, .4);
+}
+
+.twinBeacon[data-state="found"] .twinBeaconCopy,
+.twinRailFoundAction {
+  animation: twinRailFoundContent 220ms 50ms cubic-bezier(.16, 1, .3, 1) both;
+}
+
+.performanceBrief:not(.creatorTwinBrief) .twinRailFoundCopy strong {
+  max-width: none;
+  margin-top: 0;
+}
+
+.performanceBrief:not(.creatorTwinBrief) .twinBeaconAction.twinRailFoundAction {
+  border-color: rgba(101, 207, 161, .35);
+  color: #9ce4c2;
+}
+
+.twinRailError {
+  min-width: 0;
+  display: block;
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid #393451;
+  color: #a8afbd;
+  font-size: .62rem;
+  line-height: 1.45;
+}
+
+.creatorTwinRevealing {
+  transform-origin: left top;
+  animation: none;
+}
+
+.creatorTwinRevealing .twinBriefIdentity,
+.creatorTwinRevealing .twinBriefHeader,
+.creatorTwinRevealing .twinBriefIdentity span,
+.creatorTwinRevealing .twinBriefIdentity p,
+.creatorTwinRevealing .twinBriefActions,
+.creatorTwinRevealing .twinMatchSummary,
+.creatorTwinRevealing .twinVideoGraph,
+.creatorTwinRevealing .twinPatternStrip {
+  animation: none;
+  opacity: 1;
+}
+
+.creatorTwinRevealing .twinGraphRow > i > b {
+  animation: none;
+  transform: scaleX(var(--twin-video-scale));
+}
+
+.creatorTwinRevealing .twinMatchProgress {
+  animation: none;
+  stroke-dashoffset: calc(100 - var(--twin-match-value));
+}
+
+/* Keep the loaded report at the overview card's footprint and spend the space visually. */
+@media (min-width: 901px) {
+  .creatorTwinBrief {
+    min-height: 576px;
+  }
+
+  .creatorTwinBrief .twinBriefGrid {
+    min-height: 443px;
+    grid-template-rows: minmax(220px, 1fr) minmax(138px, auto);
+    align-content: stretch;
+  }
+
+  .creatorTwinBrief .twinMatchSummary,
+  .creatorTwinBrief .twinVideoGraph {
+    align-self: stretch;
+  }
+
+  .creatorTwinBrief .twinMatchSummary {
+    grid-template-columns: 154px minmax(0, 1fr);
+  }
+
+  .creatorTwinBrief .twinMatchRing {
+    width: 148px;
+  }
+
+  .creatorTwinBrief .twinMatchRing strong {
+    font-size: 2rem;
+  }
+
+  .creatorTwinBrief .twinVideoGraph {
+    display: grid;
+    grid-template-rows: auto 1fr;
+  }
+
+  .creatorTwinBrief .twinVideoGraph > div {
+    align-content: space-between;
+    gap: 10px;
+  }
+
+  .creatorTwinBrief .twinGraphRow {
+    min-height: 38px;
+    grid-template-columns: 56px minmax(98px, .9fr) minmax(110px, 1.12fr) 52px;
+  }
+
+  .creatorTwinBrief .twinGraphRow > img {
+    width: 56px;
+    aspect-ratio: 16 / 9;
+    display: block;
+    border-radius: 6px;
+    background: #202737;
+    object-fit: cover;
+  }
+
+  .creatorTwinBrief .twinPatternStrip {
+    min-height: 138px;
+    align-items: center;
+  }
+
+  .creatorTwinBrief .twinPatternDetails > div {
+    min-height: 32px;
+    grid-template-columns: 28px 44px minmax(0, 1fr);
+    align-items: center;
+    gap: 10px;
+  }
+
+  .creatorTwinBrief .twinPatternDetails > div::before {
+    width: 28px;
+    height: 28px;
+    border-radius: 7px;
+    background-color: #17182a;
+    content: "";
+  }
+
+  .creatorTwinBrief .twinPatternDetails > div[data-pattern="title"]::before {
+    background:
+      linear-gradient(#988df2 0 0) 7px 7px / 14px 2px no-repeat,
+      linear-gradient(#5c577c 0 0) 7px 13px / 10px 2px no-repeat,
+      linear-gradient(#5c577c 0 0) 7px 19px / 13px 2px no-repeat,
+      #17182a;
+  }
+
+  .creatorTwinBrief .twinPatternDetails > div[data-pattern="story"]::before {
+    background:
+      radial-gradient(circle, #9589f2 0 2px, transparent 2.5px) 5px 11px / 9px 9px repeat-x,
+      linear-gradient(#4c4969 0 0) center / 16px 1px no-repeat,
+      #17182a;
+  }
+
+  .creatorTwinBrief .twinPatternDetails > div[data-pattern="rhythm"]::before {
+    background:
+      linear-gradient(to top, #7066d7 0 8px, transparent 8px) 7px 9px / 3px 12px no-repeat,
+      linear-gradient(to top, #988df2 0 14px, transparent 14px) 13px 7px / 3px 14px no-repeat,
+      linear-gradient(to top, #5f589b 0 10px, transparent 10px) 19px 9px / 3px 12px no-repeat,
+      #17182a;
+  }
+}
+
+.performanceBrief {
+  position: relative;
+}
+
+.twinOverviewLayer {
+  display: contents;
+}
+
+.creatorTwinHost {
+  isolation: isolate;
+}
+
+.creatorTwinOverlay {
+  --twin-inline-start-inset: 73%;
+  position: absolute;
+  z-index: 5;
+  inset: 0;
+  width: 100%;
+  min-height: 100%;
+  border-radius: inherit;
+  clip-path: inset(0 0 0 0 round 12px);
+  opacity: 1;
+}
+
+.creatorTwinOverlay.creatorTwinRevealing {
+  animation: twinInlineLiveTakeover 900ms cubic-bezier(.4, 0, .2, 1) both;
+}
+
+@keyframes twinRailSignalTravel {
+  0% { opacity: 0; transform: translateY(0); }
+  18%, 72% { opacity: 1; }
+  100% { opacity: 0; transform: translateY(var(--rail-signal-distance)); }
+}
+
+@keyframes twinRailScanConfirm {
+  0% { opacity: .72; transform: scale(.94); }
+  48% { border-color: #65cfa1; opacity: 1; transform: scale(.86); }
+  100% { border-color: rgba(101, 207, 161, .34); opacity: .86; transform: scale(1); }
+}
+
+@keyframes twinRailFoundHalo {
+  0% { opacity: .55; transform: scale(.86); }
+  58% { background-color: rgba(101, 207, 161, .12); opacity: 1; transform: scale(1.06); }
+  100% { background-color: transparent; opacity: .9; transform: scale(1); }
+}
+
+@keyframes twinRailFoundContent {
+  from { opacity: 0; transform: translateY(3px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes twinInlineLiveTakeover {
+  0%, 18% { clip-path: inset(0 var(--twin-inline-start-inset) 0 0 round 12px); opacity: 0; }
+  24% { clip-path: inset(0 var(--twin-inline-start-inset) 0 0 round 12px); opacity: 1; }
+  90%, 100% { clip-path: inset(0 0 0 0 round 12px); opacity: 1; }
+}
+
+@media (max-width: 900px) {
+  .creatorTwinOverlay {
+    --twin-inline-start-inset: 0%;
+  }
+
+  .twinRailSignalSpine {
+    display: none;
+  }
+
+  .twinRailError {
+    grid-column: 1 / -1;
+    margin: 0;
+  }
+}
+
+@media (max-width: 680px) {
+  .performanceBrief:not(.creatorTwinBrief) .twinBeaconAction.twinRailProgress {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .twinBeacon[data-state="found"] .twinRailStanley,
+  .twinBeacon[data-state="found"] .twinMascotHalo,
+  .twinBeacon[data-state="scanning"][data-complete] .twinMascotHalo,
+  .twinRailPatternScan > span,
+  .twinRailSignalSpine > i,
+  .twinRailPatternsComplete,
+  .twinBeacon[data-state="found"] .twinBeaconCopy,
+  .twinRailFoundAction,
+  .creatorTwinRevealing,
+  .creatorTwinRevealing .twinBriefIdentity,
+  .creatorTwinRevealing .twinBriefHeader,
+  .creatorTwinRevealing .twinBriefIdentity span,
+  .creatorTwinRevealing .twinBriefIdentity p,
+  .creatorTwinRevealing .twinBriefActions,
+  .creatorTwinRevealing .twinMatchSummary,
+  .creatorTwinRevealing .twinVideoGraph,
+  .creatorTwinRevealing .twinPatternStrip {
+    animation: none !important;
+    filter: none !important;
+    transition: none !important;
+  }
+
+  .twinRailSignalSpine {
+    display: none;
+  }
+
+  .twinBeacon[data-state="found"] .twinRailStanley {
+    opacity: 1;
+  }
+
+  .twinRailPatternsComplete,
+  .twinBeacon[data-state="found"] .twinBeaconCopy,
+  .twinRailFoundAction {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Dashboard hierarchy cleanup: one final type scale and responsive header layout. */
+.channelHeader {
+  min-height: 0;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 48px;
+  padding: 18px 0 20px;
+}
+
+.channelIdentity {
+  grid-template-columns: 124px minmax(0, 1fr);
+  gap: 28px;
+}
+
+.channelIdentity > img,
+.channelIdentity > :global(.youtube-avatar-fallback) {
+  width: 120px;
+  height: 120px;
+}
+
+.channelCopy h1 {
+  font-size: clamp(2.4rem, 4vw, 2.85rem);
+  font-stretch: normal;
+  font-weight: 680;
+  line-height: 1.03;
+}
+
+.channelCopy div {
+  margin-top: 10px;
+}
+
+.channelCopy small {
+  font-size: .76rem;
+}
+
+.channelUtilities {
+  gap: 0;
+  padding-left: 32px;
+}
+
+.channelTotals {
+  gap: 32px;
+}
+
+.channelTotals div {
+  min-width: 92px;
+}
+
+.channelTotals dt {
+  font-size: .62rem;
+  font-weight: 540;
+}
+
+.channelTotals dd {
+  margin-top: 6px;
+  font-size: .92rem;
+  font-stretch: normal;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.dashboardToolbar {
+  min-height: 52px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  margin-top: 8px;
+  padding: 8px 0;
+  border-top: 1px solid #202734;
+  border-bottom: 1px solid #202734;
+}
+
+.dashboardToolbarStatus {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.dashboardToolbarStatus time {
+  color: #7f899a;
+  font-size: .64rem;
+  font-stretch: normal;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.dashboardToolbar .refreshButton {
+  width: 36px;
+  height: 36px;
+  border-radius: 7px;
+}
+
+.signalStrip {
+  margin-top: 20px;
+}
+
+.timelineHeader h2 {
+  font-size: 1.2rem;
+  font-weight: 640;
+}
+
+.ledgerHeading h2 {
+  font-size: 1.38rem;
+  font-weight: 650;
+}
+
+.ledgerHeading p {
+  font-size: .69rem;
+}
+
+.ledgerMetricHeadings {
+  font-size: .56rem;
+  font-weight: 540;
+}
+
+.ledgerPerformanceRow .ledgerVideo strong {
+  font-size: .74rem;
+  font-weight: 620;
+}
+
+.ledgerPerformanceRow .ledgerEvidenceRail dd {
+  font-size: .74rem;
+  font-stretch: normal;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.signalMetric strong,
+.chartTooltip strong,
+.ledgerIntelligenceRow,
+.ledgerPeriodSummary strong {
+  font-stretch: normal;
+  font-variant-numeric: tabular-nums;
+}
+
+.timelinePanel .chartFrame {
+  position: relative;
+}
+
+.chartAxisValues,
+.chartAxisDates {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  color: #737e8f;
+  font-family: inherit;
+  font-size: .58rem;
+  font-stretch: normal;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  pointer-events: none;
+}
+
+.chartAxisValues span,
+.chartAxisDates span {
+  position: absolute;
+  white-space: nowrap;
+}
+
+.chartAxisValues span {
+  left: 16px;
+  transform: translateY(-115%);
+}
+
+.chartAxisDates span {
+  bottom: 8px;
+}
+
+.chartAxisDates span[data-align="middle"] {
+  transform: translateX(-50%);
+}
+
+.chartAxisDates span[data-align="end"] {
+  transform: translateX(-100%);
+}
+
+@media (max-width: 900px) {
+  .channelHeader {
+    grid-template-columns: 1fr;
+    gap: 20px;
+  }
+
+  .channelUtilities {
+    justify-content: flex-start;
+    padding: 16px 0 0;
+    border-top: 1px solid var(--dash-border);
+    border-left: 0;
+  }
+
+  .channelTotals {
+    width: min(100%, 300px);
+  }
+
+  .channelTotals div {
+    flex: 1;
+  }
+}
+
+@media (max-width: 680px) {
+  .channelHeader {
+    gap: 16px;
+    padding-block: 14px 18px;
+  }
+
+  .channelIdentity {
+    grid-template-columns: 90px minmax(0, 1fr);
+    gap: 18px;
+  }
+
+  .channelIdentity > img,
+  .channelIdentity > :global(.youtube-avatar-fallback) {
+    width: 86px;
+    height: 86px;
+  }
+
+  .channelCopy h1 {
+    font-size: clamp(1.75rem, 9vw, 2.1rem);
+  }
+
+  .channelCopy small {
+    font-size: .68rem;
+  }
+
+  .channelTotals {
+    width: 100%;
+    display: flex;
+  }
+
+  .channelTotals div {
+    text-align: left;
+  }
+
+  .dashboardToolbar {
+    min-height: 0;
+    align-items: stretch;
+    flex-direction: column;
+    gap: 10px;
+    padding: 12px 0;
+  }
+
+  .dashboardToolbar .periodControl {
+    width: 100%;
+  }
+
+  .dashboardToolbar .periodControl > div {
+    min-width: 0;
+    flex: 1;
+  }
+
+  .dashboardToolbar .periodControl button {
+    min-width: 0;
+    flex: 1;
+    padding-inline: 5px;
+  }
+
+  .dashboardToolbarStatus {
+    justify-content: space-between;
+  }
+
+  .chartAxisValues span {
+    left: 10px;
   }
 }

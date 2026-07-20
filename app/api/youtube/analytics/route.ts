@@ -180,13 +180,14 @@ export async function GET(request: Request) {
     const period = resolvePeriod(url);
     const compare = url.searchParams.get("compare") !== "false";
     const comparisonPeriod = previousPeriod(period);
-    const [current, comparison, timeline, comparisonTimeline, videos, traffic, handle] = await Promise.all([
+    const [current, comparison, timeline, comparisonTimeline, videos, traffic, comparisonTraffic, handle] = await Promise.all([
       aggregateReport(period, session.accessToken),
       compare ? aggregateReport(comparisonPeriod, session.accessToken) : Promise.resolve(null),
       timelineReport(period, session.accessToken),
       compare ? timelineReport(comparisonPeriod, session.accessToken) : Promise.resolve([]),
       videoReport(period, session.accessToken),
       trafficReport(period, session.accessToken),
+      compare ? trafficReport(comparisonPeriod, session.accessToken) : Promise.resolve([]),
       channelHandle(session.accessToken).catch(() => null),
     ]);
 
@@ -200,6 +201,7 @@ export async function GET(request: Request) {
       comparisonTimeline,
       videos,
       traffic,
+      comparisonTraffic,
       updatedAt: new Date().toISOString(),
     });
     response.cookies.set(YOUTUBE_SESSION_COOKIE, await seal(session), cookieOptions(request.url));

@@ -4,6 +4,7 @@ import { ChangeEvent, FormEvent, KeyboardEvent, useEffect, useRef, useState } fr
 import { createPortal, flushSync } from "react-dom";
 import { ArrowDownRight, ArrowLeft, ArrowUpRight, Check, ChevronDown, ChevronRight, Clock3, Copy as CopyIcon, Download, ExternalLink, Eye, Facebook, FileText, Globe2, Image as ImageIcon, Instagram, LayoutDashboard, LogOut, MessageCircle, Minus, PanelLeftClose, PanelLeftOpen, Puzzle, RefreshCw, Search, Sparkles, SquarePen, ThumbsDown, ThumbsUp, Users, Video, WandSparkles, X } from "lucide-react";
 import dashboardStyles from "./dashboard.module.css";
+import { findDiscoveryGrowth } from "./dashboard-signals.mjs";
 
 type CreationMode = "auto" | "idea" | "title" | "thumbnail";
 type WorkspaceView = "dashboard" | "create";
@@ -236,6 +237,7 @@ type DashboardAnalytics = {
     interactionRate: number | null;
   }>;
   traffic: Array<{ source: string; views: number; watchMinutes: number }>;
+  comparisonTraffic?: Array<{ source: string; views: number; watchMinutes: number }>;
   updatedAt: string;
 };
 
@@ -1244,17 +1246,47 @@ function creatorTwinPrompt(result: CreatorTwinResult) {
   ].join("\n");
 }
 
+type CreatorTwinViewTransition = {
+  ready: Promise<void>;
+  updateCallbackDone: Promise<void>;
+  finished: Promise<void>;
+};
+
+function runCreatorTwinViewTransition(update: () => void, direction: "expand" | "collapse" = "expand") {
+  const transitionDocument = document as Document & { startViewTransition?: (callback: () => void) => CreatorTwinViewTransition };
+  if (!transitionDocument.startViewTransition || window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    update();
+    return;
+  }
+
+  const transitionRoot = document.documentElement;
+  transitionRoot.dataset.creatorTwinTransition = direction;
+  const clearTransitionDirection = () => {
+    if (transitionRoot.dataset.creatorTwinTransition === direction) delete transitionRoot.dataset.creatorTwinTransition;
+  };
+
+  try {
+    const transition = transitionDocument.startViewTransition(() => flushSync(update));
+    void transition.ready.catch(() => undefined);
+    void transition.updateCallbackDone.catch(() => undefined);
+    void transition.finished.catch(() => undefined).finally(clearTransitionDirection);
+  } catch {
+    clearTransitionDirection();
+    update();
+  }
+}
+
 function ChannelPerformanceBrief({
   videos,
   traffic,
   trafficTotal,
   current,
-  comparison,
   selectedVideoId,
   twin,
   showTwinReport,
   animateTwinReveal,
   twinLoading,
+  twinError,
   periodLabel,
   onSelectVideo,
   onSelectTraffic,
@@ -1267,12 +1299,12 @@ function ChannelPerformanceBrief({
   traffic: DashboardAnalytics["traffic"];
   trafficTotal: number;
   current: DashboardAnalytics["current"] | null;
-  comparison: DashboardAnalytics["comparison"] | null;
   selectedVideoId: string;
   twin: CreatorTwinResult | null;
   showTwinReport: boolean;
   animateTwinReveal: boolean;
   twinLoading: boolean;
+  twinError: string;
   periodLabel: string;
   onSelectVideo: (id: string) => void;
   onSelectTraffic: (source: string) => void;
@@ -1284,17 +1316,11 @@ function ChannelPerformanceBrief({
   const trafficRows = traffic.slice(0, 4);
   const topTrafficViews = Math.max(1, ...trafficRows.map((source) => source.views));
   const currentNet = netSubscribers(current);
-  const viewChange = percentDelta(current?.views ?? null, comparison?.views ?? null);
-  const watchChange = percentDelta(current?.watchMinutes ?? null, comparison?.watchMinutes ?? null);
   const twinTopViews = Math.max(1, ...(twin?.topVideos || []).map((video) => video.views));
   const twinReference = twin?.topVideos[0] ? { ...twin.topVideos[0], privacyStatus: "public" } : undefined;
+  const twinRailState = twinLoading ? "scanning" : twin ? "found" : twinError ? "error" : "idle";
 
-  if (twinLoading) return <section className={`${dashboardStyles.performanceBrief} ${dashboardStyles.performanceBriefScanning}`} aria-labelledby="performance-brief-heading">
-    <h2 className={dashboardStyles.visuallyHidden} id="performance-brief-heading">Scanning for your Creator Twin</h2>
-    <TwinLabScan />
-  </section>;
-
-  if (twin && showTwinReport) return <section className={`${dashboardStyles.performanceBrief} ${dashboardStyles.creatorTwinBrief}${animateTwinReveal ? ` ${dashboardStyles.creatorTwinRevealing}` : ""}`} aria-labelledby="creator-twin-brief-heading">
+  const twinReport = twin && showTwinReport ? <div className={`${dashboardStyles.creatorTwinBrief} ${dashboardStyles.creatorTwinOverlay}${animateTwinReveal ? ` ${dashboardStyles.creatorTwinRevealing}` : ""}`}>
     <header className={dashboardStyles.twinBriefHeader}>
       <div className={dashboardStyles.twinBriefIdentity}>
         {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -1321,45 +1347,66 @@ function ChannelPerformanceBrief({
           <div><dt>Momentum</dt><dd>{twin.creator.recentMomentum}</dd></div>
           <div><dt>Outliers</dt><dd>{twin.creator.outlierFrequency}</dd></div>
         </dl>
-        <div className={dashboardStyles.twinMatchReasons}>{twin.whyMatched.slice(0, 2).map((reason) => <p key={reason}><Check aria-hidden="true" />{reason}</p>)}</div>
       </section>
       <section className={dashboardStyles.twinVideoGraph} aria-labelledby="twin-video-graph-heading">
-        <header><div><span>Recent standouts</span><h3 id="twin-video-graph-heading">Videos carrying the pattern</h3></div><small>Public views</small></header>
+        <header><div><span>Reference videos</span><h3 id="twin-video-graph-heading">What is working for them</h3></div></header>
         <div>{twin.topVideos.slice(0, 4).map((video, index) => <div className={dashboardStyles.twinGraphRow} key={video.id}>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={video.thumbnailUrl} alt="" loading="lazy" decoding="async" referrerPolicy="no-referrer" data-twin-reference-thumbnail />
           <span title={video.title}>{video.title}</span>
           <i aria-hidden="true"><b style={{ "--twin-video-scale": Math.max(0, Math.min(1, video.views / twinTopViews)), "--twin-video-delay": `${index * 35}ms` } as React.CSSProperties} /></i>
           <strong>{formatDashboardCompact(video.views)}</strong>
         </div>)}</div>
       </section>
       <section className={dashboardStyles.twinPatternStrip} aria-label="Recommended pattern">
-        <div className={dashboardStyles.twinPatternLead}><span>Pattern to test</span><strong>{twin.insights[0]?.what || twin.inspirationContext.titlePattern}</strong><p>{twin.insights[0]?.why || twin.inspirationContext.contentFramework}</p></div>
+        <div className={dashboardStyles.twinPatternLead}><span>Pattern to test</span><strong>{twin.insights[0]?.what || twin.inspirationContext.titlePattern}</strong></div>
         <dl className={dashboardStyles.twinPatternDetails}>
-          <div><dt>Title</dt><dd>{twin.inspirationContext.titlePattern}</dd></div>
-          <div><dt>Story</dt><dd>{twin.inspirationContext.storyStructure}</dd></div>
-          <div><dt>Rhythm</dt><dd>{twin.inspirationContext.publishingRhythm}</dd></div>
+          <div data-pattern="title"><dt>Title</dt><dd>{twin.inspirationContext.titlePattern}</dd></div>
+          <div data-pattern="story"><dt>Story</dt><dd>{twin.inspirationContext.storyStructure}</dd></div>
+          <div data-pattern="rhythm"><dt>Rhythm</dt><dd>{twin.inspirationContext.publishingRhythm}</dd></div>
         </dl>
-        <div className={dashboardStyles.twinPatternAction}><p>{twin.insights[0]?.adapt || twin.inspirationContext.contentFramework}</p><a href={twin.creator.channelUrl} target="_blank" rel="noreferrer">View channel <ExternalLink aria-hidden="true" /></a></div>
+        <div className={dashboardStyles.twinPatternAction}><a href={twin.creator.channelUrl} target="_blank" rel="noreferrer">View channel <ExternalLink aria-hidden="true" /></a></div>
       </section>
     </div>
-  </section>;
+  </div> : null;
 
-  return <section className={dashboardStyles.performanceBrief} aria-labelledby="performance-brief-heading">
+  return <section className={`${dashboardStyles.performanceBrief}${showTwinReport ? ` ${dashboardStyles.creatorTwinHost}` : ""}`} aria-labelledby={showTwinReport ? "creator-twin-brief-heading" : "performance-brief-heading"} data-twin-rail-state={twinRailState}>
+    <div className={dashboardStyles.twinOverviewLayer} aria-hidden={showTwinReport || undefined} inert={showTwinReport || undefined}>
     <header className={dashboardStyles.briefHeader}>
-      <div><h2 id="performance-brief-heading">What moved this period</h2><p>Discovery, leading uploads, and channel outcomes—shown as separate signals, not assumed attribution.</p></div>
+      <div><h2 id="performance-brief-heading">What moved this period</h2></div>
       <span className={dashboardStyles.briefScope}><i />{periodLabel}</span>
     </header>
-    <button className={dashboardStyles.twinBeacon} type="button" onClick={onOpenTwin} aria-label={twin ? `View Creator Twin match with ${twin.creator.name}` : "Start Creator Twin scan"}>
-      <span className={dashboardStyles.twinRadar} aria-hidden="true">
+    <button className={dashboardStyles.twinBeacon} type="button" onClick={onOpenTwin} aria-label={twinRailState === "scanning" ? "Finding your Creator Twin" : twinRailState === "found" ? "Creator found" : twinRailState === "error" ? "Retry Creator Twin scan" : "Scan for my Creator Twin"} aria-busy={twinLoading || undefined} disabled={twinRailState === "scanning" || twinRailState === "found"} data-state={twinRailState}>
+      <span className={dashboardStyles.twinMascotStage} aria-hidden="true">
+        <i className={dashboardStyles.twinMascotHalo} />
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src="/stanley-mascot-dashboard.png" alt="" width="112" height="112" decoding="async" />
+        <img className={dashboardStyles.twinRailStanley} src="/stanley-mascot-dashboard.png" alt="" width="112" height="112" decoding="async" />
       </span>
-      <span className={dashboardStyles.twinBeaconCopy}><small>Creator Twin</small><strong>{twin ? twin.creator.name : "Find the creator pattern closest to yours"}</strong><span>{twin ? twin.creator.primaryNiche : "Compare your public channel structure with a stronger peer in the same niche."}</span></span>
-      <span className={dashboardStyles.twinBeaconData}>{twin ? <><strong>{twin.creator.similarity}%</strong><small>pattern match</small></> : <><strong>6 creators</strong><small>to evaluate</small></>}</span>
-      <span className={dashboardStyles.twinBeaconAction}>{twin ? "View match" : "Start Twin Scan"}<ArrowUpRight aria-hidden="true" /></span>
+      {twinRailState === "scanning" ? <TwinRailScan /> : twinRailState === "found" && twin ? <>
+        <span className={`${dashboardStyles.twinBeaconCopy} ${dashboardStyles.twinRailFoundCopy}`}><strong>Creator found</strong></span>
+        <span className={`${dashboardStyles.twinPatternStack} ${dashboardStyles.twinRailPatternsComplete}`}>
+          <span><i aria-hidden="true" /><b>Topics</b><small>Pattern aligned</small></span>
+          <span><i aria-hidden="true" /><b>Format</b><small>Pattern aligned</small></span>
+          <span><i aria-hidden="true" /><b>Momentum</b><small>Pattern aligned</small></span>
+        </span>
+        <span className={`${dashboardStyles.twinBeaconAction} ${dashboardStyles.twinRailFoundAction}`}>Opening report<ArrowUpRight aria-hidden="true" /></span>
+      </> : twinRailState === "error" ? <>
+        <span className={dashboardStyles.twinBeaconCopy}><small>Scan paused</small><strong>Creator Twin could not finish</strong></span>
+        <span className={dashboardStyles.twinRailError} role="alert">{twinError}</span>
+        <span className={dashboardStyles.twinBeaconAction}>Try again<RefreshCw aria-hidden="true" /></span>
+      </> : <>
+        <span className={dashboardStyles.twinBeaconCopy}><small>Creator Twin</small><strong>Find the creator pattern closest to yours</strong></span>
+        <span className={dashboardStyles.twinPatternStack}>
+          <span><i aria-hidden="true" /><b>Topics</b><small>Themes and title language</small></span>
+          <span><i aria-hidden="true" /><b>Format</b><small>Length and packaging patterns</small></span>
+          <span><i aria-hidden="true" /><b>Momentum</b><small>Views, cadence, and outliers</small></span>
+        </span>
+        <span className={dashboardStyles.twinBeaconAction}>Scan for my Twin<ArrowUpRight aria-hidden="true" /></span>
+      </>}
     </button>
     <div className={dashboardStyles.briefStages}>
       <article className={dashboardStyles.briefStage}>
-        <div className={dashboardStyles.stageHeading}><span><Globe2 aria-hidden="true" /></span><div><h3>Where views came from</h3><small>Discovery mix</small></div></div>
+        <div className={dashboardStyles.stageHeading}><span><Globe2 aria-hidden="true" /></span><div><h3>Where views came from</h3></div></div>
         <div className={dashboardStyles.sourceBars}>
           {trafficRows.length ? trafficRows.map((source) => {
             const share = trafficTotal ? (source.views / trafficTotal) * 100 : 0;
@@ -1371,7 +1418,7 @@ function ChannelPerformanceBrief({
         </div>
       </article>
       <article className={`${dashboardStyles.briefStage} ${dashboardStyles.videoStage}`}>
-        <div className={dashboardStyles.stageHeading}><span><Video aria-hidden="true" /></span><div><h3>What earned attention</h3><small>Video leaders</small></div></div>
+        <div className={dashboardStyles.stageHeading}><span><Video aria-hidden="true" /></span><div><h3>What earned attention</h3></div></div>
         <div className={dashboardStyles.briefVideos}>
           {videos.slice(0, 3).map(({ video, performance }, index) => <button type="button" key={video.id} className={selectedVideoId === video.id ? dashboardStyles.briefVideoSelected : ""} aria-pressed={selectedVideoId === video.id} onClick={() => onSelectVideo(video.id)}>
             <span className={dashboardStyles.briefVideoRank}>{String(index + 1).padStart(2, "0")}</span>
@@ -1383,15 +1430,16 @@ function ChannelPerformanceBrief({
         </div>
       </article>
       <article className={`${dashboardStyles.briefStage} ${dashboardStyles.outcomeStage}`}>
-        <div className={dashboardStyles.stageHeading}><span><ArrowUpRight aria-hidden="true" /></span><div><h3>What the channel gained</h3><small>Period outcome</small></div></div>
+        <div className={dashboardStyles.stageHeading}><span><ArrowUpRight aria-hidden="true" /></span><div><h3>What the channel gained</h3></div></div>
         <dl className={dashboardStyles.outcomeMetrics}>
-          <div><dt>Views</dt><dd>{formatDashboardCompact(current?.views ?? null)}</dd><small>{viewChange === null ? "No comparison" : `${viewChange >= 0 ? "+" : "−"}${Math.abs(viewChange).toFixed(1)}% vs prior`}</small></div>
-          <div><dt>Watch time</dt><dd>{formatDashboardWatchTime(current?.watchMinutes ?? null)}</dd><small>{watchChange === null ? "No comparison" : `${watchChange >= 0 ? "+" : "−"}${Math.abs(watchChange).toFixed(1)}% vs prior`}</small></div>
-          <div><dt>Subscribers</dt><dd>{formatDashboardNet(currentNet)}</dd><small>Net change</small></div>
+          <div><dt>Views</dt><dd>{current?.views === null || current?.views === undefined ? "—" : formatDashboardCompact(current.views)}</dd></div>
+          <div><dt>Watch time</dt><dd>{current?.watchMinutes === null || current?.watchMinutes === undefined ? "—" : formatDashboardWatchTime(current.watchMinutes)}</dd></div>
+          <div><dt>Subscribers</dt><dd>{currentNet === null ? "—" : formatDashboardNet(currentNet)}</dd></div>
         </dl>
       </article>
     </div>
-    <footer className={dashboardStyles.briefNote}>Traffic is reported at channel level and is not attributed to individual videos.</footer>
+    </div>
+    {twinReport}
   </section>;
 }
 
@@ -1421,7 +1469,7 @@ function CreatorTwinPanel({
   if (!expanded) {
     return <section className={dashboardStyles.twinCompact} aria-labelledby="creator-twin-heading">
       <Users aria-hidden="true" />
-      <div><span className={dashboardStyles.sectionEyebrow}>Competitive reference</span><h2 id="creator-twin-heading">Creator Twin</h2><p>Compare your public channel patterns with a stronger creator in the same niche.</p></div>
+      <div><span className={dashboardStyles.sectionEyebrow}>Competitive reference</span><h2 id="creator-twin-heading">Creator Twin</h2><p>Find the stronger creator pattern closest to yours.</p></div>
       <button type="button" onClick={() => { setResultView("overview"); onAnalyze(); }}>Find my Creator Twin</button>
     </section>;
   }
@@ -1438,7 +1486,7 @@ function CreatorTwinPanel({
 
   return <section className={dashboardStyles.twinExpanded} aria-labelledby="creator-twin-heading">
     <header>
-      <div><span className={dashboardStyles.sectionEyebrow}>Competitive reference</span><h2 id="creator-twin-heading">Creator Twin</h2><p>{result ? `Public YouTube evidence · ${result.cached ? "saved result" : "just checked"}` : "Scanning for a similar creator with stronger current performance."}</p></div>
+      <div><span className={dashboardStyles.sectionEyebrow}>Competitive reference</span><h2 id="creator-twin-heading">Creator Twin</h2><p>{result ? (result.cached ? "Saved match" : "Updated now") : "Finding your closest stronger match."}</p></div>
       <div className={dashboardStyles.twinControls}>
         {result && !loading ? <button type="button" onClick={() => { setResultView("overview"); onRefresh(); }}><RefreshCw aria-hidden="true" /> Refresh</button> : null}
         <button type="button" onClick={() => { setResultView("overview"); onClose(); }} aria-label="Close Creator Twin"><X aria-hidden="true" /></button>
@@ -1450,10 +1498,10 @@ function CreatorTwinPanel({
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src={result.creator.avatarUrl} alt={`${result.creator.name} channel avatar`} referrerPolicy="no-referrer" />
         <div className={dashboardStyles.twinProfileCopy}><h3>{result.creator.name}</h3><p>{result.creator.primaryNiche}</p></div>
-        <div className={`${dashboardStyles.twinStat} ${dashboardStyles.similarity}`}><span>Similarity</span><strong>{result.creator.similarity}%</strong></div>
-        <div className={dashboardStyles.twinStat}><span>Views per video</span><strong>{formatDashboardCompact(result.creator.averageViews)}</strong></div>
-        <div className={dashboardStyles.twinStat}><span>Relative pace</span><strong>{result.creator.recentMomentum}</strong></div>
-        <div className={dashboardStyles.twinStat}><span>Outlier frequency</span><strong>{result.creator.outlierFrequency}</strong></div>
+        <div className={`${dashboardStyles.twinStat} ${dashboardStyles.similarity}`}><span>Match</span><strong>{result.creator.similarity}%</strong></div>
+        <div className={dashboardStyles.twinStat}><span>Views / video</span><strong>{formatDashboardCompact(result.creator.averageViews)}</strong></div>
+        <div className={dashboardStyles.twinStat}><span>Momentum</span><strong>{result.creator.recentMomentum}</strong></div>
+        <div className={dashboardStyles.twinStat}><span>Big hits</span><strong>{result.creator.outlierFrequency}</strong></div>
       </div>
       <div className={dashboardStyles.twinActions}>
         <button className={dashboardStyles.twinPrimaryAction} type="button" onClick={() => onCreate(createPrompt, referenceVideo)}>Build from this pattern <ArrowUpRight aria-hidden="true" /></button>
@@ -1470,12 +1518,11 @@ function CreatorTwinPanel({
       </div>
       <div className={dashboardStyles.twinView} role="tabpanel" key={resultView}>
         {resultView === "overview" ? <div className={dashboardStyles.twinOverview}>
-          <article className={dashboardStyles.twinBlock}><span>Why this creator matched</span><ul>{result.whyMatched.slice(0, 4).map((reason) => <li key={reason}><Check aria-hidden="true" />{reason}</li>)}</ul></article>
-          <article className={`${dashboardStyles.twinBlock} ${dashboardStyles.twinInsight}`}><span>Best pattern to test</span><strong>{result.insights[0]?.what}</strong><p>{result.insights[0]?.why}</p><small>{result.insights[0]?.adapt}</small></article>
+          <article className={dashboardStyles.twinBlock}><span>Why it matched</span><ul>{result.whyMatched.slice(0, 2).map((reason) => <li key={reason}><Check aria-hidden="true" />{reason}</li>)}</ul></article>
+          <article className={`${dashboardStyles.twinBlock} ${dashboardStyles.twinInsight}`}><span>Pattern to test</span><strong>{result.insights[0]?.what}</strong></article>
         </div> : null}
         {resultView === "differences" ? <div className={dashboardStyles.twinDifferences}>
-          <article className={dashboardStyles.twinBlock}><span>Largest differences</span><div className={dashboardStyles.differenceGrid}>{result.differences.map((difference) => <article key={`${difference.category}-${difference.detail}`}><strong>{difference.category}</strong><p>{difference.detail}</p><dl><div><dt>{result.creator.name}</dt><dd>{difference.twin}</dd></div><div><dt>You</dt><dd>{difference.you}</dd></div></dl></article>)}</div></article>
-          <article className={dashboardStyles.twinBlock}><span>Adaptation queue</span><ol>{result.insights.map((insight) => <li className={dashboardStyles.twinInsight} key={insight.what}><strong>{insight.what}</strong><p>{insight.why}</p><small>{insight.adapt}</small></li>)}</ol></article>
+          <article className={dashboardStyles.twinBlock}><span>Largest differences</span><div className={dashboardStyles.differenceGrid}>{result.differences.slice(0, 3).map((difference) => <article key={`${difference.category}-${difference.detail}`}><strong>{difference.category}</strong><p>{difference.detail}</p><dl><div><dt>{result.creator.name}</dt><dd>{difference.twin}</dd></div><div><dt>You</dt><dd>{difference.you}</dd></div></dl></article>)}</div></article>
         </div> : null}
         {resultView === "videos" ? <div className={dashboardStyles.twinVideos}>{result.topVideos.map((video) => {
           const option: YouTubeVideoOption = { ...video, privacyStatus: "public" };
@@ -1494,15 +1541,15 @@ function CreatorTwinPanel({
 function TwinLabScan() {
   const stageRef = useRef<HTMLDivElement>(null);
   const progressRef = useRef<HTMLDivElement>(null);
-  const progressRingRef = useRef<SVGCircleElement>(null);
   const progressTrackRef = useRef<HTMLSpanElement>(null);
-  const progressValueRef = useRef<HTMLOutputElement>(null);
-  const progressPhaseRef = useRef<HTMLSpanElement>(null);
 
   useEffect(() => {
     const startedAt = performance.now();
     const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    const scanNodes = Array.from(stageRef.current?.querySelectorAll<HTMLElement>("[data-scan-node]") ?? []);
+    const signalNodes = Array.from(stageRef.current?.querySelectorAll<HTMLElement>("[data-convergence-node]") ?? []);
+    const signalTraces = Array.from(stageRef.current?.querySelectorAll<SVGPathElement>("[data-convergence-trace]") ?? []);
+    const activeThresholds = [8, 36, 64];
+    const arrivalThresholds = [30, 58, 82];
     let frame = 0;
     let previousProgress = -1;
 
@@ -1515,15 +1562,23 @@ function TwinLabScan() {
 
       if (progress !== previousProgress) {
         previousProgress = progress;
-        const phase = progress < 34 ? "Signal" : progress < 68 ? "Pattern" : "Match";
+        const phase = progress < 36 ? "topics" : progress < 64 ? "format" : progress < 86 ? "momentum" : "found";
+        const phaseLabel = phase === "topics" ? "Scanning topics" : phase === "format" ? "Reading format" : phase === "momentum" ? "Checking momentum" : "Twin found";
 
         progressRef.current?.setAttribute("aria-valuenow", String(progress));
-        progressRef.current?.setAttribute("data-phase", phase.toLowerCase());
-        if (progressRingRef.current) progressRingRef.current.style.strokeDashoffset = String(100 - progress);
+        progressRef.current?.setAttribute("aria-valuetext", phaseLabel);
+        progressRef.current?.setAttribute("data-phase", phase);
+        stageRef.current?.setAttribute("data-phase", phase);
+        stageRef.current?.toggleAttribute("data-complete", progress >= 86);
         if (progressTrackRef.current) progressTrackRef.current.style.transform = `scaleX(${progress / 100})`;
-        if (progressValueRef.current) progressValueRef.current.textContent = `${String(progress).padStart(2, "0")}%`;
-        if (progressPhaseRef.current) progressPhaseRef.current.textContent = phase;
-        scanNodes.forEach((node, index) => node.toggleAttribute("data-scanned", progress >= (index + 1) * 14));
+        signalNodes.forEach((node, index) => {
+          node.toggleAttribute("data-active", progress >= activeThresholds[index]);
+          node.toggleAttribute("data-arrived", progress >= arrivalThresholds[index]);
+        });
+        signalTraces.forEach((trace, index) => {
+          trace.toggleAttribute("data-active", progress >= activeThresholds[index]);
+          trace.toggleAttribute("data-arrived", progress >= arrivalThresholds[index]);
+        });
       }
 
       if (elapsed < 1) frame = window.requestAnimationFrame(updateProgress);
@@ -1535,32 +1590,101 @@ function TwinLabScan() {
 
   return <div className={`${dashboardStyles.twinLabScan} ${dashboardStyles.twinLabScanMinimal}`} role="status" aria-live="polite" aria-label="Finding your Creator Twin">
     <div className={dashboardStyles.twinLabStage} ref={stageRef}>
-      <svg className={dashboardStyles.scanProgressRing} viewBox="0 0 108 108" aria-hidden="true">
-        <circle className={dashboardStyles.scanProgressRingBase} cx="54" cy="54" r="50" pathLength="100" />
-        <circle ref={progressRingRef} className={dashboardStyles.scanProgressRingValue} cx="54" cy="54" r="50" pathLength="100" />
-      </svg>
-      <span className={dashboardStyles.labOrbit} aria-hidden="true">
-        <i data-scan-node /><i data-scan-node /><i data-scan-node />
-        <i data-scan-node /><i data-scan-node /><i data-scan-node />
-      </span>
-      <span className={dashboardStyles.labSweep} />
-      <span className={dashboardStyles.stanleyScanner}>
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src="/stanley-mascot-dashboard.png" alt="" width="112" height="112" decoding="async" />
-      </span>
-      <div ref={progressRef} className={dashboardStyles.scanProgressHud} role="progressbar" aria-label="Creator Twin scan progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={0} data-phase="signal">
-        <output ref={progressValueRef} aria-hidden="true">00%</output>
+      <div className={dashboardStyles.patternConvergence} aria-hidden="true">
+        <span className={`${dashboardStyles.convergenceNode} ${dashboardStyles.convergenceTopics}`} data-convergence-node="topics"><i /><span><b>Topics</b><small>Themes + titles</small></span></span>
+        <span className={`${dashboardStyles.convergenceNode} ${dashboardStyles.convergenceFormat}`} data-convergence-node="format"><i /><span><b>Format</b><small>Length + packaging</small></span></span>
+        <span className={`${dashboardStyles.convergenceNode} ${dashboardStyles.convergenceMomentum}`} data-convergence-node="momentum"><i /><span><b>Momentum</b><small>Views + cadence</small></span></span>
+        <svg className={dashboardStyles.convergenceTraces} viewBox="0 0 720 260" preserveAspectRatio="none">
+          <path className={dashboardStyles.convergenceTraceBase} d="M 164 58 C 260 58 270 130 348 130" pathLength="1" vectorEffect="non-scaling-stroke" />
+          <path className={dashboardStyles.convergenceTraceBase} d="M 164 202 C 260 202 270 130 348 130" pathLength="1" vectorEffect="non-scaling-stroke" />
+          <path className={dashboardStyles.convergenceTraceBase} d="M 556 130 C 480 130 444 130 372 130" pathLength="1" vectorEffect="non-scaling-stroke" />
+          <path className={dashboardStyles.convergenceTraceFlow} data-convergence-trace="topics" d="M 164 58 C 260 58 270 130 348 130" pathLength="1" vectorEffect="non-scaling-stroke" />
+          <path className={dashboardStyles.convergenceTraceFlow} data-convergence-trace="format" d="M 164 202 C 260 202 270 130 348 130" pathLength="1" vectorEffect="non-scaling-stroke" />
+          <path className={dashboardStyles.convergenceTraceFlow} data-convergence-trace="momentum" d="M 556 130 C 480 130 444 130 372 130" pathLength="1" vectorEffect="non-scaling-stroke" />
+        </svg>
+        <span className={dashboardStyles.convergenceCore}>
+          <i className={dashboardStyles.convergenceHalo} />
+          <i className={dashboardStyles.convergenceConfirmation} data-convergence-confirmation />
+          <span className={dashboardStyles.stanleyScanner}>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/stanley-mascot-dashboard.png" alt="" width="112" height="112" decoding="async" />
+          </span>
+          <small>Twin found</small>
+        </span>
+      </div>
+      <div ref={progressRef} className={`${dashboardStyles.scanProgressHud} ${dashboardStyles.convergenceProgress}`} role="progressbar" aria-label="Creator Twin scan progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={0} aria-valuetext="Scanning topics" data-phase="topics">
         <div className={dashboardStyles.scanProgressDetails} aria-hidden="true">
-          <div className={dashboardStyles.scanProgressMeta}>
-            <span ref={progressPhaseRef}>Signal</span>
-            <i><b /></i>
-          </div>
           <span className={dashboardStyles.scanProgressTrack}><i ref={progressTrackRef} /></span>
-          <div className={dashboardStyles.scanProgressSteps}><span>Signal</span><span>Pattern</span><span>Match</span></div>
+          <div className={dashboardStyles.scanProgressSteps}><span>Topics</span><span>Format</span><span>Momentum</span></div>
         </div>
       </div>
     </div>
   </div>;
+}
+
+function TwinRailScan() {
+  const patternRef = useRef<HTMLSpanElement>(null);
+  const progressRef = useRef<HTMLSpanElement>(null);
+  const progressTrackRef = useRef<HTMLElement>(null);
+  const phaseLabelRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    const startedAt = performance.now();
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const railButton = patternRef.current?.closest<HTMLButtonElement>("button");
+    const patterns = Array.from(railButton?.querySelectorAll<HTMLElement>("[data-rail-pattern]") ?? []);
+    const signals = Array.from(railButton?.querySelectorAll<HTMLElement>("[data-rail-signal]") ?? []);
+    const activeThresholds = [8, 36, 64];
+    const arrivalThresholds = [30, 58, 82];
+    let frame = 0;
+    let previousProgress = -1;
+
+    const updateProgress = (now: number) => {
+      const elapsed = Math.min(1, (now - startedAt) / 2400);
+      const measuredProgress = Math.min(98, Math.round(elapsed * 100));
+      const progress = reducedMotion ? elapsed === 1 ? 98 : Math.floor(measuredProgress / 25) * 25 : measuredProgress;
+
+      if (progress !== previousProgress) {
+        previousProgress = progress;
+        const phase = progress < 36 ? "topics" : progress < 64 ? "format" : progress < 86 ? "momentum" : "found";
+        const phaseLabel = phase === "topics" ? "Reading topics" : phase === "format" ? "Comparing format" : phase === "momentum" ? "Checking momentum" : "Twin found";
+        progressRef.current?.setAttribute("aria-valuenow", String(progress));
+        progressRef.current?.setAttribute("aria-valuetext", phaseLabel);
+        progressRef.current?.setAttribute("data-phase", phase);
+        railButton?.setAttribute("data-phase", phase);
+        railButton?.toggleAttribute("data-complete", progress >= 86);
+        if (progressTrackRef.current) progressTrackRef.current.style.transform = `scaleX(${progress / 100})`;
+        if (phaseLabelRef.current) phaseLabelRef.current.textContent = phaseLabel;
+        patterns.forEach((pattern, index) => {
+          pattern.toggleAttribute("data-active", progress >= activeThresholds[index]);
+          pattern.toggleAttribute("data-arrived", progress >= arrivalThresholds[index]);
+        });
+        signals.forEach((signal, index) => {
+          signal.toggleAttribute("data-active", progress >= activeThresholds[index]);
+          signal.toggleAttribute("data-arrived", progress >= arrivalThresholds[index]);
+        });
+      }
+
+      if (elapsed < 1) frame = window.requestAnimationFrame(updateProgress);
+    };
+
+    frame = window.requestAnimationFrame(updateProgress);
+    return () => window.cancelAnimationFrame(frame);
+  }, []);
+
+  return <>
+    <span className={dashboardStyles.visuallyHidden} role="status" aria-live="polite" aria-label="Finding your Creator Twin">Finding your Creator Twin</span>
+    <span className={dashboardStyles.twinBeaconCopy}><small>Creator Twin</small><strong>Reading your creator pattern</strong></span>
+    <span className={`${dashboardStyles.twinPatternStack} ${dashboardStyles.twinRailPatternScan}`} ref={patternRef}>
+      <span data-rail-pattern="topics"><i aria-hidden="true" /><b>Topics</b><small>Themes and title language</small></span>
+      <span data-rail-pattern="format"><i aria-hidden="true" /><b>Format</b><small>Length and packaging patterns</small></span>
+      <span data-rail-pattern="momentum"><i aria-hidden="true" /><b>Momentum</b><small>Views, cadence, and outliers</small></span>
+    </span>
+    <span className={dashboardStyles.twinRailSignalSpine} aria-hidden="true"><i data-rail-signal="topics" /><i data-rail-signal="format" /><i data-rail-signal="momentum" /></span>
+    <span className={`${dashboardStyles.twinBeaconAction} ${dashboardStyles.twinRailProgress}`} ref={progressRef} role="progressbar" aria-label="Creator Twin scan progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={0} aria-valuetext="Reading topics" data-phase="topics">
+      <span aria-hidden="true"><i ref={progressTrackRef} /></span><small ref={phaseLabelRef}>Reading topics</small>
+    </span>
+  </>;
 }
 
 function ChannelDashboard({
@@ -1641,8 +1765,14 @@ function ChannelDashboard({
   async function analyzeCreatorTwin(force = false) {
     const runId = ++creatorTwinRunRef.current;
     const scanStartedAt = performance.now();
+    const collapseToRail = () => {
+      setShowCreatorTwinReport(false);
+      setCreatorTwin(null);
+      setCreatorTwinRevealActive(false);
+    };
+    if (showCreatorTwinReport) runCreatorTwinViewTransition(collapseToRail, "collapse");
+    else collapseToRail();
     setCreatorTwinExpanded(true);
-    setShowCreatorTwinReport(true);
     setCreatorTwinLoading(true);
     setCreatorTwinError("");
     try {
@@ -1659,7 +1789,6 @@ function ChannelDashboard({
       await Promise.all([minimumScan, Promise.race([avatarReady, avatarWindow])]);
       if (runId !== creatorTwinRunRef.current) return;
       setCreatorTwin(payload);
-      setCreatorTwinRevealActive(true);
     } catch (caught) {
       if (runId !== creatorTwinRunRef.current) return;
       setCreatorTwinError(caught instanceof Error ? caught.message : "Creator Twin could not be calculated.");
@@ -1673,6 +1802,16 @@ function ChannelDashboard({
     const revealTimer = window.setTimeout(() => setCreatorTwinRevealActive(false), 920);
     return () => window.clearTimeout(revealTimer);
   }, [creatorTwinRevealActive]);
+
+  useEffect(() => {
+    if (!creatorTwin || creatorTwinLoading || showCreatorTwinReport) return;
+    const holdDuration = window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 120 : 600;
+    const expandTimer = window.setTimeout(() => {
+      setShowCreatorTwinReport(true);
+      setCreatorTwinRevealActive(true);
+    }, holdDuration);
+    return () => window.clearTimeout(expandTimer);
+  }, [creatorTwin, creatorTwinLoading, showCreatorTwinReport]);
 
   useEffect(() => () => {
     if (chartHoverFrameRef.current !== null) window.cancelAnimationFrame(chartHoverFrameRef.current);
@@ -1752,6 +1891,8 @@ function ChannelDashboard({
     : [];
   const trafficTotal = (analytics?.traffic || []).reduce((sum, source) => sum + source.views, 0);
   const traffic = (analytics?.traffic || []).slice(0, 4);
+  const comparisonTraffic = analytics?.comparisonTraffic || [];
+  const comparisonTrafficTotal = comparisonTraffic.reduce((sum, source) => sum + source.views, 0);
   const viewChange = percentDelta(current?.views ?? null, comparison?.views ?? null);
   const exampleTitles = strongestRows.map(({ video }) => video.title);
   const patternPrompt = [
@@ -1800,6 +1941,7 @@ function ChannelDashboard({
     : null;
   const leadingTraffic = traffic[0];
   const leadingTrafficShare = leadingTraffic && trafficTotal ? (leadingTraffic.views / trafficTotal) * 100 : null;
+  const discoveryGrowth = findDiscoveryGrowth(analytics?.traffic || [], comparisonTraffic);
   const diagnostics: DashboardDiagnostic[] = [];
   if (viewChange !== null) diagnostics.push({
     id: "period-views",
@@ -1807,7 +1949,16 @@ function ChannelDashboard({
     title: viewChange > 5 ? "Views accelerated" : viewChange < -5 ? "Views slowed" : "Views stayed near baseline",
     where: `Selected ${analytics?.period.days ?? dashboardRange}-day period`,
     why: `${viewChange >= 0 ? "+" : "−"}${Math.abs(viewChange).toFixed(1)}% versus the comparison period${leadingShare !== null ? `; the leading video contributed ${leadingShare.toFixed(1)}% of period views` : ""}.`,
-    action: leadingRow ? "Inspect the leading upload before deciding whether to make a follow-up." : "Keep the current period as the baseline for the next upload.",
+    action: leadingRow ? "Check the leading upload before planning a follow-up." : "Use this period as the baseline for your next upload.",
+    videoId: leadingRow?.video.id,
+  });
+  else diagnostics.push({
+    id: "period-views",
+    severity: "healthy",
+    title: "Views baseline is forming",
+    where: "Selected period",
+    why: "A comparison period is not available yet.",
+    action: "Compare again after the next upload.",
     videoId: leadingRow?.video.id,
   });
   if (current?.averageViewPercentage !== null && current?.averageViewPercentage !== undefined) diagnostics.push({
@@ -1816,16 +1967,42 @@ function ChannelDashboard({
     title: current.averageViewPercentage >= 40 ? "Viewer attention is holding" : "Viewer attention needs review",
     where: "Channel average view duration",
     why: `Viewers watched ${formatDashboardPercent(current.averageViewPercentage)} on average${current.averageViewDuration !== null ? `, or ${formatDashboardDuration(current.averageViewDuration)} per view` : ""}.`,
-    action: current.averageViewPercentage >= 40 ? "Preserve the opening structure when testing the next subject." : "Review the opening of the selected video before changing its packaging.",
+    action: current.averageViewPercentage >= 40 ? "Keep the opening structure for the next subject." : "Review the opening before changing the packaging.",
     videoId: leadingRow?.video.id,
   });
-  if (leadingTraffic && leadingTrafficShare !== null) diagnostics.push({
+  else diagnostics.push({
+    id: "viewer-attention",
+    severity: "watch",
+    title: "Viewer attention needs more data",
+    where: "Channel average view duration",
+    why: "Average view duration is unavailable for this period.",
+    action: "Check retention again after the next upload.",
+    videoId: leadingRow?.video.id,
+  });
+  if (comparisonTrafficTotal && discoveryGrowth?.shareChange !== undefined) diagnostics.push(discoveryGrowth.shareChange > 1 ? {
+    id: "discovery-growth",
+    severity: "opportunity",
+    title: `${dashboardTrafficLabel(discoveryGrowth.source.source)} is gaining ground`,
+    where: "Traffic source mix",
+    why: `${discoveryGrowth.currentShare.toFixed(1)}% of measured traffic, up ${discoveryGrowth.shareChange.toFixed(1)} points from the previous period.`,
+    action: "Study the videos feeding this source before the next upload.",
+    videoId: leadingRow?.video.id,
+  } : {
+    id: "discovery-growth",
+    severity: "healthy",
+    title: "Discovery mix held steady",
+    where: "Traffic source mix",
+    why: "No meaningful traffic source gained more than one point of share.",
+    action: "Keep the current mix and check again after the next upload.",
+    videoId: leadingRow?.video.id,
+  });
+  else if (leadingTraffic && leadingTrafficShare !== null) diagnostics.push({
     id: "traffic-source",
     severity: "opportunity",
     title: `${dashboardTrafficLabel(leadingTraffic.source)} leads discovery`,
     where: "Channel traffic sources",
     why: `${formatDashboardCompact(leadingTraffic.views)} views, or ${leadingTrafficShare.toFixed(1)}% of measured source traffic, came from this source.`,
-    action: leadingRow ? "Use the strongest current video as the reference for a related follow-up." : "Monitor this source after the next public upload.",
+    action: leadingRow ? "Use the strongest video as the follow-up reference." : "Check this source after the next public upload.",
     videoId: leadingRow?.video.id,
   });
   if (!diagnostics.length) diagnostics.push({ id: "no-anomaly", severity: "healthy", title: "No meaningful anomaly detected", where: "Selected period", why: "The available comparison data is not sufficient for a stronger diagnosis.", action: "Keep collecting channel data and compare again after the next upload." });
@@ -1848,26 +2025,22 @@ function ChannelDashboard({
     setSelectedTrafficSource(source);
     setDrawerMode("traffic");
   };
-  const runCreatorTwinTransition = (update: () => void) => {
-    const transitionDocument = document as Document & { startViewTransition?: (callback: () => void) => unknown };
-    if (transitionDocument.startViewTransition && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-      transitionDocument.startViewTransition(() => flushSync(update));
-    } else update();
-  };
   const openCreatorTwin = () => {
-    if (creatorTwinLoading) return;
-    if (creatorTwin) {
-      runCreatorTwinTransition(() => setShowCreatorTwinReport(true));
-      return;
-    }
-    void analyzeCreatorTwin();
+    if (!creatorTwinLoading) void analyzeCreatorTwin();
   };
-  const backToPerformanceOverview = () => runCreatorTwinTransition(() => setShowCreatorTwinReport(false));
+  const backToPerformanceOverview = () => runCreatorTwinViewTransition(() => {
+    creatorTwinRunRef.current += 1;
+    setShowCreatorTwinReport(false);
+    setCreatorTwin(null);
+    setCreatorTwinError("");
+    setCreatorTwinRevealActive(false);
+    setCreatorTwinLoading(false);
+  }, "collapse");
   const closeCreatorTwin = () => {
-    runCreatorTwinTransition(() => {
+    runCreatorTwinViewTransition(() => {
       setCreatorTwinExpanded(false);
       setDrawerMode(null);
-    });
+    }, "collapse");
   };
   const metricSignals = [
     { label: "Views", value: current?.views ?? null, previous: comparison?.views ?? null, formatter: formatDashboardCompact, metric: "views" as const, icon: <Eye aria-hidden="true" /> },
@@ -1877,22 +2050,23 @@ function ChannelDashboard({
 
   return <section className={`${dashboardStyles.viewport} ${active ? dashboardStyles.active : dashboardStyles.inactive}`} aria-hidden={active ? undefined : true} inert={active ? undefined : true}>
     <div className={dashboardStyles.shell}>
-      <header className={dashboardStyles.channelHeader}>
+      <header className={dashboardStyles.channelHeader} data-dashboard-channel-header>
         <div className={dashboardStyles.channelIdentity}>
           <YouTubeAvatar profile={profile} alt={`${profile.title} channel avatar`} />
-          <div className={dashboardStyles.channelCopy}><h1>{profile.title}</h1><div>{visibleChannelHandle ? <small>{visibleChannelHandle}</small> : null}<small>Updated {new Intl.DateTimeFormat("en", { month: "short", day: "numeric", year: "numeric" }).format(new Date(lastUpdated))}</small></div></div>
+          <div className={dashboardStyles.channelCopy}><h1>{profile.title}</h1><div>{visibleChannelHandle ? <small>{visibleChannelHandle}</small> : null}</div></div>
         </div>
         <div className={dashboardStyles.channelUtilities}>
           <dl className={dashboardStyles.channelTotals}>
             <div><dt>Subscribers</dt><dd>{formatDashboardCompact(profile.subscriberCount)}</dd></div>
             <div><dt>Videos</dt><dd>{formatDashboardCompact(profile.videoCount)}</dd></div>
           </dl>
-          <div className={dashboardStyles.dashboardControls}>
-            <div className={dashboardStyles.periodControl} role="group" aria-label="Dashboard period"><span>Period</span><div>{dashboardRanges.map((item) => <button type="button" key={item.value} aria-pressed={dashboardRange === item.value} title={item.label} onClick={() => setDashboardRange(item.value)}>{item.short}</button>)}</div></div>
-            <button className={dashboardStyles.refreshButton} type="button" onClick={refresh} disabled={isBusy} aria-label="Refresh dashboard"><RefreshCw aria-hidden="true" /></button>
-          </div>
         </div>
       </header>
+
+      <div className={dashboardStyles.dashboardToolbar} data-dashboard-toolbar>
+        <div className={dashboardStyles.periodControl} role="group" aria-label="Dashboard period"><span>Period</span><div>{dashboardRanges.map((item) => <button type="button" key={item.value} aria-pressed={dashboardRange === item.value} title={item.label} onClick={() => setDashboardRange(item.value)}>{item.short}</button>)}</div></div>
+        <div className={dashboardStyles.dashboardToolbarStatus}><time dateTime={lastUpdated}>Updated {new Intl.DateTimeFormat("en", { month: "short", day: "numeric", year: "numeric" }).format(new Date(lastUpdated))}</time><button className={dashboardStyles.refreshButton} type="button" onClick={refresh} disabled={isBusy} aria-label="Refresh dashboard"><RefreshCw aria-hidden="true" /></button></div>
+      </div>
 
       {visibleError && !isBusy ? <div className={dashboardStyles.dataError} role="alert"><span>{visibleError}</span><button type="button" onClick={refresh}>Try again</button></div> : null}
 
@@ -1908,7 +2082,7 @@ function ChannelDashboard({
         })}</div>
       </section>
 
-      <ChannelPerformanceBrief key={`brief-${dashboardRange}-${refreshVersion}`} videos={strongestRows} traffic={traffic} trafficTotal={trafficTotal} current={current} comparison={comparison} selectedVideoId={selectedVideoId} twin={creatorTwin} showTwinReport={showCreatorTwinReport} animateTwinReveal={creatorTwinRevealActive} twinLoading={creatorTwinLoading} periodLabel={activeRangeLabel} onSelectVideo={selectVideo} onSelectTraffic={selectTraffic} onOpenTwin={openCreatorTwin} onBackToOverview={backToPerformanceOverview} onRescanTwin={() => void analyzeCreatorTwin(true)} onCreate={onCreateFromPattern} />
+      <ChannelPerformanceBrief key={`brief-${dashboardRange}-${refreshVersion}`} videos={strongestRows} traffic={traffic} trafficTotal={trafficTotal} current={current} selectedVideoId={selectedVideoId} twin={creatorTwin} showTwinReport={showCreatorTwinReport} animateTwinReveal={creatorTwinRevealActive} twinLoading={creatorTwinLoading} twinError={creatorTwinError} periodLabel={activeRangeLabel} onSelectVideo={selectVideo} onSelectTraffic={selectTraffic} onOpenTwin={openCreatorTwin} onBackToOverview={backToPerformanceOverview} onRescanTwin={() => void analyzeCreatorTwin(true)} onCreate={onCreateFromPattern} />
 
       <div className={dashboardStyles.insightGrid}>
       <section className={dashboardStyles.timelinePanel} aria-labelledby="performance-timeline-heading">
@@ -1919,23 +2093,24 @@ function ChannelDashboard({
         {analyticsLoading && !analytics ? <div className={dashboardStyles.chartSkeleton} aria-label="Loading Performance Timeline">{[48, 62, 54, 76, 68, 84, 72, 91, 78, 87, 82, 96].map((height, index) => <i key={`${height}-${index}`} style={{ "--skeleton-height": `${height}%` } as React.CSSProperties} />)}</div> : timeline.length ? <>
           <div className={dashboardStyles.chartFrame} onPointerEnter={(event) => { chartBoundsRef.current = event.currentTarget.getBoundingClientRect(); }} onPointerMove={(event) => { const bounds = chartBoundsRef.current || event.currentTarget.getBoundingClientRect(); const ratio = Math.min(1, Math.max(0, (event.clientX - bounds.left) / Math.max(1, bounds.width))); queueChartHover(Math.round(ratio * Math.max(0, timeline.length - 1))); }} onPointerLeave={() => { chartBoundsRef.current = null; queueChartHover(null); }}>
             <svg viewBox={`0 0 ${geometry.width} ${geometry.height}`} role="img" aria-label={`${chartMetric === "views" ? "Views" : chartMetric === "watchMinutes" ? "Watch time" : "Subscribers"} over the selected dates`} preserveAspectRatio="none">
-              {[0, 0.5, 1].map((position) => { const value = geometry.maximum - (geometry.maximum - geometry.minimum) * position; const lineY = geometry.y(value); return <g key={position}><line className={dashboardStyles.chartGrid} x1="14" x2="908" y1={lineY} y2={lineY} /><text className={dashboardStyles.chartLabel} x="16" y={Math.max(12, lineY - 6)}>{chartValue(value, chartMetric)}</text></g>; })}
+              {[0, 0.5, 1].map((position) => { const value = geometry.maximum - (geometry.maximum - geometry.minimum) * position; const lineY = geometry.y(value); return <line className={dashboardStyles.chartGrid} key={position} x1="14" x2="908" y1={lineY} y2={lineY} />; })}
               {geometry.fillPath ? <path className={dashboardStyles.chartArea} d={geometry.fillPath} key={`area-${chartMetric}`} /> : null}
               {geometry.comparisonPath ? <path className={`${dashboardStyles.chartLine} ${dashboardStyles.chartPrevious}`} d={geometry.comparisonPath} key={`previous-${chartMetric}`} /> : null}
               {geometry.currentPath ? <path className={`${dashboardStyles.chartLine} ${dashboardStyles.chartCurrent}`} d={geometry.currentPath} key={`current-${chartMetric}`} /> : null}
               {uploadMarkers.map(({ video, index }) => <g className={`${dashboardStyles.uploadMarker}${selectedVideoId === video.id ? ` ${dashboardStyles.selectedMarker}` : ""}`} key={video.id} role="button" tabIndex={0} aria-label={`Select upload ${video.title}`} onClick={() => selectVideo(video.id)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") selectVideo(video.id); }}><line x1={geometry.x(index, timeline.length)} x2={geometry.x(index, timeline.length)} y1={geometry.y(timeline[index][chartMetric]) + 8} y2={geometry.height - 29} /><circle cx={geometry.x(index, timeline.length)} cy={geometry.y(timeline[index][chartMetric])} r="6"><title>{video.title}</title></circle></g>)}
               {hoveredChartIndex !== null && activePoint ? <><line className={dashboardStyles.chartScanner} x1={geometry.x(hoveredChartIndex, timeline.length)} x2={geometry.x(hoveredChartIndex, timeline.length)} y1="10" y2={geometry.height - 29} /><circle className={dashboardStyles.chartPoint} cx={geometry.x(hoveredChartIndex, timeline.length)} cy={geometry.y(activePoint[chartMetric])} r="4" /></> : null}
-              {labelIndexes.map((index) => <text className={dashboardStyles.chartDate} key={timeline[index].date} x={geometry.x(index, timeline.length)} y={geometry.height - 8} textAnchor={index === 0 ? "start" : index === timeline.length - 1 ? "end" : "middle"}>{new Intl.DateTimeFormat("en", { month: "short", day: "numeric" }).format(new Date(`${timeline[index].date}T00:00:00Z`))}</text>)}
             </svg>
+            <div className={dashboardStyles.chartAxisValues} aria-hidden="true">{[0, 0.5, 1].map((position) => { const value = geometry.maximum - (geometry.maximum - geometry.minimum) * position; const lineY = geometry.y(value); return <span key={position} data-chart-y-label style={{ top: `${(lineY / geometry.height) * 100}%` }}>{chartValue(value, chartMetric)}</span>; })}</div>
+            <div className={dashboardStyles.chartAxisDates} aria-hidden="true">{labelIndexes.map((index) => <span data-chart-date-label data-align={index === 0 ? "start" : index === timeline.length - 1 ? "end" : "middle"} key={timeline[index].date} style={{ left: `${(geometry.x(index, timeline.length) / geometry.width) * 100}%` }}>{new Intl.DateTimeFormat("en", { month: "short", day: "numeric" }).format(new Date(`${timeline[index].date}T00:00:00Z`))}</span>)}</div>
             {activePoint && hoveredChartIndex !== null ? <div className={dashboardStyles.chartTooltip} style={{ left: `${(geometry.x(hoveredChartIndex, timeline.length) / geometry.width) * 100}%` }}><span>{new Intl.DateTimeFormat("en", { month: "short", day: "numeric", year: "numeric" }).format(new Date(`${activePoint.date}T00:00:00Z`))}</span><strong>{chartValue(activePoint[chartMetric], chartMetric)}</strong>{activeComparisonPoint ? <small>Previous: {chartValue(activeComparisonPoint[chartMetric], chartMetric)}</small> : null}</div> : null}
           </div>
           <div className={dashboardStyles.chartLegend}><span><i /> Current period</span>{comparison ? <span><i className={dashboardStyles.previousLegend} /> Previous period</span> : null}{uploadMarkers.length ? <span>{uploadMarkers.length} upload events</span> : null}</div>
         </> : <p className={dashboardStyles.emptyChart}>There is no YouTube timeline data for these dates.</p>}
       </section>
       <aside className={dashboardStyles.changeBrief} aria-labelledby="change-brief-heading">
-        <header><h2 id="change-brief-heading">Signals worth acting on</h2><p>Only the clearest observations from this period.</p></header>
-        <div>{diagnostics.slice(0, 2).map((diagnostic) => <button type="button" key={diagnostic.id} onClick={() => selectDiagnostic(diagnostic)}>
-          <span><small className={`${dashboardStyles.severity} ${dashboardStyles[diagnostic.severity]}`}><i />{diagnostic.severity}</small><strong>{diagnostic.title}</strong><p>{diagnostic.why}</p><b>{diagnostic.action}</b></span>
+        <header><h2 id="change-brief-heading">Signals worth acting on</h2></header>
+        <div>{diagnostics.slice(0, 3).map((diagnostic) => <button type="button" key={diagnostic.id} onClick={() => selectDiagnostic(diagnostic)}>
+          <span><small className={`${dashboardStyles.severity} ${dashboardStyles[diagnostic.severity]}`}><i />{diagnostic.severity}</small><strong>{diagnostic.title}</strong><b>{diagnostic.action}</b></span>
           <ChevronRight aria-hidden="true" />
         </button>)}</div>
         <footer><button type="button" onClick={() => onCreateFromPattern(patternPrompt, leadingRow?.video)}>Build a follow-up <ArrowUpRight aria-hidden="true" /></button></footer>
