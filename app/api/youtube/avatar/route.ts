@@ -1,4 +1,5 @@
 import { fetchChannelProfile, readYouTubeSession } from "../oauth";
+import { cached } from "../server-cache";
 
 const AVATAR_HOSTS = new Set([
   "yt3.ggpht.com",
@@ -41,12 +42,22 @@ export async function GET() {
   const session = await readYouTubeSession();
   if (!session) return new Response(null, { status: 404 });
 
-  let avatar = await loadAvatar(session.profile.thumbnailUrl);
+  let avatarResult = await cached(`channel-avatar:${session.profile.id}:${session.profile.thumbnailUrl}`, 6 * 60 * 60 * 1000, async () => {
+    const avatar = await loadAvatar(session.profile.thumbnailUrl);
+    if (!avatar) throw new Error("The saved channel avatar was unavailable.");
+    return avatar;
+  }).catch(() => null);
+  let avatar = avatarResult?.value || null;
   if (!avatar) {
     try {
       const refreshedProfile = await fetchChannelProfile(session.accessToken);
       if (refreshedProfile.thumbnailUrl !== session.profile.thumbnailUrl) {
-        avatar = await loadAvatar(refreshedProfile.thumbnailUrl);
+        avatarResult = await cached(`channel-avatar:${session.profile.id}:${refreshedProfile.thumbnailUrl}`, 6 * 60 * 60 * 1000, async () => {
+          const refreshedAvatar = await loadAvatar(refreshedProfile.thumbnailUrl);
+          if (!refreshedAvatar) throw new Error("The refreshed channel avatar was unavailable.");
+          return refreshedAvatar;
+        }).catch(() => null);
+        avatar = avatarResult?.value || null;
       }
     } catch (error) {
       console.warn("YouTube avatar refresh was unavailable.", error);
@@ -58,6 +69,8 @@ export async function GET() {
     headers: {
       "Content-Type": avatar.contentType,
       "Cache-Control": "private, max-age=3600, stale-while-revalidate=86400",
+      "Vary": "Cookie",
+      "X-Stanley-Cache": avatarResult?.hit ? "hit" : "miss",
       "X-Content-Type-Options": "nosniff",
     },
   });

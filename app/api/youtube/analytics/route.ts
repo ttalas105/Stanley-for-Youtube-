@@ -6,6 +6,7 @@ import {
   seal,
   youtubeDataApiUrl,
 } from "../oauth";
+import { PRIVATE_CHANNEL_CACHE, cached } from "../server-cache";
 
 type AnalyticsResponse = {
   columnHeaders?: Array<{ name?: string; columnType?: string; dataType?: string }>;
@@ -179,31 +180,39 @@ export async function GET(request: Request) {
     const url = new URL(request.url);
     const period = resolvePeriod(url);
     const compare = url.searchParams.get("compare") !== "false";
+    const force = url.searchParams.get("refresh") === "true";
     const comparisonPeriod = previousPeriod(period);
-    const [current, comparison, timeline, comparisonTimeline, videos, traffic, comparisonTraffic, handle] = await Promise.all([
-      aggregateReport(period, session.accessToken),
-      compare ? aggregateReport(comparisonPeriod, session.accessToken) : Promise.resolve(null),
-      timelineReport(period, session.accessToken),
-      compare ? timelineReport(comparisonPeriod, session.accessToken) : Promise.resolve([]),
-      videoReport(period, session.accessToken),
-      trafficReport(period, session.accessToken),
-      compare ? trafficReport(comparisonPeriod, session.accessToken) : Promise.resolve([]),
-      channelHandle(session.accessToken).catch(() => null),
-    ]);
+    const result = await cached(`channel-analytics:${session.profile.id}:${period.startDate}:${period.endDate}:${compare}`, 2 * 60 * 1000, async () => {
+      const [current, comparison, timeline, comparisonTimeline, videos, traffic, comparisonTraffic, handle] = await Promise.all([
+        aggregateReport(period, session.accessToken),
+        compare ? aggregateReport(comparisonPeriod, session.accessToken) : Promise.resolve(null),
+        timelineReport(period, session.accessToken),
+        compare ? timelineReport(comparisonPeriod, session.accessToken) : Promise.resolve([]),
+        videoReport(period, session.accessToken),
+        trafficReport(period, session.accessToken),
+        compare ? trafficReport(comparisonPeriod, session.accessToken) : Promise.resolve([]),
+        channelHandle(session.accessToken).catch(() => null),
+      ]);
 
-    const response = NextResponse.json({
-      channel: { handle },
-      period,
-      comparisonPeriod: compare ? comparisonPeriod : null,
-      current,
-      comparison,
-      timeline,
-      comparisonTimeline,
-      videos,
-      traffic,
-      comparisonTraffic,
-      updatedAt: new Date().toISOString(),
-    });
+      return {
+        channel: { handle },
+        period,
+        comparisonPeriod: compare ? comparisonPeriod : null,
+        current,
+        comparison,
+        timeline,
+        comparisonTimeline,
+        videos,
+        traffic,
+        comparisonTraffic,
+        updatedAt: new Date().toISOString(),
+      };
+    }, { force });
+
+    const response = NextResponse.json(result.value);
+    response.headers.set("Cache-Control", force ? "no-store" : PRIVATE_CHANNEL_CACHE);
+    response.headers.set("Vary", "Cookie");
+    response.headers.set("X-Stanley-Cache", result.hit ? "hit" : "miss");
     response.cookies.set(YOUTUBE_SESSION_COOKIE, await seal(session), cookieOptions(request.url));
     return response;
   } catch (error) {

@@ -927,6 +927,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, summary:focus
   text-align: left;
   font-size: inherit;
   font-weight: inherit;
+  text-decoration: none;
 }
 .nav-tool-button > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .nav-icon { width: 20px; height: 20px; display: grid; place-items: center; color: var(--grey-3); }
@@ -1394,6 +1395,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, summary:focus
   cursor: pointer;
   font-size: .76rem;
   font-weight: 640;
+  text-decoration: none;
   transition: background-color 150ms ease, border-color 150ms ease, transform 150ms ease;
 }
 .sidebar-new-chat-button:hover { border-color: var(--app-border-strong); background: var(--app-panel-hover); transform: translateY(-1px); }
@@ -3143,4 +3145,124 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, summary:focus
 @media (prefers-reduced-motion: reduce) {
   .onboarding-direction-forward .onboarding-stage,
   .onboarding-direction-back .onboarding-stage { animation: none; }
+}
+
+/* Creator context switcher */
+.creator-switcher { position: relative; justify-self: center; z-index: 40; }
+.app-shell .channel-trigger { color: inherit; font: inherit; cursor: pointer; transition: border-color 150ms ease-out, background-color 150ms ease-out; }
+.app-shell .channel-trigger:hover,
+.app-shell .channel-trigger[aria-expanded="true"] { border-color: #4a5569; background: #171e2a; }
+.channel-chevron { width: 14px; height: 14px; margin-left: 2px; color: #717d90; transition: transform 180ms cubic-bezier(.22, 1, .36, 1), color 150ms ease-out; }
+.channel-trigger[aria-expanded="true"] .channel-chevron { transform: rotate(180deg); color: #b5bdca; }
+.creator-profile-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 50%;
+  width: 308px;
+  padding: 8px;
+  border: 1px solid #2b3545;
+  border-radius: 12px;
+  background: #111722;
+  box-shadow: 0 6px 8px rgba(0, 0, 0, .28);
+  transform: translateX(-50%);
+  animation: creator-menu-in 160ms cubic-bezier(.22, 1, .36, 1) both;
+}
+@keyframes creator-menu-in {
+  from { opacity: 0; transform: translate(-50%, -5px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
+}
+.creator-menu-heading { display: grid; gap: 3px; padding: 8px 9px 10px; }
+.creator-menu-heading strong { color: #edf0f5; font-size: .72rem; font-weight: 680; }
+.creator-menu-heading span { color: #7d8899; font-size: .59rem; line-height: 1.45; }
+.creator-profile-option {
+  width: 100%;
+  min-height: 54px;
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) 18px;
+  gap: 10px;
+  align-items: center;
+  padding: 7px 9px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #dfe4ec;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 150ms ease-out, color 150ms ease-out;
+}
+.creator-profile-option:hover { background: #1a2230; }
+.creator-profile-option[aria-checked="true"] { background: #1d2036; }
+.creator-profile-option > img,
+.creator-profile-option > .youtube-avatar-fallback { width: 34px; height: 34px; border-radius: 50%; object-fit: cover; }
+.creator-profile-option > span:nth-child(2) { min-width: 0; display: grid; gap: 3px; }
+.creator-profile-option strong { overflow: hidden; color: #eef1f5; font-size: .68rem; font-weight: 660; text-overflow: ellipsis; white-space: nowrap; }
+.creator-profile-option small { color: #7f8a9c; font-size: .56rem; }
+.creator-profile-option > svg { width: 15px; height: 15px; color: #8d82ff; opacity: 0; }
+.creator-profile-option[aria-checked="true"] > svg { opacity: 1; }
+.creator-menu-separator { height: 1px; margin: 6px 4px; background: #263040; }
+.creator-disconnect { width: 100%; min-height: 36px; display: flex; align-items: center; gap: 10px; padding: 0 10px; border: 0; border-radius: 8px; background: transparent; color: #8f99a9; cursor: pointer; font-size: .63rem; font-weight: 580; text-align: left; transition: background-color 150ms ease-out, color 150ms ease-out; }
+.creator-disconnect:hover { background: #2a1920; color: #ee9aaa; }
+.creator-disconnect svg { width: 15px; height: 15px; }
+
+@media (max-width: 680px) {
+  .creator-profile-menu { position: fixed; top: 58px; left: 50%; width: min(308px, calc(100vw - 24px)); transform: translateX(-50%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .creator-profile-menu { animation: none; }
+  .channel-chevron { transition: none; }
+}
+
+/* Compact app utility header */
+.app-shell .main-header {
+  height: 50px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding-inline: 18px;
+  border-bottom: 0;
+  background: #090d15;
+  backdrop-filter: none;
+}
+
+.app-shell .main-header .header-balance {
+  display: none;
+}
+
+.app-shell .main-header .header-actions {
+  order: 1;
+  margin-left: auto;
+}
+
+.app-shell .main-header .creator-switcher,
+.app-shell .main-header .youtube-connect-header {
+  order: 2;
+  margin-left: 8px;
+}
+
+.app-shell .main-header .creator-switcher {
+  justify-self: auto;
+}
+
+.app-shell .main-header .creator-profile-menu {
+  right: 0;
+  left: auto;
+  transform: none;
+  animation: none;
+}
+
+@media (max-width: 680px) {
+  .app-shell .main-header {
+    height: 48px;
+    padding-inline: 10px;
+  }
+
+  .app-shell .main-header .creator-profile-menu {
+    position: fixed;
+    top: 52px;
+    right: 10px;
+    left: auto;
+    width: min(308px, calc(100vw - 20px));
+    transform: none;
+  }
 }

@@ -3,11 +3,19 @@
 import { ChangeEvent, FormEvent, KeyboardEvent, useEffect, useRef, useState } from "react";
 import { createPortal, flushSync } from "react-dom";
 import { ArrowDownRight, ArrowLeft, ArrowUpRight, Check, ChevronDown, ChevronRight, Clock3, Copy as CopyIcon, Download, ExternalLink, Eye, Facebook, FileText, Globe2, Image as ImageIcon, Instagram, LayoutDashboard, LogOut, MessageCircle, Minus, PanelLeftClose, PanelLeftOpen, Puzzle, RefreshCw, Search, Sparkles, SquarePen, ThumbsDown, ThumbsUp, Users, Video, WandSparkles, X } from "lucide-react";
+import { InputText } from "primereact/inputtext";
+import { Paginator } from "primereact/paginator";
 import dashboardStyles from "./dashboard.module.css";
 import { findDiscoveryGrowth } from "./dashboard-signals.mjs";
+import { type CreatorProfileId, WILL_TENNYSON_DEMO, isCreatorProfileId } from "./creator-profiles";
+import { PerformanceTimelinePanel } from "./PerformanceTimelinePanel";
 
 type CreationMode = "auto" | "idea" | "title" | "thumbnail";
-type WorkspaceView = "dashboard" | "create";
+type WorkspaceView = "dashboard" | "creatorTwin" | "create";
+
+type StanleyAppProps = {
+  initialView?: WorkspaceView;
+};
 
 type GeneratedTitle = {
   id: string;
@@ -136,6 +144,7 @@ type Draft = {
   messages?: ChatMessage[];
   titles?: GeneratedTitle[];
   research?: Research;
+  creatorProfile?: CreatorProfileId;
 };
 
 type ApiPayload = {
@@ -304,9 +313,12 @@ type MessageAttachment = Pick<ComposerAttachment, "id" | "kind" | "name" | "prev
 const DRAFTS_KEY = "stanley-title-drafts";
 const ONBOARDING_KEY = "stanley-onboarding-v1";
 const SIDEBAR_KEY = "stanley-sidebar-collapsed";
+const CREATOR_PROFILE_KEY = "stanley-creator-profile";
+const TOP_VIDEOS_PAGE_SIZE = 6;
 
 const NAV_ITEMS: Array<{ icon: string; label: string; view?: WorkspaceView }> = [
   { icon: "dashboard", label: "Dashboard", view: "dashboard" },
+  { icon: "creatorTwin", label: "Creator Twin", view: "creatorTwin" },
   { icon: "extension", label: "Chrome extension" },
 ];
 
@@ -682,6 +694,7 @@ async function readApiResponse(response: Response, onActivity: (activity: AgentA
 
 function ToolIcon({ name }: { name: string }) {
   if (name === "dashboard") return <LayoutDashboard aria-hidden="true" />;
+  if (name === "creatorTwin") return <Users aria-hidden="true" />;
   if (name === "extension") return <Puzzle aria-hidden="true" />;
   return <Sparkles aria-hidden="true" />;
 }
@@ -704,7 +717,7 @@ function YouTubeIcon() {
   return <svg className="youtube-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21.6 7.2a3 3 0 0 0-2.1-2.1C17.7 4.6 12 4.6 12 4.6s-5.7 0-7.5.5a3 3 0 0 0-2.1 2.1A31 31 0 0 0 2 12a31 31 0 0 0 .4 4.8 3 3 0 0 0 2.1 2.1c1.8.5 7.5.5 7.5.5s5.7 0 7.5-.5a3 3 0 0 0 2.1-2.1A31 31 0 0 0 22 12a31 31 0 0 0-.4-4.8Z" /><path className="youtube-play" d="m10 15.2 5-3.2-5-3.2v6.4Z" /></svg>;
 }
 
-function YouTubeAvatar({ profile, alt = "" }: { profile: YouTubeProfile; alt?: string }) {
+function YouTubeAvatar({ profile, alt = "", direct = false }: { profile: YouTubeProfile; alt?: string; direct?: boolean }) {
   const sourceKey = `${profile.id}:${profile.thumbnailUrl}:${profile.analyzedAt}`;
   const [failedSource, setFailedSource] = useState<string | null>(null);
   const failed = failedSource === sourceKey;
@@ -714,7 +727,7 @@ function YouTubeAvatar({ profile, alt = "" }: { profile: YouTubeProfile; alt?: s
   }
   return <>
     {/* eslint-disable-next-line @next/next/no-img-element */}
-    <img src={`/api/youtube/avatar?v=${encodeURIComponent(profile.analyzedAt)}`} alt={alt} onError={() => setFailedSource(sourceKey)} />
+    <img src={direct ? profile.thumbnailUrl : `/api/youtube/avatar?v=${encodeURIComponent(profile.analyzedAt)}`} alt={alt} referrerPolicy={direct ? "no-referrer" : undefined} onError={() => setFailedSource(sourceKey)} />
   </>;
 }
 
@@ -1443,6 +1456,50 @@ function ChannelPerformanceBrief({
   </section>;
 }
 
+function CreatorTwinRouteHero({
+  loading,
+  result,
+  onAnalyze,
+}: {
+  loading: boolean;
+  result: CreatorTwinResult | null;
+  onAnalyze: () => void;
+}) {
+  return <section className={dashboardStyles.creatorTwinHero} data-loading={loading || undefined} data-result={Boolean(result) || undefined} aria-labelledby="creator-twin-route-heading">
+    <div className={dashboardStyles.creatorTwinHeroCopy}>
+      <span className={dashboardStyles.creatorTwinEngineStatus}><i aria-hidden="true" /> Stanley match engine</span>
+      <h1 id="creator-twin-route-heading">Find your creative twin.</h1>
+      <p>Stanley reads your topics, packaging, and momentum to find the creator pattern closest to yours—and the next move worth borrowing.</p>
+      <div className={dashboardStyles.creatorTwinSignals} aria-label="Signals used for matching">
+        <span><i aria-hidden="true" />Topics</span>
+        <span><i aria-hidden="true" />Format</span>
+        <span><i aria-hidden="true" />Momentum</span>
+      </div>
+      <button className={dashboardStyles.creatorTwinHeroAction} type="button" onClick={onAnalyze} disabled={loading}>
+        {loading ? <><RefreshCw aria-hidden="true" /> Finding your twin…</> : result ? <><RefreshCw aria-hidden="true" /> Find a fresh match</> : <><Sparkles aria-hidden="true" /> Find my Creator Twin</>}
+      </button>
+    </div>
+    <div className={dashboardStyles.creatorTwinHeroStage} aria-hidden="true">
+      <span className={`${dashboardStyles.creatorTwinHeroOrbit} ${dashboardStyles.creatorTwinHeroOrbitOuter}`}><i /><i /><i /></span>
+      <span className={`${dashboardStyles.creatorTwinHeroOrbit} ${dashboardStyles.creatorTwinHeroOrbitInner}`} />
+      <span className={dashboardStyles.creatorTwinHeroSweep} />
+      <span className={dashboardStyles.creatorTwinSignalNode} data-node="topics">Topics</span>
+      <span className={dashboardStyles.creatorTwinSignalNode} data-node="format">Format</span>
+      <span className={dashboardStyles.creatorTwinSignalNode} data-node="momentum">Momentum</span>
+      <span className={dashboardStyles.creatorTwinMascot}>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src="/stanley-mascot-dashboard.png" alt="" width="144" height="144" decoding="async" />
+      </span>
+      {result ? <span className={dashboardStyles.creatorTwinFoundNode}>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={result.creator.avatarUrl} alt="" referrerPolicy="no-referrer" />
+        <b>{result.creator.similarity}%</b>
+      </span> : null}
+      <span className={dashboardStyles.creatorTwinStageLabel}>{loading ? "Comparing creator patterns" : result ? `${result.creator.name} found` : "Ready to scan"}</span>
+    </div>
+  </section>;
+}
+
 function CreatorTwinPanel({
   expanded,
   loading,
@@ -1484,49 +1541,69 @@ function CreatorTwinPanel({
     return [instagram, xLink || fallback].filter((link, index, links): link is CreatorTwinResult["links"][number] => Boolean(link) && links.findIndex((item) => item?.url === link?.url) === index);
   })() : [];
 
-  return <section className={dashboardStyles.twinExpanded} aria-labelledby="creator-twin-heading">
-    <header>
-      <div><span className={dashboardStyles.sectionEyebrow}>Competitive reference</span><h2 id="creator-twin-heading">Creator Twin</h2><p>{result ? (result.cached ? "Saved match" : "Updated now") : "Finding your closest stronger match."}</p></div>
-      <div className={dashboardStyles.twinControls}>
-        {result && !loading ? <button type="button" onClick={() => { setResultView("overview"); onRefresh(); }}><RefreshCw aria-hidden="true" /> Refresh</button> : null}
-        <button type="button" onClick={() => { setResultView("overview"); onClose(); }} aria-label="Close Creator Twin"><X aria-hidden="true" /></button>
-      </div>
-    </header>
-
+  return <section className={dashboardStyles.twinExpanded} aria-label="Creator Twin">
     {loading ? <TwinLabScan /> : error ? <div className={dashboardStyles.twinError} role="alert"><strong>Creator Twin could not finish.</strong><p>{error}</p><button type="button" onClick={onRefresh}>Try again</button></div> : result ? <div className={dashboardStyles.twinResults}>
-      <div className={dashboardStyles.twinProfile}>
+      <header className={dashboardStyles.twinResultHeader}>
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src={result.creator.avatarUrl} alt={`${result.creator.name} channel avatar`} referrerPolicy="no-referrer" />
-        <div className={dashboardStyles.twinProfileCopy}><h3>{result.creator.name}</h3><p>{result.creator.primaryNiche}</p></div>
-        <div className={`${dashboardStyles.twinStat} ${dashboardStyles.similarity}`}><span>Match</span><strong>{result.creator.similarity}%</strong></div>
-        <div className={dashboardStyles.twinStat}><span>Views / video</span><strong>{formatDashboardCompact(result.creator.averageViews)}</strong></div>
-        <div className={dashboardStyles.twinStat}><span>Momentum</span><strong>{result.creator.recentMomentum}</strong></div>
-        <div className={dashboardStyles.twinStat}><span>Big hits</span><strong>{result.creator.outlierFrequency}</strong></div>
+        <div className={dashboardStyles.twinResultIdentity}>
+          <span><Check aria-hidden="true" /> Closest creator match</span>
+          <h2 id="creator-twin-heading">{result.creator.name}</h2>
+          <p>{result.creator.primaryNiche}</p>
+        </div>
+        <div className={dashboardStyles.twinMatchScore} aria-label={`${result.creator.similarity}% pattern match`}>
+          <strong>{result.creator.similarity}%</strong><span>pattern match</span>
+          <i aria-hidden="true"><b style={{ transform: `scaleX(${result.creator.similarity / 100})` }} /></i>
+        </div>
+        <div className={dashboardStyles.twinHeaderActions}>
+          <button className={dashboardStyles.twinPrimaryAction} type="button" onClick={() => onCreate(createPrompt, referenceVideo)}>Build from this pattern <ArrowUpRight aria-hidden="true" /></button>
+          <a href={result.creator.channelUrl} target="_blank" rel="noreferrer">Open channel <ExternalLink aria-hidden="true" /></a>
+          <button className={dashboardStyles.twinIconAction} type="button" onClick={() => { setResultView("overview"); onRefresh(); }} aria-label="Scan again" title="Scan again"><RefreshCw aria-hidden="true" /></button>
+          <button className={dashboardStyles.twinIconAction} type="button" onClick={() => { setResultView("overview"); onClose(); }} aria-label="Hide Creator Twin result" title="Hide result"><X aria-hidden="true" /></button>
+        </div>
+      </header>
+      <div className={dashboardStyles.twinMetricRail} role="list" aria-label="Creator comparison summary">
+        <div role="listitem"><span>Average views</span><strong>{formatDashboardCompact(result.creator.averageViews)}</strong><small>per recent video</small></div>
+        <div role="listitem"><span>Momentum edge</span><strong>{result.creator.recentMomentum}</strong><small>against your recent baseline</small></div>
+        <div role="listitem"><span>Breakout rate</span><strong>{result.creator.outlierFrequency}</strong><small>across the analyzed sample</small></div>
       </div>
-      <div className={dashboardStyles.twinActions}>
-        <button className={dashboardStyles.twinPrimaryAction} type="button" onClick={() => onCreate(createPrompt, referenceVideo)}>Build from this pattern <ArrowUpRight aria-hidden="true" /></button>
-        <a href={result.creator.channelUrl} target="_blank" rel="noreferrer">Open channel <ExternalLink aria-hidden="true" /></a>
-        <button className={dashboardStyles.twinScanAgain} type="button" onClick={() => { setResultView("overview"); onRefresh(); }}><RefreshCw aria-hidden="true" /> Scan again</button>
+      <div className={dashboardStyles.twinSubnav}>
+      <div className={dashboardStyles.twinNavigation}>
         {connectLinks.length ? <div className={dashboardStyles.socialLinks}>{connectLinks.map((link) => <a key={link.platform} href={link.url} target="_blank" rel="noreferrer" aria-label={`${link.platform}: ${link.label}`} title={link.label}>
           {link.platform === "x" ? <b aria-hidden="true">𝕏</b> : link.platform === "instagram" ? <Instagram aria-hidden="true" /> : link.platform === "facebook" ? <Facebook aria-hidden="true" /> : link.platform === "youtube" ? <YouTubeIcon /> : <Globe2 aria-hidden="true" />}
         </a>)}</div> : null}
       </div>
       <div className={dashboardStyles.twinTabs} role="tablist" aria-label="Creator Twin details">
         {(["overview", "differences", "videos"] as const).map((view) => <button key={view} type="button" role="tab" aria-selected={resultView === view} className={resultView === view ? dashboardStyles.activeTab : ""} onClick={() => setResultView(view)}>
-          {view === "overview" ? "Overview" : view === "differences" ? "Differences" : `Videos (${result.topVideos.length})`}
+          {view === "overview" ? "Why this match" : view === "differences" ? "Key differences" : `Top videos (${result.topVideos.length})`}
         </button>)}
+      </div>
       </div>
       <div className={dashboardStyles.twinView} role="tabpanel" key={resultView}>
         {resultView === "overview" ? <div className={dashboardStyles.twinOverview}>
-          <article className={dashboardStyles.twinBlock}><span>Why it matched</span><ul>{result.whyMatched.slice(0, 2).map((reason) => <li key={reason}><Check aria-hidden="true" />{reason}</li>)}</ul></article>
-          <article className={`${dashboardStyles.twinBlock} ${dashboardStyles.twinInsight}`}><span>Pattern to test</span><strong>{result.insights[0]?.what}</strong></article>
+          <section className={dashboardStyles.twinEvidence}>
+            <div><span>Match evidence</span><h3>Why Stanley chose {result.creator.name}</h3><p>The overlap is strongest across the signals that shape what viewers see and how often they return.</p></div>
+            <ul>{result.whyMatched.slice(0, 4).map((reason) => <li key={reason}><Check aria-hidden="true" /><span>{reason}</span></li>)}</ul>
+          </section>
+          <aside className={dashboardStyles.twinNextMove}>
+            <span>Best pattern to test next</span>
+            <h3>{result.insights[0]?.what}</h3>
+            <p>{result.insights[0]?.why}</p>
+            <strong>{result.insights[0]?.adapt}</strong>
+            <button type="button" onClick={() => onCreate(createPrompt, referenceVideo)}>Turn this into a video <ArrowUpRight aria-hidden="true" /></button>
+          </aside>
         </div> : null}
         {resultView === "differences" ? <div className={dashboardStyles.twinDifferences}>
-          <article className={dashboardStyles.twinBlock}><span>Largest differences</span><div className={dashboardStyles.differenceGrid}>{result.differences.slice(0, 3).map((difference) => <article key={`${difference.category}-${difference.detail}`}><strong>{difference.category}</strong><p>{difference.detail}</p><dl><div><dt>{result.creator.name}</dt><dd>{difference.twin}</dd></div><div><dt>You</dt><dd>{difference.you}</dd></div></dl></article>)}</div></article>
+          <div className={dashboardStyles.twinDifferenceHeading}><div><span>Where the patterns separate</span><h3>Use the gap, not the creator.</h3></div><p>Borrow the behavior that is working. Keep your own voice, subject, and visual identity.</p></div>
+          <div className={dashboardStyles.twinDifferenceTable} role="table" aria-label={`Differences between ${result.creator.name} and your channel`}>
+            <div role="row"><span role="columnheader">Signal</span><span role="columnheader">{result.creator.name}</span><span role="columnheader">Your channel</span></div>
+            {result.differences.slice(0, 4).map((difference) => <div role="row" key={`${difference.category}-${difference.detail}`}><span role="cell"><strong>{difference.category}</strong><small>{difference.detail}</small></span><span role="cell">{difference.twin}</span><span role="cell">{difference.you}</span></div>)}
+          </div>
         </div> : null}
-        {resultView === "videos" ? <div className={dashboardStyles.twinVideos}>{result.topVideos.map((video) => {
+        {resultView === "videos" ? <div className={dashboardStyles.twinVideos}>{result.topVideos.map((video, index) => {
           const option: YouTubeVideoOption = { ...video, privacyStatus: "public" };
           return <article className={dashboardStyles.twinVideo} key={video.id}>
+            <span className={dashboardStyles.twinVideoRank}>{String(index + 1).padStart(2, "0")}</span>
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={video.thumbnailUrl} alt="" />
             <div><strong>{video.title}</strong><p>{formatDashboardCompact(video.views)} views · {video.outlierScore.toFixed(1)}× usual · {formatTime(video.publishedAt)}</p></div>
@@ -1689,6 +1766,7 @@ function TwinRailScan() {
 
 function ChannelDashboard({
   active,
+  surface,
   status,
   videos,
   loading,
@@ -1698,8 +1776,10 @@ function ChannelDashboard({
   onCreateFromPattern,
   onUseVideo,
   onRefresh,
+  publicOnly = false,
 }: {
   active: boolean;
+  surface: "dashboard" | "creatorTwin";
   status: YouTubeStatus;
   videos: YouTubeVideoOption[];
   loading: boolean;
@@ -1709,19 +1789,19 @@ function ChannelDashboard({
   onCreateFromPattern: (prompt: string, video?: YouTubeVideoOption) => void;
   onUseVideo: (video: YouTubeVideoOption) => void;
   onRefresh: () => void;
+  publicOnly?: boolean;
 }) {
   const [analytics, setAnalytics] = useState<DashboardAnalytics | null>(null);
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
   const [analyticsError, setAnalyticsError] = useState("");
-  const [chartMetric, setChartMetric] = useState<DashboardChartMetric>("views");
   const [dashboardRange, setDashboardRange] = useState<DashboardRange>(30);
-  const [hoveredChartIndex, setHoveredChartIndex] = useState<number | null>(null);
   const [selectedVideoId, setSelectedVideoId] = useState("");
   const [selectedTrafficSource, setSelectedTrafficSource] = useState("");
   const [activeDiagnosticId, setActiveDiagnosticId] = useState("");
   const [drawerMode, setDrawerMode] = useState<"video" | "diagnostic" | "traffic" | "twin" | null>(null);
   const [ledgerQuery, setLedgerQuery] = useState("");
   const [ledgerSort, setLedgerSort] = useState<"performance" | "period">("performance");
+  const [ledgerPage, setLedgerPage] = useState(1);
   const [refreshVersion, setRefreshVersion] = useState(0);
   const [creatorTwinExpanded, setCreatorTwinExpanded] = useState(false);
   const [creatorTwinLoading, setCreatorTwinLoading] = useState(false);
@@ -1729,26 +1809,38 @@ function ChannelDashboard({
   const [creatorTwin, setCreatorTwin] = useState<CreatorTwinResult | null>(null);
   const [showCreatorTwinReport, setShowCreatorTwinReport] = useState(false);
   const [creatorTwinRevealActive, setCreatorTwinRevealActive] = useState(false);
+  const [showPerformanceReport, setShowPerformanceReport] = useState(false);
+  const [reportDiagnosticId, setReportDiagnosticId] = useState("");
+  const analyticsCacheRef = useRef(new Map<string, DashboardAnalytics>());
+  const signalStripRef = useRef<HTMLElement>(null);
+  const activeChartMetricRef = useRef<DashboardChartMetric>("views");
   const creatorTwinRunRef = useRef(0);
-  const chartBoundsRef = useRef<DOMRect | null>(null);
-  const chartHoverFrameRef = useRef<number | null>(null);
-  const pendingChartHoverRef = useRef<number | null>(null);
   const drawerCloseRef = useRef<HTMLButtonElement>(null);
+  const performanceReportRef = useRef<HTMLElement>(null);
   const profile = status.profile;
-  const compare = true;
 
   useEffect(() => {
-    if (!status.connected || !profile) return;
+    if (!active || surface !== "dashboard" || !status.connected || !profile) return;
     const controller = new AbortController();
     const params = new URLSearchParams({ range: String(dashboardRange), compare: "true" });
+    const cacheKey = `${publicOnly ? "demo" : "live"}:${profile.id}:${dashboardRange}`;
+    const cachedAnalytics = analyticsCacheRef.current.get(cacheKey);
+    if (cachedAnalytics) {
+      setAnalytics(cachedAnalytics);
+      setAnalyticsLoading(false);
+      setAnalyticsError("");
+      return;
+    }
 
     async function loadAnalytics() {
       setAnalyticsLoading(true);
       setAnalyticsError("");
       try {
-        const response = await fetch(`/api/youtube/analytics?${params}`, { cache: "no-store", signal: controller.signal });
+        const endpoint = publicOnly ? "/api/youtube/demo-analytics" : "/api/youtube/analytics";
+        const response = await fetch(`${endpoint}?${params}`, { signal: controller.signal });
         const payload = await response.json() as DashboardAnalytics & { error?: string };
         if (!response.ok) throw new Error(payload.error || "Your YouTube numbers could not be loaded.");
+        analyticsCacheRef.current.set(cacheKey, payload);
         setAnalytics(payload);
       } catch (caught) {
         if (controller.signal.aborted) return;
@@ -1760,7 +1852,7 @@ function ChannelDashboard({
 
     void loadAnalytics();
     return () => controller.abort();
-  }, [dashboardRange, profile, refreshVersion, status.connected]);
+  }, [active, dashboardRange, profile, publicOnly, refreshVersion, status.connected, surface]);
 
   async function analyzeCreatorTwin(force = false) {
     const runId = ++creatorTwinRunRef.current;
@@ -1776,7 +1868,10 @@ function ChannelDashboard({
     setCreatorTwinLoading(true);
     setCreatorTwinError("");
     try {
-      const response = await fetch(`/api/youtube/creator-twin${force ? "?refresh=true" : ""}`, { cache: "no-store" });
+      const params = new URLSearchParams();
+      if (publicOnly) params.set("creator", WILL_TENNYSON_DEMO.id);
+      if (force) params.set("refresh", "true");
+      const response = await fetch(`/api/youtube/creator-twin${params.size ? `?${params}` : ""}`, force ? { cache: "no-store" } : undefined);
       const payload = await response.json() as CreatorTwinResult & { error?: string };
       if (!response.ok) throw new Error(payload.error || "Creator Twin could not be calculated.");
       const remainingScanTime = Math.max(0, 2400 - (performance.now() - scanStartedAt));
@@ -1813,10 +1908,6 @@ function ChannelDashboard({
     return () => window.clearTimeout(expandTimer);
   }, [creatorTwin, creatorTwinLoading, showCreatorTwinReport]);
 
-  useEffect(() => () => {
-    if (chartHoverFrameRef.current !== null) window.cancelAnimationFrame(chartHoverFrameRef.current);
-  }, []);
-
   useEffect(() => {
     if (!active) return;
     function handleDashboardShortcut(event: globalThis.KeyboardEvent) {
@@ -1841,17 +1932,33 @@ function ChannelDashboard({
     </section>;
   }
 
+  if (surface === "creatorTwin") {
+    return <section className={`${dashboardStyles.viewport} ${active ? dashboardStyles.active : dashboardStyles.inactive}`} aria-hidden={active ? undefined : true} inert={active ? undefined : true}>
+      <div className={`${dashboardStyles.shell} ${dashboardStyles.creatorTwinRoute}`}>
+        <CreatorTwinRouteHero
+          loading={creatorTwinLoading}
+          result={creatorTwin}
+          onAnalyze={() => void analyzeCreatorTwin(Boolean(creatorTwin))}
+        />
+        {creatorTwinExpanded && !creatorTwinLoading ? <CreatorTwinPanel
+          expanded={creatorTwinExpanded}
+          loading={creatorTwinLoading}
+          error={creatorTwinError}
+          result={creatorTwin}
+          onAnalyze={() => void analyzeCreatorTwin()}
+          onRefresh={() => void analyzeCreatorTwin(true)}
+          onClose={() => setCreatorTwinExpanded(false)}
+          onCreate={onCreateFromPattern}
+          onStudy={onUseVideo}
+        /> : null}
+      </div>
+    </section>;
+  }
+
   const refresh = () => {
+    analyticsCacheRef.current.clear();
     onRefresh();
     setRefreshVersion((version) => version + 1);
-  };
-  const queueChartHover = (index: number | null) => {
-    pendingChartHoverRef.current = index;
-    if (chartHoverFrameRef.current !== null) return;
-    chartHoverFrameRef.current = window.requestAnimationFrame(() => {
-      chartHoverFrameRef.current = null;
-      setHoveredChartIndex((currentIndex) => currentIndex === pendingChartHoverRef.current ? currentIndex : pendingChartHoverRef.current);
-    });
   };
   const current = analytics?.current || null;
   const comparison = analytics?.comparison || null;
@@ -1876,6 +1983,10 @@ function ChannelDashboard({
     .sort((left, right) => {
       return (right.performance?.views ?? right.video.views) - (left.performance?.views ?? left.video.views);
     });
+  const ledgerPageCount = Math.max(1, Math.ceil(ledgerRows.length / TOP_VIDEOS_PAGE_SIZE));
+  const visibleLedgerPage = Math.min(ledgerPage, ledgerPageCount);
+  const ledgerPageStart = (visibleLedgerPage - 1) * TOP_VIDEOS_PAGE_SIZE;
+  const pagedLedgerRows = ledgerRows.slice(ledgerPageStart, ledgerPageStart + TOP_VIDEOS_PAGE_SIZE);
   const ledgerViewsMax = ledgerRows.reduce((maximum, { video, performance }) => Math.max(maximum, performance?.views ?? video.views), 0);
   const ledgerSubscriberYieldMax = ledgerRows.reduce((maximum, { video, performance }) => {
     const rowViews = performance?.views ?? video.views;
@@ -1885,21 +1996,11 @@ function ChannelDashboard({
   const strongestRows = ledgerSource
     .sort((left, right) => (right.performance?.views ?? right.video.views) - (left.performance?.views ?? left.video.views))
     .slice(0, 3);
-  const geometry = chartGeometry(analytics?.timeline || [], compare ? analytics?.comparisonTimeline || [] : [], chartMetric);
-  const labelIndexes = analytics?.timeline.length
-    ? Array.from(new Set([0, Math.floor((analytics.timeline.length - 1) / 2), analytics.timeline.length - 1]))
-    : [];
   const trafficTotal = (analytics?.traffic || []).reduce((sum, source) => sum + source.views, 0);
   const traffic = (analytics?.traffic || []).slice(0, 4);
   const comparisonTraffic = analytics?.comparisonTraffic || [];
   const comparisonTrafficTotal = comparisonTraffic.reduce((sum, source) => sum + source.views, 0);
   const viewChange = percentDelta(current?.views ?? null, comparison?.views ?? null);
-  const exampleTitles = strongestRows.map(({ video }) => video.title);
-  const patternPrompt = [
-    `Generate one original follow-up idea for ${profile.title} using only the observable performance evidence in this dashboard.`,
-    exampleTitles.length ? `Strong current references: ${exampleTitles.map((title) => `“${title}”`).join("; ")}.` : "",
-    "Do not copy a title, thumbnail, topic, or wording. Use the references only to understand the channel's current audience response. Give the idea, title, thumbnail direction, opening, and one evidence-based reason to test it.",
-  ].filter(Boolean).join("\n");
   const lastUpdated = analytics?.updatedAt || profile.analyzedAt;
   const channelHandle = analytics?.channel.handle?.trim();
   const visibleChannelHandle = channelHandle && !/^api\s+preview$/i.test(channelHandle) ? channelHandle : "";
@@ -1931,10 +2032,6 @@ function ChannelDashboard({
     });
     return [{ video, index: closestIndex }];
   }) : [];
-  const activePoint = hoveredChartIndex === null ? null : timeline[hoveredChartIndex];
-  const activeComparisonPoint = hoveredChartIndex === null || !comparisonTimeline.length
-    ? null
-    : comparisonTimeline[Math.min(hoveredChartIndex, comparisonTimeline.length - 1)];
   const leadingRow = strongestRows[0];
   const leadingShare = leadingRow?.performance?.views !== null && leadingRow?.performance?.views !== undefined && current?.views
     ? (leadingRow.performance.views / current.views) * 100
@@ -2047,86 +2144,104 @@ function ChannelDashboard({
     { label: "Watch time", value: current?.watchMinutes ?? null, previous: comparison?.watchMinutes ?? null, formatter: formatDashboardWatchTime, metric: "watchMinutes" as const, icon: <Clock3 aria-hidden="true" /> },
     { label: "Net subscribers", value: currentNet, previous: comparisonNet, formatter: formatDashboardNet, metric: "netSubscribers" as const, icon: <Users aria-hidden="true" /> },
   ];
+  const highlightChartMetric = (metric: DashboardChartMetric) => {
+    activeChartMetricRef.current = metric;
+    signalStripRef.current?.querySelectorAll<HTMLElement>("[data-dashboard-signal-metric]").forEach((card) => {
+      card.toggleAttribute("data-chart-active", card.dataset.dashboardSignalMetric === metric);
+    });
+  };
+  const togglePerformanceReport = () => {
+    if (showPerformanceReport) {
+      setShowPerformanceReport(false);
+      setReportDiagnosticId("");
+      return;
+    }
+    flushSync(() => setShowPerformanceReport(true));
+    window.requestAnimationFrame(() => performanceReportRef.current?.scrollIntoView({
+      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
+      block: "start",
+    }));
+  };
+  const generateDiagnosticFollowUp = (diagnostic: DashboardDiagnostic) => {
+    const sourceVideo = diagnostic.videoId ? videoById.get(diagnostic.videoId) : undefined;
+    const prompt = [
+      `Create one original follow-up video idea from this ${activeRangeLabel.toLowerCase()} channel finding: ${diagnostic.title}.`,
+      `Evidence: ${diagnostic.why}`,
+      `Recommended next move: ${diagnostic.action}`,
+      sourceVideo ? `Use the observable performance pattern from “${sourceVideo.title}” as supporting evidence, without copying its subject or packaging.` : "Use the channel-level evidence as the creative baseline.",
+      "Give me the idea, title, thumbnail direction, opening hook, and why it follows from this finding.",
+    ].join("\n");
+    onCreateFromPattern(prompt, sourceVideo);
+  };
 
   return <section className={`${dashboardStyles.viewport} ${active ? dashboardStyles.active : dashboardStyles.inactive}`} aria-hidden={active ? undefined : true} inert={active ? undefined : true}>
     <div className={dashboardStyles.shell}>
       <header className={dashboardStyles.channelHeader} data-dashboard-channel-header>
         <div className={dashboardStyles.channelIdentity}>
-          <YouTubeAvatar profile={profile} alt={`${profile.title} channel avatar`} />
-          <div className={dashboardStyles.channelCopy}><h1>{profile.title}</h1><div>{visibleChannelHandle ? <small>{visibleChannelHandle}</small> : null}</div></div>
-        </div>
-        <div className={dashboardStyles.channelUtilities}>
-          <dl className={dashboardStyles.channelTotals}>
-            <div><dt>Subscribers</dt><dd>{formatDashboardCompact(profile.subscriberCount)}</dd></div>
-            <div><dt>Videos</dt><dd>{formatDashboardCompact(profile.videoCount)}</dd></div>
-          </dl>
+          <YouTubeAvatar profile={profile} alt={`${profile.title} channel avatar`} direct={publicOnly} />
+          <div className={dashboardStyles.channelCopy}>
+            <h1>{profile.title}</h1>
+            <div>{visibleChannelHandle ? <small>{visibleChannelHandle}</small> : null}{publicOnly ? <span className={dashboardStyles.demoAnalyticsLabel}>Demo workspace</span> : null}</div>
+            <dl className={dashboardStyles.channelTotals}>
+              <div><dd>{formatDashboardCompact(profile.subscriberCount)}</dd><dt>subscribers</dt></div>
+              <div><dd>{formatDashboardCompact(profile.totalViews)}</dd><dt>lifetime views</dt></div>
+              <div><dd>{formatDashboardCompact(profile.videoCount)}</dd><dt>videos</dt></div>
+            </dl>
+          </div>
         </div>
       </header>
 
-      <div className={dashboardStyles.dashboardToolbar} data-dashboard-toolbar>
-        <div className={dashboardStyles.periodControl} role="group" aria-label="Dashboard period"><span>Period</span><div>{dashboardRanges.map((item) => <button type="button" key={item.value} aria-pressed={dashboardRange === item.value} title={item.label} onClick={() => setDashboardRange(item.value)}>{item.short}</button>)}</div></div>
-        <div className={dashboardStyles.dashboardToolbarStatus}><time dateTime={lastUpdated}>Updated {new Intl.DateTimeFormat("en", { month: "short", day: "numeric", year: "numeric" }).format(new Date(lastUpdated))}</time><button className={dashboardStyles.refreshButton} type="button" onClick={refresh} disabled={isBusy} aria-label="Refresh dashboard"><RefreshCw aria-hidden="true" /></button></div>
-      </div>
-
       {visibleError && !isBusy ? <div className={dashboardStyles.dataError} role="alert"><span>{visibleError}</span><button type="button" onClick={refresh}>Try again</button></div> : null}
 
-      <section className={dashboardStyles.signalStrip} aria-label="Channel overview">
+      <section className={dashboardStyles.signalStrip} aria-label="Channel overview" ref={signalStripRef}>
         <div className={dashboardStyles.signalScroller}>{metricSignals.map((metric) => {
           const change = percentDelta(metric.value, metric.previous);
           const direction = change === null || Math.abs(change) < 0.05 ? "flat" : change > 0 ? "up" : "down";
-          return <button className={`${dashboardStyles.signalMetric}${chartMetric === metric.metric ? ` ${dashboardStyles.signalActive}` : ""}`} type="button" key={`${metric.label}-${dashboardRange}-${refreshVersion}`} onClick={() => setChartMetric(metric.metric)}>
+          return <article className={dashboardStyles.signalMetric} key={`${metric.label}-${dashboardRange}-${refreshVersion}`} data-dashboard-signal-metric={metric.metric} data-chart-active={activeChartMetricRef.current === metric.metric ? "" : undefined}>
             <span className={dashboardStyles.signalLabel}>{metric.icon}{metric.label}</span>
             <strong>{analyticsLoading && !analytics ? "—" : <AnimatedMetric value={metric.value} formatter={metric.formatter} />}</strong>
             <small className={dashboardStyles[direction]}>{direction === "up" ? <ArrowUpRight aria-hidden="true" /> : direction === "down" ? <ArrowDownRight aria-hidden="true" /> : <Minus aria-hidden="true" />}{change === null ? "No comparison" : `${change >= 0 ? "+" : "−"}${Math.abs(change).toFixed(1)}% vs prior ${analytics?.comparisonPeriod?.days ?? dashboardRange} days`}</small>
-          </button>;
+          </article>;
         })}</div>
       </section>
 
-      <ChannelPerformanceBrief key={`brief-${dashboardRange}-${refreshVersion}`} videos={strongestRows} traffic={traffic} trafficTotal={trafficTotal} current={current} selectedVideoId={selectedVideoId} twin={creatorTwin} showTwinReport={showCreatorTwinReport} animateTwinReveal={creatorTwinRevealActive} twinLoading={creatorTwinLoading} twinError={creatorTwinError} periodLabel={activeRangeLabel} onSelectVideo={selectVideo} onSelectTraffic={selectTraffic} onOpenTwin={openCreatorTwin} onBackToOverview={backToPerformanceOverview} onRescanTwin={() => void analyzeCreatorTwin(true)} onCreate={onCreateFromPattern} />
-
       <div className={dashboardStyles.insightGrid}>
-      <section className={dashboardStyles.timelinePanel} aria-labelledby="performance-timeline-heading">
-        <header className={dashboardStyles.timelineHeader}>
-          <div><h2 id="performance-timeline-heading">Performance over time</h2><p>{activePoint ? new Intl.DateTimeFormat("en", { month: "short", day: "numeric", year: "numeric" }).format(new Date(`${activePoint.date}T00:00:00Z`)) : `${analytics?.period.startDate || "Selected period"} — ${analytics?.period.endDate || "current"}`}</p></div>
-          <div className={dashboardStyles.metricTabs} role="tablist" aria-label="Performance Timeline metric"><button type="button" role="tab" aria-selected={chartMetric === "views"} className={chartMetric === "views" ? dashboardStyles.activeTab : ""} onClick={() => setChartMetric("views")}>Views</button><button type="button" role="tab" aria-selected={chartMetric === "watchMinutes"} className={chartMetric === "watchMinutes" ? dashboardStyles.activeTab : ""} onClick={() => setChartMetric("watchMinutes")}>Watch time</button><button type="button" role="tab" aria-selected={chartMetric === "netSubscribers"} className={chartMetric === "netSubscribers" ? dashboardStyles.activeTab : ""} onClick={() => setChartMetric("netSubscribers")}>Subscribers</button></div>
-        </header>
-        {analyticsLoading && !analytics ? <div className={dashboardStyles.chartSkeleton} aria-label="Loading Performance Timeline">{[48, 62, 54, 76, 68, 84, 72, 91, 78, 87, 82, 96].map((height, index) => <i key={`${height}-${index}`} style={{ "--skeleton-height": `${height}%` } as React.CSSProperties} />)}</div> : timeline.length ? <>
-          <div className={dashboardStyles.chartFrame} onPointerEnter={(event) => { chartBoundsRef.current = event.currentTarget.getBoundingClientRect(); }} onPointerMove={(event) => { const bounds = chartBoundsRef.current || event.currentTarget.getBoundingClientRect(); const ratio = Math.min(1, Math.max(0, (event.clientX - bounds.left) / Math.max(1, bounds.width))); queueChartHover(Math.round(ratio * Math.max(0, timeline.length - 1))); }} onPointerLeave={() => { chartBoundsRef.current = null; queueChartHover(null); }}>
-            <svg viewBox={`0 0 ${geometry.width} ${geometry.height}`} role="img" aria-label={`${chartMetric === "views" ? "Views" : chartMetric === "watchMinutes" ? "Watch time" : "Subscribers"} over the selected dates`} preserveAspectRatio="none">
-              {[0, 0.5, 1].map((position) => { const value = geometry.maximum - (geometry.maximum - geometry.minimum) * position; const lineY = geometry.y(value); return <line className={dashboardStyles.chartGrid} key={position} x1="14" x2="908" y1={lineY} y2={lineY} />; })}
-              {geometry.fillPath ? <path className={dashboardStyles.chartArea} d={geometry.fillPath} key={`area-${chartMetric}`} /> : null}
-              {geometry.comparisonPath ? <path className={`${dashboardStyles.chartLine} ${dashboardStyles.chartPrevious}`} d={geometry.comparisonPath} key={`previous-${chartMetric}`} /> : null}
-              {geometry.currentPath ? <path className={`${dashboardStyles.chartLine} ${dashboardStyles.chartCurrent}`} d={geometry.currentPath} key={`current-${chartMetric}`} /> : null}
-              {uploadMarkers.map(({ video, index }) => <g className={`${dashboardStyles.uploadMarker}${selectedVideoId === video.id ? ` ${dashboardStyles.selectedMarker}` : ""}`} key={video.id} role="button" tabIndex={0} aria-label={`Select upload ${video.title}`} onClick={() => selectVideo(video.id)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") selectVideo(video.id); }}><line x1={geometry.x(index, timeline.length)} x2={geometry.x(index, timeline.length)} y1={geometry.y(timeline[index][chartMetric]) + 8} y2={geometry.height - 29} /><circle cx={geometry.x(index, timeline.length)} cy={geometry.y(timeline[index][chartMetric])} r="6"><title>{video.title}</title></circle></g>)}
-              {hoveredChartIndex !== null && activePoint ? <><line className={dashboardStyles.chartScanner} x1={geometry.x(hoveredChartIndex, timeline.length)} x2={geometry.x(hoveredChartIndex, timeline.length)} y1="10" y2={geometry.height - 29} /><circle className={dashboardStyles.chartPoint} cx={geometry.x(hoveredChartIndex, timeline.length)} cy={geometry.y(activePoint[chartMetric])} r="4" /></> : null}
-            </svg>
-            <div className={dashboardStyles.chartAxisValues} aria-hidden="true">{[0, 0.5, 1].map((position) => { const value = geometry.maximum - (geometry.maximum - geometry.minimum) * position; const lineY = geometry.y(value); return <span key={position} data-chart-y-label style={{ top: `${(lineY / geometry.height) * 100}%` }}>{chartValue(value, chartMetric)}</span>; })}</div>
-            <div className={dashboardStyles.chartAxisDates} aria-hidden="true">{labelIndexes.map((index) => <span data-chart-date-label data-align={index === 0 ? "start" : index === timeline.length - 1 ? "end" : "middle"} key={timeline[index].date} style={{ left: `${(geometry.x(index, timeline.length) / geometry.width) * 100}%` }}>{new Intl.DateTimeFormat("en", { month: "short", day: "numeric" }).format(new Date(`${timeline[index].date}T00:00:00Z`))}</span>)}</div>
-            {activePoint && hoveredChartIndex !== null ? <div className={dashboardStyles.chartTooltip} style={{ left: `${(geometry.x(hoveredChartIndex, timeline.length) / geometry.width) * 100}%` }}><span>{new Intl.DateTimeFormat("en", { month: "short", day: "numeric", year: "numeric" }).format(new Date(`${activePoint.date}T00:00:00Z`))}</span><strong>{chartValue(activePoint[chartMetric], chartMetric)}</strong>{activeComparisonPoint ? <small>Previous: {chartValue(activeComparisonPoint[chartMetric], chartMetric)}</small> : null}</div> : null}
-          </div>
-          <div className={dashboardStyles.chartLegend}><span><i /> Current period</span>{comparison ? <span><i className={dashboardStyles.previousLegend} /> Previous period</span> : null}{uploadMarkers.length ? <span>{uploadMarkers.length} upload events</span> : null}</div>
-        </> : <p className={dashboardStyles.emptyChart}>There is no YouTube timeline data for these dates.</p>}
-      </section>
-      <aside className={dashboardStyles.changeBrief} aria-labelledby="change-brief-heading">
-        <header><h2 id="change-brief-heading">Signals worth acting on</h2></header>
-        <div>{diagnostics.slice(0, 3).map((diagnostic) => <button type="button" key={diagnostic.id} onClick={() => selectDiagnostic(diagnostic)}>
-          <span><small className={`${dashboardStyles.severity} ${dashboardStyles[diagnostic.severity]}`}><i />{diagnostic.severity}</small><strong>{diagnostic.title}</strong><b>{diagnostic.action}</b></span>
-          <ChevronRight aria-hidden="true" />
-        </button>)}</div>
-        <footer><button type="button" onClick={() => onCreateFromPattern(patternPrompt, leadingRow?.video)}>Build a follow-up <ArrowUpRight aria-hidden="true" /></button></footer>
-      </aside>
+      <PerformanceTimelinePanel timeline={timeline} comparisonTimeline={comparisonTimeline} uploadMarkers={uploadMarkers.map(({ video, index }) => ({ id: video.id, title: video.title, index }))} loading={analyticsLoading && !analytics} rangeLabel={activeRangeLabel} range={dashboardRange} selectedVideoId={selectedVideoId} onSelectUpload={selectVideo} onRangeChange={(range) => { setDashboardRange(range); setLedgerPage(1); }} onMetricChange={highlightChartMetric}>
+      <footer className={dashboardStyles.reportLauncher}>
+        <button type="button" aria-expanded={showPerformanceReport} onClick={togglePerformanceReport}>{showPerformanceReport ? <>Close report <X aria-hidden="true" /></> : <>Generate report <ArrowUpRight aria-hidden="true" /></>}</button>
+      </footer>
+      </PerformanceTimelinePanel>
       </div>
+
+      {showPerformanceReport ? <section className={dashboardStyles.performanceReport} aria-labelledby="performance-report-heading" ref={performanceReportRef}>
+        <header className={dashboardStyles.performanceReportHeader}>
+          <h2 id="performance-report-heading">Channel performance report</h2><span>{activeRangeLabel} · {diagnostics.length} findings</span>
+        </header>
+        <div className={dashboardStyles.performanceFindingList}>
+          {diagnostics.map((diagnostic, index) => {
+            const expanded = reportDiagnosticId === diagnostic.id;
+            return <article className={dashboardStyles.performanceFindingItem} data-expanded={expanded || undefined} key={`report-${diagnostic.id}`} style={{ "--finding-index": index } as React.CSSProperties}>
+              <button type="button" id={`report-finding-${diagnostic.id}`} aria-controls={`report-finding-detail-${diagnostic.id}`} aria-expanded={expanded} onClick={() => setReportDiagnosticId(expanded ? "" : diagnostic.id)}><strong>{diagnostic.title}</strong><ChevronDown aria-hidden="true" /></button>
+              {expanded ? <div className={dashboardStyles.performanceFindingDetail} id={`report-finding-detail-${diagnostic.id}`} role="region" aria-labelledby={`report-finding-${diagnostic.id}`}>
+                <div><span>Evidence</span><p>{diagnostic.why}</p></div>
+                <div><span>Next move</span><p>{diagnostic.action}</p></div>
+                <button type="button" onClick={() => generateDiagnosticFollowUp(diagnostic)}>Generate follow-up <ArrowUpRight aria-hidden="true" /></button>
+              </div> : null}
+            </article>;
+          })}
+        </div>
+      </section> : null}
 
       <section className={dashboardStyles.ledgerSection} aria-labelledby="video-ledger-heading">
         <header className={dashboardStyles.ledgerHeader}>
-          <div className={dashboardStyles.ledgerHeading}><h2 id="video-ledger-heading">Top videos</h2><p>{ledgerSort === "performance" ? `${ledgerSource.length} videos with activity in ${activeRangeLabel.toLowerCase()}, ranked by outlier ratio.` : `Views and subscribers in ${activeRangeLabel.toLowerCase()} compared with the previous ${analytics?.period.days ?? dashboardRange} days.`}</p></div>
+          <div className={dashboardStyles.ledgerHeading}><h2 id="video-ledger-heading">Top videos</h2></div>
           <div className={dashboardStyles.ledgerTools}>
-            <label className={dashboardStyles.ledgerSearch}><Search aria-hidden="true" /><span className={dashboardStyles.visuallyHidden}>Search videos</span><input type="search" value={ledgerQuery} onChange={(event) => setLedgerQuery(event.target.value)} placeholder="Search videos" /></label>
-            <div className={dashboardStyles.ledgerModeSwitch} role="tablist" aria-label="Top videos view">{([{ value: "performance", label: "Performance" }, { value: "period", label: "Period analytics" }] as const).map((item) => <button type="button" role="tab" key={item.value} aria-selected={ledgerSort === item.value} aria-controls="video-ledger-panel" onClick={() => setLedgerSort(item.value)}>{item.label}</button>)}</div>
+            <div className={dashboardStyles.ledgerSearch} role="search"><Search aria-hidden="true" /><InputText unstyled type="search" aria-label="Search top videos" value={ledgerQuery} onChange={(event) => { setLedgerQuery(event.target.value); setLedgerPage(1); }} placeholder="Search top videos" />{ledgerQuery ? <button type="button" className={dashboardStyles.ledgerSearchClear} aria-label="Clear video search" onClick={() => { setLedgerQuery(""); setLedgerPage(1); }}><X aria-hidden="true" /></button> : null}</div>
+            <div className={dashboardStyles.ledgerModeSwitch} role="tablist" aria-label="Top videos view">{([{ value: "performance", label: "Performance" }, { value: "period", label: "Period analytics" }] as const).map((item) => <button type="button" role="tab" key={item.value} aria-selected={ledgerSort === item.value} aria-controls="video-ledger-panel" onClick={() => { setLedgerSort(item.value); setLedgerPage(1); }}>{item.label}</button>)}</div>
           </div>
         </header>
         <div className={`${dashboardStyles.ledgerViewport}${ledgerSort === "period" ? ` ${dashboardStyles.ledgerViewportPeriod}` : ""}`} id="video-ledger-panel" role="tabpanel" aria-label={ledgerSort === "performance" ? "Video performance" : "Period analytics"}>
-          <div className={`${dashboardStyles.ledgerView} ${dashboardStyles[`ledgerView${ledgerSort[0].toUpperCase() + ledgerSort.slice(1)}`]}`} key={ledgerSort}>
+          <div className={`${dashboardStyles.ledgerView} ${dashboardStyles[`ledgerView${ledgerSort[0].toUpperCase() + ledgerSort.slice(1)}`]}`} key={`${ledgerSort}-${visibleLedgerPage}`}>
             {ledgerSort === "period" && analytics ? <div className={dashboardStyles.ledgerPeriodSummary}>
               <LedgerTrendChart label="Views" metric="views" currentValue={current?.views ?? null} previousValue={comparison?.views ?? null} timeline={timeline} comparisonTimeline={comparisonTimeline} days={analytics.period.days} />
               <LedgerTrendChart label="Net subscribers" metric="netSubscribers" currentValue={currentNet} previousValue={comparisonNet} timeline={timeline} comparisonTimeline={comparisonTimeline} days={analytics.period.days} />
@@ -2136,7 +2251,8 @@ function ChannelDashboard({
               <span className={dashboardStyles.ledgerMetricHeadings}><span>Total views</span><span>Subscribers</span><span>Likes</span></span>
               <span />
             </div> : null}
-            <div className={dashboardStyles.ledgerRows}>{ledgerRows.length ? ledgerRows.map(({ video, performance }, index) => {
+            <div className={dashboardStyles.ledgerRows}>{ledgerRows.length ? pagedLedgerRows.map(({ video, performance }, index) => {
+            const absoluteIndex = ledgerPageStart + index;
             const rowViews = performance?.views ?? video.views;
             const rowTotalViews = Math.max(video.views, rowViews);
             const outlierRatio = performance?.views !== null && performance?.views !== undefined && comparableViewMedian ? performance.views / comparableViewMedian : null;
@@ -2163,7 +2279,7 @@ function ChannelDashboard({
             };
             const action = <button className={dashboardStyles.ledgerCreateButton} type="button" onClick={(event) => { event.stopPropagation(); onCreateFromPattern(followUpPrompt, video); }} onKeyDown={(event) => event.stopPropagation()}>Make a video <ArrowUpRight aria-hidden="true" /></button>;
             const identity = <div className={dashboardStyles.ledgerVideoSummary}>
-              <span className={dashboardStyles.ledgerRank} aria-hidden="true">{String(index + 1).padStart(2, "0")}</span>
+              <span className={dashboardStyles.ledgerRank} aria-hidden="true">{String(absoluteIndex + 1).padStart(2, "0")}</span>
               <span className={dashboardStyles.ledgerVideo}>
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={video.thumbnailUrl} alt="" loading="lazy" />
@@ -2189,7 +2305,7 @@ function ChannelDashboard({
                 <span className={dashboardStyles.ledgerMeter}><i style={{ "--ledger-signal": Math.max(.07, subscriberStrength) } as React.CSSProperties} /></span>
                 <small>{subscriberYield === null ? "Conversion unavailable" : `${subscriberYield.toFixed(1)} per 1K views`}</small>
               </div>
-              <div className={dashboardStyles.ledgerRowAction}><span>Open details</span>{action}<ChevronRight aria-hidden="true" /></div>
+              <div className={dashboardStyles.ledgerRowAction}>{action}<ChevronRight aria-hidden="true" /></div>
             </article>;
 
             return <article className={`${dashboardStyles.ledgerIntelligenceRow} ${dashboardStyles.ledgerPerformanceRow}${selectedVideoId === video.id ? ` ${dashboardStyles.ledgerSelected}` : ""}`} key={video.id} {...rowProps}>
@@ -2204,6 +2320,33 @@ function ChannelDashboard({
           }) : <p className={dashboardStyles.ledgerEmpty}>{analyticsLoading ? "Loading period video data." : ledgerQuery ? "No period videos match this search." : "No videos recorded activity in this period."}</p>}</div>
           </div>
         </div>
+        {ledgerRows.length > TOP_VIDEOS_PAGE_SIZE ? <footer className={dashboardStyles.ledgerPagination} aria-label="Top videos pagination">
+          <span>{ledgerPageStart + 1}–{Math.min(ledgerPageStart + TOP_VIDEOS_PAGE_SIZE, ledgerRows.length)} of {ledgerRows.length}</span>
+          <Paginator
+            unstyled
+            className={dashboardStyles.ledgerPaginator}
+            first={ledgerPageStart}
+            rows={TOP_VIDEOS_PAGE_SIZE}
+            totalRecords={ledgerRows.length}
+            pageLinkSize={6}
+            template={{
+              layout: "PrevPageLink PageLinks NextPageLink",
+              PageLinks: (options) => <button
+                type="button"
+                className={`${dashboardStyles.ledgerPaginatorButton}${options.page === visibleLedgerPage - 1 ? ` ${dashboardStyles.ledgerPaginatorActive}` : ""}`}
+                aria-label={`Page ${options.page + 1}`}
+                aria-current={options.page === visibleLedgerPage - 1 ? "page" : undefined}
+                onClick={options.onClick}
+              >{options.page + 1}</button>,
+            }}
+            onPageChange={(event) => setLedgerPage(event.page + 1)}
+            pt={{
+              pages: { className: dashboardStyles.ledgerPaginatorPages },
+              prevPageButton: { className: dashboardStyles.ledgerPaginatorButton },
+              nextPageButton: { className: dashboardStyles.ledgerPaginatorButton },
+            }}
+          />
+        </footer> : null}
       </section>
     </div>
 
@@ -2213,7 +2356,7 @@ function ChannelDashboard({
         {drawerMode === "video" && selectedVideo ? <>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img className={dashboardStyles.drawerThumbnail} src={selectedVideo.thumbnailUrl} alt={`${selectedVideo.title} thumbnail`} />
-          <div className={dashboardStyles.drawerTitle}><span>{formatTime(selectedVideo.publishedAt)}</span><h3>{selectedVideo.title}</h3></div><dl className={dashboardStyles.drawerMetrics}><div><dt>Total views</dt><dd>{formatDashboardCompact(selectedVideo.views)}</dd></div><div><dt>Period views</dt><dd>{selectedPerformance?.views === null || selectedPerformance?.views === undefined ? "—" : formatDashboardCompact(selectedPerformance.views)}</dd></div><div><dt>Outlier ratio</dt><dd>{selectedPerformance?.views !== null && selectedPerformance?.views !== undefined && comparableViewMedian ? `${(selectedPerformance.views / comparableViewMedian).toFixed(1)}×` : "—"}</dd></div><div><dt>Likes</dt><dd>{selectedPerformance?.likes === null || selectedPerformance?.likes === undefined ? "—" : formatDashboardCompact(selectedPerformance.likes)}</dd></div><div><dt>Comments</dt><dd>{selectedPerformance?.comments === null || selectedPerformance?.comments === undefined ? "—" : formatDashboardCompact(selectedPerformance.comments)}</dd></div><div><dt>Comment rate</dt><dd>{selectedPerformance?.commentRate === null || selectedPerformance?.commentRate === undefined ? "—" : `${selectedPerformance.commentRate.toFixed(2)}%`}</dd></div><div><dt>Average duration</dt><dd>{selectedPerformance?.averageViewDuration === null || selectedPerformance?.averageViewDuration === undefined ? "—" : formatDashboardDuration(selectedPerformance.averageViewDuration)}</dd></div><div><dt>Average viewed</dt><dd>{selectedPerformance?.averageViewPercentage === null || selectedPerformance?.averageViewPercentage === undefined ? "—" : formatDashboardPercent(selectedPerformance.averageViewPercentage)}</dd></div><div><dt>Watch time</dt><dd>{selectedPerformance?.watchMinutes === null || selectedPerformance?.watchMinutes === undefined ? "—" : formatDashboardWatchTime(selectedPerformance.watchMinutes)}</dd></div><div><dt>Subscribers</dt><dd>{selectedPerformance ? formatDashboardNet(selectedPerformance.netSubscribers) : "—"}</dd></div></dl><div className={dashboardStyles.drawerDiagnostics}><span>Related diagnostics</span>{diagnostics.filter((diagnostic) => diagnostic.videoId === selectedVideo.id).map((diagnostic) => <button type="button" key={diagnostic.id} onClick={() => selectDiagnostic(diagnostic)}><strong>{diagnostic.title}</strong><small>{diagnostic.action}</small><ChevronRight aria-hidden="true" /></button>)}</div><div className={dashboardStyles.drawerActions}><a href={selectedVideo.url} target="_blank" rel="noreferrer">Open video <ExternalLink aria-hidden="true" /></a><button type="button" onClick={() => onUseVideo(selectedVideo)}>Create from this <ArrowUpRight aria-hidden="true" /></button><button type="button" onClick={() => onCreateFromPattern(patternPrompt, selectedVideo)}>Generate follow-up idea</button></div>
+          <div className={dashboardStyles.drawerTitle}><span>{formatTime(selectedVideo.publishedAt)}</span><h3>{selectedVideo.title}</h3></div><dl className={dashboardStyles.drawerMetrics}><div><dt>Total views</dt><dd>{formatDashboardCompact(selectedVideo.views)}</dd></div><div><dt>Period views</dt><dd>{selectedPerformance?.views === null || selectedPerformance?.views === undefined ? "—" : formatDashboardCompact(selectedPerformance.views)}</dd></div><div><dt>Outlier ratio</dt><dd>{selectedPerformance?.views !== null && selectedPerformance?.views !== undefined && comparableViewMedian ? `${(selectedPerformance.views / comparableViewMedian).toFixed(1)}×` : "—"}</dd></div><div><dt>Likes</dt><dd>{selectedPerformance?.likes === null || selectedPerformance?.likes === undefined ? "—" : formatDashboardCompact(selectedPerformance.likes)}</dd></div><div><dt>Comments</dt><dd>{selectedPerformance?.comments === null || selectedPerformance?.comments === undefined ? "—" : formatDashboardCompact(selectedPerformance.comments)}</dd></div><div><dt>Comment rate</dt><dd>{selectedPerformance?.commentRate === null || selectedPerformance?.commentRate === undefined ? "—" : `${selectedPerformance.commentRate.toFixed(2)}%`}</dd></div><div><dt>Average duration</dt><dd>{selectedPerformance?.averageViewDuration === null || selectedPerformance?.averageViewDuration === undefined ? "—" : formatDashboardDuration(selectedPerformance.averageViewDuration)}</dd></div><div><dt>Average viewed</dt><dd>{selectedPerformance?.averageViewPercentage === null || selectedPerformance?.averageViewPercentage === undefined ? "—" : formatDashboardPercent(selectedPerformance.averageViewPercentage)}</dd></div><div><dt>Watch time</dt><dd>{selectedPerformance?.watchMinutes === null || selectedPerformance?.watchMinutes === undefined ? "—" : formatDashboardWatchTime(selectedPerformance.watchMinutes)}</dd></div><div><dt>Subscribers</dt><dd>{selectedPerformance ? formatDashboardNet(selectedPerformance.netSubscribers) : "—"}</dd></div></dl><div className={dashboardStyles.drawerActions}><a href={selectedVideo.url} target="_blank" rel="noreferrer">Open video <ExternalLink aria-hidden="true" /></a><button type="button" onClick={() => onUseVideo(selectedVideo)}>Create from this <ArrowUpRight aria-hidden="true" /></button></div>
         </> : null}
         {drawerMode === "diagnostic" ? <div className={dashboardStyles.diagnosticDetail}><span className={`${dashboardStyles.severity} ${dashboardStyles[selectedDiagnostic.severity]}`}><i />{selectedDiagnostic.severity}</span><h3>{selectedDiagnostic.title}</h3><dl><div><dt>Where it happened</dt><dd>{selectedDiagnostic.where}</dd></div><div><dt>Evidence</dt><dd>{selectedDiagnostic.why}</dd></div><div><dt>Recommended action</dt><dd>{selectedDiagnostic.action}</dd></div></dl>{selectedDiagnostic.videoId && videoById.get(selectedDiagnostic.videoId) ? <button className={dashboardStyles.relatedVideoButton} type="button" onClick={() => selectVideo(selectedDiagnostic.videoId!)}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -2226,7 +2369,7 @@ function ChannelDashboard({
   </section>;
 }
 
-export default function Home() {
+export default function Home({ initialView = "create" }: StanleyAppProps = {}) {
   const topicRef = useRef<HTMLTextAreaElement>(null);
   const conversationEndRef = useRef<HTMLDivElement>(null);
   const latestAssistantRef = useRef<HTMLElement>(null);
@@ -2236,10 +2379,12 @@ export default function Home() {
   const videoInputRef = useRef<HTMLInputElement>(null);
   const attachmentButtonRef = useRef<HTMLButtonElement>(null);
   const attachmentMenuRef = useRef<HTMLDivElement>(null);
+  const creatorMenuRef = useRef<HTMLDivElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const recordingTimerRef = useRef<number | null>(null);
   const dashboardVideosRequestedRef = useRef(false);
+  const willVideosRequestedRef = useRef(false);
   const [topic, setTopic] = useState("");
   const [mode, setMode] = useState<CreationMode>("auto");
   const [originalTopic, setOriginalTopic] = useState("");
@@ -2266,12 +2411,38 @@ export default function Home() {
   const [selectedVideoId, setSelectedVideoId] = useState("");
   const [videosLoading, setVideosLoading] = useState(false);
   const [videosError, setVideosError] = useState("");
+  const [willVideos, setWillVideos] = useState<YouTubeVideoOption[]>([]);
+  const [willVideosLoading, setWillVideosLoading] = useState(false);
+  const [willVideosError, setWillVideosError] = useState("");
   const [recording, setRecording] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const [transcribing, setTranscribing] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [activeView, setActiveView] = useState<WorkspaceView>("create");
+  const [activeView, setActiveView] = useState<WorkspaceView>(initialView);
+  const [creatorProfile, setCreatorProfile] = useState<CreatorProfileId>("connected");
+  const [creatorMenuOpen, setCreatorMenuOpen] = useState(false);
+  const [willProfile, setWillProfile] = useState<YouTubeProfile>({
+    id: `demo:${WILL_TENNYSON_DEMO.id}`,
+    title: WILL_TENNYSON_DEMO.title,
+    thumbnailUrl: "",
+    subscriberCount: 0,
+    videoCount: 0,
+    totalViews: 0,
+    analyzedAt: "demo",
+  });
 
+  useEffect(() => {
+    const syncRoute = () => {
+      const nextView: WorkspaceView = window.location.pathname === "/dashboard" ? "dashboard" : window.location.pathname === "/creator-twin" ? "creatorTwin" : "create";
+      setActiveView(nextView);
+      if (window.location.pathname === "/") {
+        window.history.replaceState({}, "", `/chat${window.location.search}${window.location.hash}`);
+      }
+    };
+    syncRoute();
+    window.addEventListener("popstate", syncRoute);
+    return () => window.removeEventListener("popstate", syncRoute);
+  }, []);
   useEffect(() => {
     if (!attachmentMenuOpen) return;
 
@@ -2295,10 +2466,43 @@ export default function Home() {
     };
   }, [attachmentMenuOpen]);
   useEffect(() => {
+    if (!creatorMenuOpen) return;
+
+    function closeCreatorMenu(event: PointerEvent) {
+      if (!(event.target instanceof Node) || creatorMenuRef.current?.contains(event.target)) return;
+      setCreatorMenuOpen(false);
+    }
+
+    function closeCreatorMenuWithKeyboard(event: globalThis.KeyboardEvent) {
+      if (event.key === "Escape") setCreatorMenuOpen(false);
+    }
+
+    document.addEventListener("pointerdown", closeCreatorMenu);
+    document.addEventListener("keydown", closeCreatorMenuWithKeyboard);
+    return () => {
+      document.removeEventListener("pointerdown", closeCreatorMenu);
+      document.removeEventListener("keydown", closeCreatorMenuWithKeyboard);
+    };
+  }, [creatorMenuOpen]);
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetch(`/api/youtube/demo-profile?creator=${WILL_TENNYSON_DEMO.id}`, { signal: controller.signal })
+      .then(async (response) => {
+        const payload = await response.json() as { profile?: YouTubeProfile };
+        if (response.ok && payload.profile) setWillProfile(payload.profile);
+      })
+      .catch(() => undefined);
+    return () => controller.abort();
+  }, []);
+  useEffect(() => {
     let active = true;
     let analysisTimer: number | undefined;
     const draftsTimer = window.setTimeout(() => setDrafts(readDrafts()), 0);
     const sidebarTimer = window.setTimeout(() => setSidebarCollapsed(window.localStorage.getItem(SIDEBAR_KEY) === "true"), 0);
+    const creatorProfileTimer = window.setTimeout(() => {
+      const savedCreatorProfile = window.localStorage.getItem(CREATOR_PROFILE_KEY);
+      if (isCreatorProfileId(savedCreatorProfile)) setCreatorProfile(savedCreatorProfile);
+    }, 0);
 
     async function initialize() {
       const params = new URLSearchParams(window.location.search);
@@ -2374,6 +2578,7 @@ export default function Home() {
       active = false;
       window.clearTimeout(draftsTimer);
       window.clearTimeout(sidebarTimer);
+      window.clearTimeout(creatorProfileTimer);
       if (analysisTimer) window.clearTimeout(analysisTimer);
       delete document.documentElement.dataset.stanleyReady;
     };
@@ -2388,7 +2593,7 @@ export default function Home() {
       setVideosLoading(true);
       setVideosError("");
       try {
-        const response = await fetch("/api/youtube/videos", { cache: "no-store", signal: controller.signal });
+        const response = await fetch("/api/youtube/videos", { signal: controller.signal });
         const payload = await response.json() as { videos?: YouTubeVideoOption[]; error?: string };
         if (!response.ok) throw new Error(payload.error || "Your videos could not be loaded.");
         setYouTubeVideos(selectableYouTubeVideos(payload.videos || []));
@@ -2403,6 +2608,31 @@ export default function Home() {
     void loadDashboardVideos();
     return () => controller.abort();
   }, [onboardingStep, youtubeStatus.connected]);
+
+  useEffect(() => {
+    if (onboardingStep !== "done" || creatorProfile !== WILL_TENNYSON_DEMO.id || willVideosRequestedRef.current) return;
+    willVideosRequestedRef.current = true;
+    const controller = new AbortController();
+
+    async function loadWillVideos() {
+      setWillVideosLoading(true);
+      setWillVideosError("");
+      try {
+        const response = await fetch(`/api/youtube/demo-videos?creator=${WILL_TENNYSON_DEMO.id}`, { signal: controller.signal });
+        const payload = await response.json() as { videos?: YouTubeVideoOption[]; error?: string };
+        if (!response.ok) throw new Error(payload.error || "Will's public videos could not be loaded.");
+        setWillVideos(selectableYouTubeVideos(payload.videos || []));
+      } catch (caught) {
+        if (controller.signal.aborted) return;
+        setWillVideosError(caught instanceof Error ? caught.message : "Will's public videos could not be loaded.");
+      } finally {
+        if (!controller.signal.aborted) setWillVideosLoading(false);
+      }
+    }
+
+    void loadWillVideos();
+    return () => controller.abort();
+  }, [creatorProfile, onboardingStep]);
 
   useEffect(() => {
     if (messages.length > 0 || topic || loading || recording || transcribing) return;
@@ -2512,6 +2742,7 @@ export default function Home() {
       })),
       titles: firstTitleResponse?.titles,
       research: firstTitleResponse?.research,
+      creatorProfile,
     };
     const next = [updated, ...current.filter((draft) => draft.id !== id)].slice(0, 8);
     const storageSafe = next.map((draft) => ({
@@ -2615,6 +2846,7 @@ export default function Home() {
           topic: rootTopic,
           mode,
           sessionId: activeSessionId,
+          creatorProfile,
           attachments: requestAttachments.map((attachment) => ({
             kind: attachment.kind,
             name: attachment.name,
@@ -2737,10 +2969,18 @@ export default function Home() {
     setNotice(value === "up" ? "Marked as helpful" : "Feedback noted");
   }
 
+  function navigateWorkspace(view: WorkspaceView, replace = false) {
+    const path = view === "dashboard" ? "/dashboard" : view === "creatorTwin" ? "/creator-twin" : "/chat";
+    if (window.location.pathname !== path) {
+      window.history[replace ? "replaceState" : "pushState"]({}, "", path);
+    }
+    setActiveView(view);
+  }
+
   function openDraft(draft: Draft) {
     replyRunRef.current += 1;
     setUploadedVideoCache(new Map());
-    setActiveView("create");
+    navigateWorkspace("create");
     setSessionId(draft.id);
     setOriginalTopic(draft.topic);
     setMessages(restoreMessages(draft));
@@ -2750,6 +2990,9 @@ export default function Home() {
     setAttachments([]);
     setAttachmentMenuOpen(false);
     setMode("auto");
+    const draftCreatorProfile = isCreatorProfileId(draft.creatorProfile) ? draft.creatorProfile : "connected";
+    setCreatorProfile(draftCreatorProfile);
+    window.localStorage.setItem(CREATOR_PROFILE_KEY, draftCreatorProfile);
     setError("");
     window.setTimeout(() => topicRef.current?.focus(), 250);
   }
@@ -2757,7 +3000,7 @@ export default function Home() {
   function startNewChat() {
     replyRunRef.current += 1;
     setUploadedVideoCache(new Map());
-    setActiveView("create");
+    navigateWorkspace("create");
     setTopic("");
     setMode("auto");
     setOriginalTopic("");
@@ -2773,6 +3016,17 @@ export default function Home() {
     window.setTimeout(() => topicRef.current?.focus(), 0);
   }
 
+  function switchCreatorProfile(nextProfile: CreatorProfileId) {
+    setCreatorMenuOpen(false);
+    if (nextProfile === creatorProfile) return;
+    setCreatorProfile(nextProfile);
+    window.localStorage.setItem(CREATOR_PROFILE_KEY, nextProfile);
+    if (activeView === "create") startNewChat();
+    setNotice(nextProfile === "connected"
+      ? `Now creating for ${youtubeStatus.profile?.title || "your connected channel"}`
+      : `Demo workspace loaded for ${WILL_TENNYSON_DEMO.title}`);
+  }
+
   function continueOnboarding() {
     setYouTubeError("");
     setOnboardingDirection("forward");
@@ -2786,7 +3040,7 @@ export default function Home() {
   }
 
   function connectYouTube() {
-    window.location.assign("/api/youtube/connect?returnTo=/");
+    window.location.assign("/api/youtube/connect?returnTo=/chat");
   }
 
   async function disconnectYouTube() {
@@ -2804,7 +3058,7 @@ export default function Home() {
 
   function skipOnboarding() {
     window.localStorage.setItem(ONBOARDING_KEY, "skipped");
-    setActiveView("create");
+    navigateWorkspace("create", true);
     setOnboardingStep("done");
     window.setTimeout(() => topicRef.current?.focus(), 0);
   }
@@ -2890,7 +3144,7 @@ export default function Home() {
     setVideosLoading(true);
     setVideosError("");
     try {
-      const response = await fetch("/api/youtube/videos", { cache: "no-store" });
+      const response = await fetch("/api/youtube/videos");
       const payload = await response.json() as { videos?: YouTubeVideoOption[]; error?: string };
       if (!response.ok) throw new Error(payload.error || "Your videos could not be loaded.");
       setYouTubeVideos(selectableYouTubeVideos(payload.videos || []));
@@ -3023,7 +3277,7 @@ export default function Home() {
 
   function openTool(item: (typeof NAV_ITEMS)[number]) {
     if (item.view) {
-      setActiveView(item.view);
+      navigateWorkspace(item.view);
       if (item.view === "create") window.setTimeout(() => topicRef.current?.focus(), 0);
       return;
     }
@@ -3055,12 +3309,28 @@ export default function Home() {
   }
 
   async function refreshDashboard() {
+    if (creatorProfile === WILL_TENNYSON_DEMO.id) {
+      willVideosRequestedRef.current = true;
+      setWillVideosLoading(true);
+      setWillVideosError("");
+      try {
+        const response = await fetch(`/api/youtube/demo-videos?creator=${WILL_TENNYSON_DEMO.id}&refresh=true`, { cache: "no-store" });
+        const payload = await response.json() as { videos?: YouTubeVideoOption[]; error?: string };
+        if (!response.ok) throw new Error(payload.error || "Will's public videos could not be loaded.");
+        setWillVideos(selectableYouTubeVideos(payload.videos || []));
+      } catch (caught) {
+        setWillVideosError(caught instanceof Error ? caught.message : "Will's public videos could not be loaded.");
+      } finally {
+        setWillVideosLoading(false);
+      }
+      return;
+    }
     if (!youtubeStatus.connected) return;
     dashboardVideosRequestedRef.current = true;
     setVideosLoading(true);
     setVideosError("");
     try {
-      const response = await fetch("/api/youtube/videos", { cache: "no-store" });
+      const response = await fetch("/api/youtube/videos?refresh=true", { cache: "no-store" });
       const payload = await response.json() as { videos?: YouTubeVideoOption[]; error?: string };
       if (!response.ok) throw new Error(payload.error || "Your videos could not be loaded.");
       setYouTubeVideos(selectableYouTubeVideos(payload.videos || []));
@@ -3075,6 +3345,13 @@ export default function Home() {
   const streamingReply = messages.some((message) => message.streaming);
   const latestAssistantMessageId = [...messages].reverse().find((message) => message.role === "assistant")?.id;
   const latestScriptMessageId = [...messages].reverse().find((message) => message.script)?.id;
+  const publicDemoSelected = creatorProfile === WILL_TENNYSON_DEMO.id;
+  const activeDashboardStatus: YouTubeStatus = publicDemoSelected
+    ? { configured: true, connected: true, profile: willProfile }
+    : youtubeStatus;
+  const activeDashboardVideos = publicDemoSelected ? willVideos : youtubeVideos;
+  const activeDashboardLoading = publicDemoSelected ? willVideosLoading : videosLoading;
+  const activeDashboardError = publicDemoSelected ? willVideosError : videosError;
   const composerPlaceholder = transcribing ? "Transcribing your voice message…" : "";
   const filteredYoutubeVideos = youtubeVideos.filter((video) =>
     ["public", "private", "unlisted"].includes(video.privacyStatus)
@@ -3195,17 +3472,20 @@ export default function Home() {
           </a>
         </div>
 
-        <button className="sidebar-new-chat-button" type="button" onClick={startNewChat} title={sidebarCollapsed ? "New chat" : undefined}><NewChatIcon /><span>New chat</span></button>
+        <a className="sidebar-new-chat-button" href="/chat" onClick={(event) => { event.preventDefault(); startNewChat(); }} title={sidebarCollapsed ? "New chat" : undefined}><NewChatIcon /><span>New chat</span></a>
 
         <nav aria-label="Stanley tools">
           {NAV_ITEMS.map((item) => {
             const active = item.view === activeView;
             return (
             <div className={active ? "nav-item active" : "nav-item"} data-label={item.label} key={item.label}>
-              <button className="nav-tool-button" type="button" onClick={() => openTool(item)} aria-current={active ? "page" : undefined}>
+              {item.view ? <a className="nav-tool-button" href={item.view === "dashboard" ? "/dashboard" : item.view === "creatorTwin" ? "/creator-twin" : "/chat"} onClick={(event) => { event.preventDefault(); openTool(item); }} aria-current={active ? "page" : undefined}>
                 <span className="nav-icon" aria-hidden="true"><ToolIcon name={item.icon} /></span>
                 <span>{item.label}</span>
-              </button>
+              </a> : <button className="nav-tool-button" type="button" onClick={() => openTool(item)}>
+                <span className="nav-icon" aria-hidden="true"><ToolIcon name={item.icon} /></span>
+                <span>{item.label}</span>
+              </button>}
             </div>
           )})}
         </nav>
@@ -3244,10 +3524,30 @@ export default function Home() {
       <section className="main-panel">
         <header className="main-header">
           <span className="header-balance" />
-          {youtubeStatus.connected && youtubeStatus.profile ? <div className="channel-connection" title={`${youtubeStatus.profile.title} YouTube channel`}>
-            <YouTubeAvatar profile={youtubeStatus.profile} />
-            <span className="channel-copy"><strong>{youtubeStatus.profile.title}</strong><small><i /> YouTube channel</small></span>
-            <button className="channel-disconnect" type="button" onClick={() => void disconnectYouTube()} title={`Disconnect ${youtubeStatus.profile.title}`} aria-label={`Disconnect ${youtubeStatus.profile.title}`}><LogOut aria-hidden="true" /></button>
+          {youtubeStatus.connected && youtubeStatus.profile ? <div className="creator-switcher" ref={creatorMenuRef}>
+            <button className="channel-connection channel-trigger" type="button" onClick={() => setCreatorMenuOpen((current) => !current)} aria-expanded={creatorMenuOpen} aria-haspopup="menu" aria-controls="creator-profile-menu" aria-label={`Switch creator profile. Current: ${publicDemoSelected ? WILL_TENNYSON_DEMO.title : youtubeStatus.profile.title}`} title="Switch creator profile">
+              <YouTubeAvatar profile={publicDemoSelected ? willProfile : youtubeStatus.profile} direct={publicDemoSelected} />
+              <span className="channel-copy">
+                <strong>{publicDemoSelected ? WILL_TENNYSON_DEMO.title : youtubeStatus.profile.title}</strong>
+                <small><i />{publicDemoSelected ? "Public demo" : "Your channel"}</small>
+              </span>
+              <ChevronDown className="channel-chevron" aria-hidden="true" />
+            </button>
+            {creatorMenuOpen && <div className="creator-profile-menu" id="creator-profile-menu" role="menu" aria-label="Switch creator profile">
+              <div className="creator-menu-heading"><strong>Creative profile</strong></div>
+              <button className="creator-profile-option" type="button" role="menuitemradio" aria-checked={creatorProfile === "connected"} onClick={() => switchCreatorProfile("connected")}>
+                <YouTubeAvatar profile={youtubeStatus.profile} alt={youtubeStatus.profile.title} />
+                <span><strong>{youtubeStatus.profile.title}</strong><small>Your channel · Private analytics</small></span>
+                <Check aria-hidden="true" />
+              </button>
+              <button className="creator-profile-option" type="button" role="menuitemradio" aria-checked={creatorProfile === WILL_TENNYSON_DEMO.id} onClick={() => switchCreatorProfile(WILL_TENNYSON_DEMO.id)}>
+                <YouTubeAvatar profile={willProfile} alt={WILL_TENNYSON_DEMO.title} direct />
+                <span><strong>{WILL_TENNYSON_DEMO.title}</strong><small>Demo · {willProfile.subscriberCount ? `${formatViews(willProfile.subscriberCount)} subscribers` : "Public channel data"}</small></span>
+                <Check aria-hidden="true" />
+              </button>
+              <div className="creator-menu-separator" />
+              <button className="creator-disconnect" type="button" role="menuitem" onClick={() => { setCreatorMenuOpen(false); void disconnectYouTube(); }}><LogOut aria-hidden="true" /><span>Disconnect YouTube</span></button>
+            </div>}
           </div> : <button className="youtube-connect-header" type="button" onClick={connectYouTube}><YouTubeIcon /><span>Connect YouTube</span></button>}
           <div className="header-actions">
             {activeView === "create" && sessionId && <button className="debug-session" type="button" onClick={copySessionId} title={`Copy session ID: ${sessionId}`} aria-label="Copy session ID"><DebugIcon /><span>Debug</span><code>{sessionId.slice(0, 8)}</code></button>}
@@ -3255,16 +3555,18 @@ export default function Home() {
         </header>
 
         <ChannelDashboard
-          active={activeView === "dashboard"}
-          status={youtubeStatus}
-          videos={youtubeVideos}
-          loading={videosLoading}
-          error={videosError}
+          active={activeView === "dashboard" || activeView === "creatorTwin"}
+          surface={activeView === "creatorTwin" ? "creatorTwin" : "dashboard"}
+          status={activeDashboardStatus}
+          videos={activeDashboardVideos}
+          loading={activeDashboardLoading}
+          error={activeDashboardError}
           onConnect={connectYouTube}
-          onCreate={() => startDashboardPrompt("Analyze my channel and give me three strong video ideas for my next upload")}
+          onCreate={() => startDashboardPrompt(publicDemoSelected ? `Analyze ${WILL_TENNYSON_DEMO.title}'s public channel and give me three strong video ideas` : "Analyze my channel and give me three strong video ideas for my next upload")}
           onCreateFromPattern={(prompt, video) => startDashboardPrompt(prompt, video)}
           onUseVideo={(video) => startDashboardPrompt(`Analyze this upload and help me build a stronger follow-up video: ${video.title}`, video)}
           onRefresh={() => void refreshDashboard()}
+          publicOnly={publicDemoSelected}
         />
         {activeView === "create" ? <>
         <div className={inConversation ? "content conversation-mode" : "content"}>

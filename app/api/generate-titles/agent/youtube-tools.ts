@@ -29,6 +29,7 @@ type YouTubeToolOptions = {
   allowPublicSearch?: boolean;
   allowChannelSnapshot?: boolean;
   allowVideoEvidence?: boolean;
+  fixedPublicChannelName?: string;
 };
 
 type SearchResponse = {
@@ -254,7 +255,8 @@ function searchReferenceVideosTool(options: YouTubeToolOptions): ToolDefinition 
       };
     },
     async execute(args, context) {
-      const channelName = typeof args.channelName === "string" ? args.channelName.trim() : "";
+      const channelName = options.fixedPublicChannelName?.trim()
+        || (typeof args.channelName === "string" ? args.channelName.trim() : "");
       const requestedQuery = typeof args.query === "string" ? args.query : "";
       const query = focusResearchQuery(requestedQuery, options.researchTopic);
       const maxResults = Number(args.maxResults || 12);

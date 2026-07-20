@@ -36,12 +36,15 @@ yarn-error.log*
 dev.out.log
 dev.err.log
 .stanley-*.log
+.codex-dev.*.log
+/.codex-local/
 
 # vercel
 .vercel
 
 # typescript
 next-env.d.ts
+*.tsbuildinfo
 /dist/
 /.wrangler/
 /outputs/

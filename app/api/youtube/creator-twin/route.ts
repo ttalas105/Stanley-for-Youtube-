@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
+import { publicDemoCreator } from "../../../creator-profiles";
+import { loadDemoVideos } from "../demo-videos/route";
 import { fetchChannelVideos, readYouTubeSession, youtubeDataApiUrl, type YouTubeSession, type YouTubeVideoReference } from "../oauth";
+import { PUBLIC_DEMO_CACHE } from "../server-cache";
 
 type PublicVideo = YouTubeVideoReference & { channelId: string; channelTitle: string };
+type YouTubeCredential = { accessToken: string; apiKey?: never } | { apiKey: string; accessToken?: never };
 
 type ChannelDetails = {
   id: string;
@@ -212,21 +216,26 @@ export function scoreCreatorSimilarity(own: VideoSummary, candidate: VideoSummar
   };
 }
 
-async function youtubeJson<T>(url: URL, accessToken: string) {
-  const response = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
-  if (!response.ok) throw new Error("YouTube could not load the channel information.");
-  return response.json() as Promise<T>;
+async function youtubeJson<T>(url: URL, credential: YouTubeCredential) {
+  const requestUrl = new URL(url);
+  const headers = new Headers();
+  if ("apiKey" in credential) requestUrl.searchParams.set("key", credential.apiKey);
+  else headers.set("Authorization", `Bearer ${credential.accessToken}`);
+  const response = await fetch(requestUrl, { headers, cache: "no-store", signal: AbortSignal.timeout(8_000) });
+  const payload = await response.json() as T & { error?: { message?: string } };
+  if (!response.ok) throw new Error(payload.error?.message || "YouTube could not load the channel information.");
+  return payload;
 }
 
-async function searchComparableChannels(accessToken: string, query: string) {
+async function searchComparableChannels(credential: YouTubeCredential, query: string) {
   type SearchResponse = { items?: Array<{ id?: { channelId?: string }; snippet?: { channelId?: string } }> };
   const [similarChannels, highViewVideos] = await Promise.all([
     youtubeJson<SearchResponse>(youtubeDataApiUrl("search", {
       part: "snippet", type: "channel", order: "relevance", q: query, maxResults: "12",
-    }), accessToken).catch(() => ({ items: [] })),
+    }), credential).catch(() => ({ items: [] })),
     youtubeJson<SearchResponse>(youtubeDataApiUrl("search", {
       part: "snippet", type: "video", order: "viewCount", q: query, maxResults: "16",
-    }), accessToken).catch(() => ({ items: [] })),
+    }), credential).catch(() => ({ items: [] })),
   ]);
   const ids = new Set<string>();
   for (const item of similarChannels.items || []) if (item.id?.channelId) ids.add(item.id.channelId);
@@ -234,7 +243,7 @@ async function searchComparableChannels(accessToken: string, query: string) {
   return [...ids].slice(0, 18);
 }
 
-async function fetchPublicVideos(accessToken: string, ids: string[]): Promise<PublicVideo[]> {
+async function fetchPublicVideos(credential: YouTubeCredential, ids: string[]): Promise<PublicVideo[]> {
   if (!ids.length) return [];
   type VideosResponse = { items?: Array<{
     id: string;
@@ -246,7 +255,7 @@ async function fetchPublicVideos(accessToken: string, ids: string[]): Promise<Pu
   const chunks = Array.from({ length: Math.ceil(ids.length / 50) }, (_, index) => ids.slice(index * 50, index * 50 + 50));
   const responses = await Promise.all(chunks.map((chunk) => youtubeJson<VideosResponse>(youtubeDataApiUrl("videos", {
     part: "snippet,statistics,contentDetails,status", id: chunk.join(","),
-  }), accessToken)));
+  }), credential)));
   return responses.flatMap((response) => response.items || []).flatMap((video) => {
     if (!video.snippet?.channelId || video.status?.privacyStatus !== "public") return [];
     return [{
@@ -264,15 +273,16 @@ async function fetchPublicVideos(accessToken: string, ids: string[]): Promise<Pu
   });
 }
 
-async function fetchChannels(accessToken: string, ids: string[]) {
-  const response = await youtubeJson<{ items?: Array<{
+type ChannelItem = {
     id: string;
     snippet?: { title?: string; description?: string; customUrl?: string; thumbnails?: { high?: { url?: string }; medium?: { url?: string }; default?: { url?: string } } };
     statistics?: { subscriberCount?: string };
     contentDetails?: { relatedPlaylists?: { uploads?: string } };
     topicDetails?: { topicCategories?: string[] };
-  }> }>(youtubeDataApiUrl("channels", { part: "snippet,statistics,contentDetails,topicDetails", id: ids.join(",") }), accessToken);
-  return new Map((response.items || []).map((channel): [string, ChannelDetails] => [channel.id, {
+};
+
+function mapChannels(items: ChannelItem[] = []) {
+  return new Map(items.map((channel): [string, ChannelDetails] => [channel.id, {
     id: channel.id,
     title: channel.snippet?.title || "Unknown creator",
     avatarUrl: channel.snippet?.thumbnails?.high?.url || channel.snippet?.thumbnails?.medium?.url || channel.snippet?.thumbnails?.default?.url || "",
@@ -284,29 +294,44 @@ async function fetchChannels(accessToken: string, ids: string[]) {
   }]));
 }
 
-async function fetchCandidateVideos(accessToken: string, channels: ChannelDetails[]) {
+async function fetchChannels(credential: YouTubeCredential, ids: string[]) {
+  if (!ids.length) return new Map<string, ChannelDetails>();
+  const response = await youtubeJson<{ items?: ChannelItem[] }>(youtubeDataApiUrl("channels", {
+    part: "snippet,statistics,contentDetails,topicDetails", id: ids.join(","),
+  }), credential);
+  return mapChannels(response.items);
+}
+
+async function fetchChannelByHandle(credential: YouTubeCredential, handle: string) {
+  const response = await youtubeJson<{ items?: ChannelItem[] }>(youtubeDataApiUrl("channels", {
+    part: "snippet,statistics,contentDetails,topicDetails", forHandle: handle.replace(/^@/, ""),
+  }), credential);
+  return [...mapChannels(response.items).values()][0] || null;
+}
+
+async function fetchCandidateVideos(credential: YouTubeCredential, channels: ChannelDetails[]) {
   const videoIds = new Set<string>();
   await Promise.all(channels.map(async (channel) => {
     if (!channel.uploadsPlaylistId) return;
     try {
       const playlist = await youtubeJson<{ items?: Array<{ contentDetails?: { videoId?: string } }> }>(youtubeDataApiUrl("playlistItems", {
         part: "contentDetails", playlistId: channel.uploadsPlaylistId, maxResults: "10",
-      }), accessToken);
+      }), credential);
       for (const item of playlist.items || []) if (item.contentDetails?.videoId) videoIds.add(item.contentDetails.videoId);
     } catch (error) {
       console.warn(`Creator Twin could not sample ${channel.id}.`, error);
     }
   }));
-  return fetchPublicVideos(accessToken, [...videoIds]);
+  return fetchPublicVideos(credential, [...videoIds]);
 }
 
-async function fetchTopVideos(accessToken: string, channelId: string, fallback: PublicVideo[]) {
+async function fetchTopVideos(credential: YouTubeCredential, channelId: string, fallback: PublicVideo[]) {
   try {
     const search = await youtubeJson<{ items?: Array<{ id?: { videoId?: string } }> }>(youtubeDataApiUrl("search", {
       part: "snippet", type: "video", order: "viewCount", channelId, maxResults: "5",
-    }), accessToken);
+    }), credential);
     const ids = (search.items || []).map((item) => item.id?.videoId).filter((id): id is string => Boolean(id));
-    const videos = await fetchPublicVideos(accessToken, ids);
+    const videos = await fetchPublicVideos(credential, ids);
     if (videos.length) return videos;
   } catch (error) {
     console.warn("Creator Twin top-video lookup was unavailable; using the matching sample.", error);
@@ -462,31 +487,39 @@ function buildResult(candidate: Candidate, own: VideoSummary, topVideos: PublicV
   };
 }
 
-async function calculateCreatorTwin(session: YouTubeSession) {
-  const ownVideos = (await fetchChannelVideos(session.accessToken, 30)).filter((video) => video.privacyStatus === "public")
-    .map((video): PublicVideo => ({ ...video, channelId: session.profile.id, channelTitle: session.profile.title }));
+async function calculateCreatorTwinFromVideos({
+  credential,
+  ownChannel,
+  ownVideos,
+  allowClosestMatch = false,
+}: {
+  credential: YouTubeCredential;
+  ownChannel: ChannelDetails;
+  ownVideos: PublicVideo[];
+  allowClosestMatch?: boolean;
+}) {
   if (ownVideos.length < 3) return { error: "Creator Twin needs at least three public videos before it can find a good match.", status: 422 as const };
-  const ownChannel = (await fetchChannels(session.accessToken, [session.profile.id])).get(session.profile.id);
   const own = summarize(ownVideos, ownChannel);
   const query = own.topics.slice(0, 3).join(" ");
   if (!query) return { error: "Creator Twin needs a few more videos about similar topics before it can find a match.", status: 422 as const };
 
-  const candidateIds = (await searchComparableChannels(session.accessToken, query)).filter((id) => id !== session.profile.id);
+  const candidateIds = (await searchComparableChannels(credential, query)).filter((id) => id !== ownChannel.id);
   if (!candidateIds.length) return { error: "Stanley could not find a close match yet. Try again after you post another video.", status: 404 as const };
-  const channels = await fetchChannels(session.accessToken, candidateIds);
-  const publicVideos = await fetchCandidateVideos(session.accessToken, [...channels.values()]);
+  const channels = await fetchChannels(credential, candidateIds);
+  const publicVideos = await fetchCandidateVideos(credential, [...channels.values()]);
   const grouped = new Map<string, PublicVideo[]>();
   for (const video of publicVideos) grouped.set(video.channelId, [...(grouped.get(video.channelId) || []), video]);
   const eligibleGroups = [...grouped].filter(([, sample]) => sample.length >= 3);
   if (!eligibleGroups.length) return { error: "Stanley could not find a close match yet. Try again after you post another video.", status: 404 as const };
-  const candidates = eligibleGroups.flatMap(([id, candidateVideos]): Candidate[] => {
+  const allCandidates = eligibleGroups.flatMap(([id, candidateVideos]): Candidate[] => {
     const channel = channels.get(id);
     if (!channel) return [];
     const summary = summarize(candidateVideos, channel);
-    const score = scoreCreatorSimilarity(own, summary, session.profile.subscriberCount, channel.subscriberCount);
+    const score = scoreCreatorSimilarity(own, summary, ownChannel.subscriberCount, channel.subscriberCount);
     const performanceRatio = Math.max(summary.averageViews / Math.max(1, own.averageViews), summary.viewsPerDay / Math.max(1, own.viewsPerDay));
     return [{ channel, videos: candidateVideos, summary, score, performanceRatio }];
-  }).filter((candidate) => {
+  });
+  const strongerCandidates = allCandidates.filter((candidate) => {
     const closeMatch = candidate.performanceRatio >= 1.1 && candidate.score.total >= .45 && candidate.score.topic >= .14;
     const strongerNicheCreator = candidate.performanceRatio >= 2 && candidate.score.total >= .36 && candidate.score.topic >= .24;
     return closeMatch || strongerNicheCreator;
@@ -495,23 +528,69 @@ async function calculateCreatorTwin(session: YouTubeSession) {
     const performanceBoost = Math.min(.1, Math.max(0, Math.log2(Math.max(1, candidate.performanceRatio))) * .025);
     return candidate.score.total + candidate.score.topic * .08 + performanceBoost;
   };
-  const candidate = candidates.sort((left, right) => rank(right) - rank(left))[0];
+  const closestCandidates = allowClosestMatch
+    ? allCandidates.filter((candidate) => candidate.score.total >= .32 && candidate.score.topic >= .12)
+    : [];
+  const candidate = (strongerCandidates.length ? strongerCandidates : closestCandidates).sort((left, right) => rank(right) - rank(left))[0];
   if (!candidate) return { error: "Stanley found no similar creator who is getting more views right now.", status: 404 as const };
-  const topVideos = await fetchTopVideos(session.accessToken, candidate.channel.id, candidate.videos);
-  return { result: buildResult(candidate, own, topVideos), channelId: session.profile.id };
+  const topVideos = await fetchTopVideos(credential, candidate.channel.id, candidate.videos);
+  return { result: buildResult(candidate, own, topVideos), channelId: ownChannel.id };
+}
+
+async function calculateConnectedCreatorTwin(session: YouTubeSession) {
+  const credential: YouTubeCredential = { accessToken: session.accessToken };
+  const ownVideos = (await fetchChannelVideos(session.accessToken, 30)).filter((video) => video.privacyStatus === "public")
+    .map((video): PublicVideo => ({ ...video, channelId: session.profile.id, channelTitle: session.profile.title }));
+  const ownChannel = (await fetchChannels(credential, [session.profile.id])).get(session.profile.id) || {
+    id: session.profile.id,
+    title: session.profile.title,
+    avatarUrl: session.profile.thumbnailUrl,
+    description: "",
+    topicCategories: [],
+    customUrl: "",
+    subscriberCount: session.profile.subscriberCount,
+    uploadsPlaylistId: "",
+  };
+  return calculateCreatorTwinFromVideos({ credential, ownChannel, ownVideos });
+}
+
+async function calculatePublicCreatorTwin(creatorId: string, force: boolean) {
+  const creator = publicDemoCreator(creatorId);
+  if (!creator) return { error: "That demo creator is not available.", status: 404 as const };
+  const apiKey = process.env.YOUTUBE_API_KEY?.trim();
+  if (!apiKey) return { error: "YouTube public data is not configured.", status: 503 as const };
+  const credential: YouTubeCredential = { apiKey };
+  const [ownChannel, videoResult] = await Promise.all([
+    fetchChannelByHandle(credential, creator.handle),
+    loadDemoVideos(creator.id, force),
+  ]);
+  if (!ownChannel) return { error: "The public creator channel could not be loaded.", status: 404 as const };
+  const ownVideos = videoResult.value.videos.map((video): PublicVideo => ({
+    ...video,
+    channelId: ownChannel.id,
+    channelTitle: ownChannel.title,
+  }));
+  return calculateCreatorTwinFromVideos({ credential, ownChannel, ownVideos, allowClosestMatch: true });
 }
 
 export async function GET(request: NextRequest) {
   try {
-    const session = await readYouTubeSession();
-    if (!session) return NextResponse.json({ error: "Connect YouTube before analyzing your Creator Twin." }, { status: 401 });
     const force = request.nextUrl.searchParams.get("refresh") === "true";
-    const saved = cache.get(session.profile.id);
-    if (!force && saved && saved.expiresAt > Date.now()) return NextResponse.json({ ...saved.result, cached: true });
-    const calculated = await calculateCreatorTwin(session);
+    const demoCreator = publicDemoCreator(request.nextUrl.searchParams.get("creator"));
+    const session = demoCreator ? null : await readYouTubeSession();
+    if (!demoCreator && !session) return NextResponse.json({ error: "Connect YouTube before analyzing your Creator Twin." }, { status: 401 });
+    const cacheKey = demoCreator ? `demo:${demoCreator.id}` : session!.profile.id;
+    const responseHeaders = demoCreator
+      ? { "Cache-Control": force ? "no-store" : PUBLIC_DEMO_CACHE, "X-Stanley-Cache": "hit" }
+      : { "Cache-Control": force ? "no-store" : "private, max-age=300, stale-while-revalidate=3600", "Vary": "Cookie", "X-Stanley-Cache": "hit" };
+    const saved = cache.get(cacheKey);
+    if (!force && saved && saved.expiresAt > Date.now()) return NextResponse.json({ ...saved.result, cached: true }, { headers: responseHeaders });
+    const calculated = demoCreator
+      ? await calculatePublicCreatorTwin(demoCreator.id, force)
+      : await calculateConnectedCreatorTwin(session!);
     if ("error" in calculated) return NextResponse.json({ error: calculated.error }, { status: calculated.status });
-    cache.set(calculated.channelId, { expiresAt: Date.now() + CACHE_TTL, result: calculated.result });
-    return NextResponse.json(calculated.result);
+    cache.set(cacheKey, { expiresAt: Date.now() + CACHE_TTL, result: calculated.result });
+    return NextResponse.json(calculated.result, { headers: { ...responseHeaders, "X-Stanley-Cache": "miss" } });
   } catch (error) {
     console.error("Creator Twin analysis failed", error);
     return NextResponse.json({ error: error instanceof Error ? error.message : "Creator Twin could not be calculated." }, { status: 502 });

@@ -17,6 +17,7 @@ import type { AgentActivityEvent } from "./agent/kernel";
 import { GeminiProviderAdapter, generateStructured } from "./agent/provider";
 import { createYouTubeToolRegistry, researchFromToolResults } from "./agent/youtube-tools";
 import type { AgentResult, ModelContent } from "./agent/types";
+import { publicDemoCreator } from "../../creator-profiles";
 
 type GenerateRequest = {
   topic?: unknown;
@@ -24,6 +25,7 @@ type GenerateRequest = {
   mode?: unknown;
   sessionId?: unknown;
   attachments?: unknown;
+  creatorProfile?: unknown;
 };
 
 type InputAttachment = {
@@ -990,6 +992,8 @@ async function generateResponse(request: Request, emitProgress?: ProgressEmitter
   const topic = cleanText(body.topic, 900);
   const requestedMode = cleanText(body.mode, 20);
   const requestedSessionId = cleanText(body.sessionId, 80);
+  const requestedCreatorProfile = cleanText(body.creatorProfile, 40) || "connected";
+  const demoCreator = publicDemoCreator(requestedCreatorProfile);
   const mode: RequestedMode = requestedMode === "idea" || requestedMode === "title" || requestedMode === "thumbnail" ? requestedMode : "auto";
   const messages = normalizeMessages(body.messages);
   const inputAttachments = normalizeAttachments(body.attachments);
@@ -1002,6 +1006,9 @@ async function generateResponse(request: Request, emitProgress?: ProgressEmitter
   }
   if (inputAttachments === null) {
     return Response.json({ error: "One of the attachments is too large or is not supported." }, { status: 400 });
+  }
+  if (requestedCreatorProfile !== "connected" && !demoCreator) {
+    return Response.json({ error: "That creator profile is not available." }, { status: 400 });
   }
 
   const geminiKey = process.env.GEMINI_API_KEY;
@@ -1022,18 +1029,21 @@ async function generateResponse(request: Request, emitProgress?: ProgressEmitter
   const classifierMessage = attachedContext ? `${currentMessage}\n\nATTACHMENTS:\n${attachedContext}` : currentMessage;
   const projectId = requestedSessionId || crypto.randomUUID();
   const youtubeSession = requestContext ? requestContext.youtubeSession : await readYouTubeSession();
+  const activeYouTubeSession = demoCreator ? null : youtubeSession;
   const ownerOnlyYouTubeAttachment = inputAttachments.find((attachment) =>
     attachment.kind === "youtube" && attachment.privacyStatus !== "public",
   );
   if (ownerOnlyYouTubeAttachment && !hasYouTubeCaptionAccess(youtubeSession)) {
     return Response.json({ error: "Reconnect YouTube once to enable private-video caption analysis." }, { status: 403 });
   }
-  const privateChannelContext = channelContext(youtubeSession?.profile);
+  const selectedChannelContext = demoCreator
+    ? `Selected public demo creator: ${demoCreator.title} (${demoCreator.handle}). Channel niche: ${demoCreator.niche}. Use public channel evidence only. This is a simulation, not an authenticated session and not access to the creator's private analytics.`
+    : channelContext(youtubeSession?.profile);
   let ownerId = requestContext?.ownerId || "";
   let semanticMemory = emptySemanticMemory() as SemanticMemory;
   try {
     if (!ownerId) ownerId = await resolveMemoryOwner(request.url, youtubeSession);
-    semanticMemory = await readSemanticMemory(ownerId, projectId);
+    if (!demoCreator) semanticMemory = await readSemanticMemory(ownerId, projectId);
   } catch (error) {
     console.warn("Semantic memory was unavailable; continuing without it.", error);
   }
@@ -1057,13 +1067,17 @@ async function generateResponse(request: Request, emitProgress?: ProgressEmitter
   const [scope, memoryUpdate, memorySelection] = await Promise.all([
     fastScriptFollowUp
       ? Promise.resolve(fastScriptScope)
-      : classifyRequest(geminiKey, topic, conversation, classifierMessage, mode, privateChannelContext, inputAttachments.length > 0, request.signal),
+      : classifyRequest(geminiKey, topic, conversation, classifierMessage, mode, selectedChannelContext, inputAttachments.length > 0, request.signal),
     fastScriptFollowUp
       ? Promise.resolve({} as SemanticMemoryUpdate)
-      : extractSemanticMemory(geminiKey, conversation, currentMessage, semanticMemory, request.signal),
+      : demoCreator
+        ? Promise.resolve({} as SemanticMemoryUpdate)
+        : extractSemanticMemory(geminiKey, conversation, currentMessage, semanticMemory, request.signal),
     fastScriptFollowUp
       ? Promise.resolve({ relevantCreatorKeys: [] as string[], relevantProjectKeys: [] as string[] })
-      : selectRelevantMemoryKeys(geminiKey, topic, conversation, currentMessage, initialMemoryContext, request.signal),
+      : demoCreator
+        ? Promise.resolve({ relevantCreatorKeys: [] as string[], relevantProjectKeys: [] as string[] })
+        : selectRelevantMemoryKeys(geminiKey, topic, conversation, currentMessage, initialMemoryContext, request.signal),
   ]);
   await emitProgress?.({
     id: "intent",
@@ -1099,9 +1113,9 @@ async function generateResponse(request: Request, emitProgress?: ProgressEmitter
     currentMessage,
     scope.intent,
     resolvedBrief,
-    Boolean(youtubeSession),
+    Boolean(activeYouTubeSession || demoCreator),
   );
-  if (ownerId && scope.intent !== "social" && !fastScriptFollowUp) {
+  if (ownerId && !demoCreator && scope.intent !== "social" && !fastScriptFollowUp) {
     try {
       semanticMemory = await updateSemanticMemory(ownerId, projectId, scope.intent === "memory"
         ? memoryUpdate
@@ -1145,7 +1159,10 @@ async function generateResponse(request: Request, emitProgress?: ProgressEmitter
 - Public performance is evidence of audience response, not proof of a ranking rule. Separate observations, inferences, and creative hypotheses.
 - Never claim a topic, person, or pet already appears on the creator's channel unless a successful youtube_channel_snapshot result actually shows it. Without that evidence, describe only fit to the creator's current brief.
 - After any useful tool calls, answer the creator directly and return JSON matching the requested response schema. Do not expose tool syntax or internal reasoning.`;
-  const creativeSystem = [strategyGroundedSystem, agentRules, privateContexts].filter(Boolean).join("\n\n");
+  const demoCreatorContext = demoCreator
+    ? `SELECTED_CREATOR_SIMULATION_START\nThe tester selected ${demoCreator.title} (${demoCreator.handle}) as a public demo workspace. Build recommendations for that channel using observable public patterns. Do not use the signed-in tester's identity, memories, private analytics, or uploads. Do not claim to be ${demoCreator.title}; say "for ${demoCreator.title}'s channel" when the distinction matters. For channel-specific creation work, inspect the selected channel with the public YouTube search tool before making performance claims.\nSELECTED_CREATOR_SIMULATION_END`
+    : "";
+  const creativeSystem = [strategyGroundedSystem, agentRules, privateContexts, demoCreatorContext].filter(Boolean).join("\n\n");
   const attachedMedia = await mediaParts(inputAttachments, request.signal);
   const attachedMediaParts = attachedMedia.parts;
   const hasThumbnailReference = attachedMediaParts.some((part) => "inlineData" in part && part.inlineData.mimeType.startsWith("image/"));
@@ -1153,13 +1170,14 @@ async function generateResponse(request: Request, emitProgress?: ProgressEmitter
   const provider = new GeminiProviderAdapter(geminiKey, MODEL);
   const toolRegistry = createYouTubeToolRegistry({
     apiKey: youtubeKey,
-    session: youtubeSession,
+    session: activeYouTubeSession,
     researchTopic,
     requestedPublishedWithinHours: researchWindowHours,
     forceMostPopularChart,
-    allowPublicSearch: researchAccess.publicSearch,
-    allowChannelSnapshot: researchAccess.channelSnapshot,
+    allowPublicSearch: demoCreator ? true : researchAccess.publicSearch,
+    allowChannelSnapshot: demoCreator ? false : researchAccess.channelSnapshot,
     allowVideoEvidence: researchAccess.videoEvidence,
+    fixedPublicChannelName: demoCreator?.channelName,
   });
   const creativeJson = async (
     prompt: string,
@@ -1170,13 +1188,15 @@ async function generateResponse(request: Request, emitProgress?: ProgressEmitter
     model = MODEL,
     deadlineMs = 75_000,
   ): Promise<AgentResult> => {
+    const effectiveResearchBudget = demoCreator ? Math.min(1, researchBudget) : researchBudget;
     const runtimeContext = `RUNTIME_CONTEXT_START
-Connected YouTube channel available: ${youtubeSession ? "yes" : "no"}.
+Connected YouTube channel available: ${activeYouTubeSession ? "yes" : "no"}.
+Selected public demo creator: ${demoCreator ? `${demoCreator.title} (${demoCreator.handle})` : "none"}.
 Public YouTube API key available: ${youtubeKey ? "yes" : "no"}.
 Current public-research topic: ${researchTopic || "No public research topic is needed."}
-Public-video search permitted for this message: ${researchAccess.publicSearch ? "yes" : "no"}.
-Connected-channel analysis permitted for this message: ${researchAccess.channelSnapshot ? "yes" : "no"}.
-The connected channel is only a candidate context. Call youtube_channel_snapshot before using its private metrics.
+Public-video search permitted for this message: ${demoCreator || researchAccess.publicSearch ? "yes" : "no"}.
+Connected-channel analysis permitted for this message: ${!demoCreator && researchAccess.channelSnapshot ? "yes" : "no"}.
+${demoCreator ? "The selected creator is public-only. Use the fixed public channel search and never imply private analytics access." : "The connected channel is only a candidate context. Call youtube_channel_snapshot before using its private metrics."}
 RUNTIME_CONTEXT_END`;
     const attachmentPrompt = attachedContext
       ? `\n\nATTACHMENTS_START\n${attachedContext}\nATTACHMENTS_END\nUse the selected YouTube video or uploaded media only as creator-supplied reference material. Describe only what you can actually observe or what the supplied metadata states. Some supplied images may be YouTube-generated storyboard sheets sampled across the selected video; use them to understand the visual sequence, but never invent audio or dialogue they do not show.${hasUploadedSourceVideo ? " CONTENT_ACCESS_STATUS: The creator supplied the original video file. Analyze its audiovisual content and combine those observations with the connected YouTube metadata." : ""}`
@@ -1190,9 +1210,9 @@ RUNTIME_CONTEXT_END`;
       responseSchema: schema as Record<string, unknown>,
       maxOutputTokens,
       signal: request.signal,
-      maxRounds: allowTools ? Math.min(4, Math.max(2, researchBudget + 2)) : 1,
-      maxToolCallsPerRound: Math.max(1, Math.min(2, researchBudget)),
-      maxToolCallsPerTurn: Math.max(1, Math.min(2, researchBudget)),
+      maxRounds: allowTools ? Math.min(4, Math.max(2, effectiveResearchBudget + 2)) : 1,
+      maxToolCallsPerRound: Math.max(1, Math.min(2, effectiveResearchBudget)),
+      maxToolCallsPerTurn: Math.max(1, Math.min(2, effectiveResearchBudget)),
       deadlineMs,
       toolTimeoutMs: 12_000,
       toolsEnabled: allowTools,

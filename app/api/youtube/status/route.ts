@@ -9,6 +9,8 @@ export async function GET(request: Request) {
     captionAccess: hasYouTubeCaptionAccess(session),
     profile: session?.profile || null,
   });
+  response.headers.set("Cache-Control", "no-store");
+  response.headers.set("Vary", "Cookie");
   if (session) response.cookies.set(YOUTUBE_SESSION_COOKIE, await seal(session), cookieOptions(request.url));
   return response;
 }

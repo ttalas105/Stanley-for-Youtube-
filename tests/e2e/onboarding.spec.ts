@@ -102,8 +102,8 @@ test("turns a successful OAuth callback into a personalized first chat", async (
   await expect(page.getByText(/I Let AI Plan My Week/)).toBeVisible();
   await expect(page.locator(".channel-connection").getByText("Thomas Creates", { exact: true })).toBeVisible();
   await expect(page.getByText("YouTube connected", { exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Disconnect Thomas Creates" })).toBeVisible();
-  await expect(page.locator(".channel-disconnect svg")).toHaveCount(1);
+  await page.getByRole("button", { name: /Switch creator profile/ }).click();
+  await expect(page.getByRole("menuitem", { name: "Disconnect YouTube" })).toBeVisible();
 });
 
 test("loads connected channel avatars through the local image proxy", async ({ page }) => {
