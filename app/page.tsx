@@ -747,6 +747,48 @@ function OnboardingIcon({ name }: { name: "ideas" | "build" | "learn" }) {
 }
 
 function OnboardingVisual({ step, profile }: { step: Exclude<OnboardingStep, "loading" | "done">; profile: YouTubeProfile | null }) {
+  const reel = ({
+    welcome: {
+      frames: [
+        "/product-reel/stanley-home.png",
+        "/product-reel/stanley-ideas.png",
+        "/product-reel/stanley-dashboard.png",
+      ],
+    },
+    features: {
+      frames: [
+        "/product-reel/stanley-ideas.png",
+        "/product-reel/stanley-home.png",
+        "/product-reel/stanley-dashboard.png",
+      ],
+    },
+    connect: {
+      frames: [
+        "/product-reel/stanley-dashboard.png",
+        "/product-reel/stanley-ideas.png",
+        "/product-reel/stanley-home.png",
+      ],
+    },
+    analyzing: {
+      frames: [
+        "/product-reel/stanley-dashboard.png",
+        "/product-reel/stanley-ideas.png",
+        "/product-reel/stanley-home.png",
+      ],
+    },
+  } satisfies Record<Exclude<OnboardingStep, "loading" | "done">, { frames: [string, string, string] }>)[step];
+
+  if (reel) return (
+    <div className={`onboarding-product-reel product-reel-${step}`} aria-hidden="true">
+      <div className="product-reel-stage">
+        {reel.frames.map((frame, index) => <figure className="product-reel-frame" key={`${step}-${frame}`} style={{ "--reel-index": index } as React.CSSProperties}>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={frame} alt="" />
+        </figure>)}
+      </div>
+    </div>
+  );
+
   if (step === "welcome") return (
     <div className="onboarding-visual-canvas startup-visual" aria-hidden="true">
       <div className="startup-visual-header">
@@ -957,54 +999,54 @@ function Onboarding({
       <section className={`onboarding-stage onboarding-${step}`} aria-live="polite" key={step}>
         <div className="onboarding-copy-panel">
           {step === "welcome" && <>
-            <p className="onboarding-label startup-label"><Sparkles aria-hidden="true" /> Your YouTube creative sidekick</p>
-            <h1>Hey, meet <span className="startup-name">Stanley.</span></h1>
-            <p className="onboarding-copy">Bring the rough idea. Stanley finds the angle, pressure-tests what people want to watch, and helps you shape a video you can actually make.</p>
-            <button className="onboarding-primary" type="button" onClick={onContinue}>Show me how <ChevronRight aria-hidden="true" /></button>
-            <p className="onboarding-footnote startup-footnote"><span>Ideas</span><span>Research</span><span>Full video plans</span></p>
+            <h1>Plan your next YouTube video.</h1>
+            <p className="onboarding-copy">Stanley can research a topic, develop the idea, write titles and scripts, and make thumbnails in one conversation.</p>
+            <div className="onboarding-welcome-actions">
+              <button className="onboarding-primary" type="button" onClick={onContinue}>Continue <ChevronRight aria-hidden="true" /></button>
+              <button className="onboarding-skip" type="button" onClick={onSkip}>Skip setup</button>
+            </div>
           </>}
 
           {step === "features" && <>
-            <p className="onboarding-label feature-label"><Sparkles aria-hidden="true" /> Start messy. Stanley will organize it.</p>
-            <h1>One chat.<br />Your whole video.</h1>
-            <p className="onboarding-copy">Start with a rough thought, a weird angle, or a title that is not clicking yet.</p>
-            <div className="feature-list">
-              <article><span><OnboardingIcon name="ideas" /></span><div><h2>Find an idea worth making</h2><p>Use real YouTube patterns to find a sharper angle.</p></div></article>
-              <article><span><OnboardingIcon name="build" /></span><div><h2>Build the full package</h2><p>Shape the title, thumbnail, hook, and script together.</p></div></article>
-              <article><span><OnboardingIcon name="learn" /></span><div><h2>Keep it sounding like you</h2><p>Stanley remembers your channel, choices, and creative style.</p></div></article>
+            <h1>Start with whatever you have.</h1>
+            <p className="onboarding-copy">Type a topic, paste a title, or attach a video. Ask for one result or a complete video plan.</p>
+            <div className="onboarding-example">
+              <span>For example</span>
+              <p>“I spent 30 days learning to cook. Help me turn it into a video.”</p>
             </div>
-            <div className="onboarding-actions"><button className="onboarding-back" type="button" onClick={onBack}>Back</button><button className="onboarding-primary" type="button" onClick={onContinue}>Connect my channel <ChevronRight aria-hidden="true" /></button></div>
+            <p className="onboarding-followup">Reply in the same chat to revise any part.</p>
+            <div className="onboarding-actions"><button className="onboarding-back" type="button" onClick={onBack}>Back</button><button className="onboarding-primary" type="button" onClick={onContinue}>Continue <ChevronRight aria-hidden="true" /></button></div>
           </>}
 
           {step === "connect" && <>
             <div className="onboarding-youtube-mark" aria-hidden="true"><YouTubeIcon /></div>
-            <h1>Connect your YouTube account.</h1>
-            <p className="onboarding-copy">Stanley reads your recent channel signals and uses what already worked to suggest sharper ideas, titles, and scripts. You can connect later.</p>
-            <div className="connect-benefits"><span><Check aria-hidden="true" /> Topics your viewers come back for</span><span><Check aria-hidden="true" /> Videos that outperform your baseline</span><span><Check aria-hidden="true" /> Patterns in your strongest titles</span></div>
+            <h1>Connect your YouTube channel.</h1>
+            <p className="onboarding-copy">Stanley can use your videos and analytics when it researches ideas. Connecting is optional.</p>
+            <div className="connect-benefits"><span><Check aria-hidden="true" /> Use recent channel performance</span><span><Check aria-hidden="true" /> Find topics and title patterns</span><span><Check aria-hidden="true" /> Personalize ideas to your audience</span></div>
+            <p className="onboarding-permission"><strong>Read-only access.</strong> Stanley cannot upload, edit, or delete videos.</p>
             {error && <p className="onboarding-error" role="alert">{error}</p>}
             {!configured && <p className="oauth-dev-note"><strong>Preview setup</strong><span>Private Google credentials are needed before connection can open.</span></p>}
             <div className="onboarding-connect-actions">
               <button className="onboarding-primary youtube-button" type="button" onClick={onConnect}><span className="youtube-button-icon"><YouTubeIcon /></span> Connect YouTube</button>
-              <button className="onboarding-skip" type="button" onClick={onSkip}>Skip for now</button>
+              <button className="onboarding-skip" type="button" onClick={onSkip}>Continue without YouTube</button>
             </div>
             <button className="onboarding-back standalone" type="button" onClick={onBack}>Back</button>
           </>}
 
           {step === "analyzing" && <>
-            <p className="onboarding-label"><span className="analysis-live-dot" /> Channel connected</p>
-            <h1>Getting to know<br />{profile?.title || "your channel"}.</h1>
-            <p className="onboarding-copy">Stanley is finding the signals that can make your next creative conversation more useful.</p>
+            <h1>Loading {profile?.title || "your channel"}.</h1>
+            <p className="onboarding-copy">Checking recent videos and performance. This usually takes a few seconds.</p>
             <div className="analysis-steps">
-              <p><span>✓</span> Channel and recent videos found</p>
-              <p><span className="analysis-dot" /> Comparing video performance</p>
-              <p><span className="analysis-dot muted" /> Preparing your first recommendations</p>
+              <p><span>✓</span> YouTube connected</p>
+              <p><span className="analysis-dot" /> Loading recent videos</p>
+              <p><span className="analysis-dot muted" /> Preparing your chat</p>
             </div>
           </>}
         </div>
         <aside className="onboarding-visual-panel"><OnboardingVisual step={step} profile={profile} /></aside>
       </section>
 
-      <footer className="onboarding-footer"><span>Built for YouTube creators</span><span>Your ideas stay private</span></footer>
+      <footer className="onboarding-footer"><span>Setup takes about 30 seconds</span><span>YouTube can be connected later</span></footer>
     </main>
   );
 }
