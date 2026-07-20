@@ -122,18 +122,31 @@ async function timelineReport(period: Period, accessToken: string) {
 async function videoReport(period: Period, accessToken: string) {
   const result = await authenticatedJson<AnalyticsResponse>(analyticsUrl(period, {
     dimensions: "video",
-    metrics: "views,estimatedMinutesWatched,averageViewDuration,averageViewPercentage,subscribersGained,subscribersLost",
+    metrics: "views,estimatedMinutesWatched,averageViewDuration,averageViewPercentage,subscribersGained,subscribersLost,likes,comments,shares",
     sort: "-views",
-    maxResults: "10",
+    maxResults: "24",
   }), accessToken);
-  return (result.rows || []).map((row) => ({
-    id: String(row[0] || ""),
-    views: numberAt(row, 1),
-    watchMinutes: numberAt(row, 2),
-    averageViewDuration: numberAt(row, 3),
-    averageViewPercentage: numberAt(row, 4),
-    netSubscribers: (numberAt(row, 5) ?? 0) - (numberAt(row, 6) ?? 0),
-  })).filter((video) => video.id);
+  return (result.rows || []).map((row) => {
+    const views = numberAt(row, 1);
+    const likes = numberAt(row, 7);
+    const comments = numberAt(row, 8);
+    const shares = numberAt(row, 9);
+    return {
+      id: String(row[0] || ""),
+      views,
+      watchMinutes: numberAt(row, 2),
+      averageViewDuration: numberAt(row, 3),
+      averageViewPercentage: numberAt(row, 4),
+      netSubscribers: (numberAt(row, 5) ?? 0) - (numberAt(row, 6) ?? 0),
+      likes,
+      comments,
+      shares,
+      commentRate: views && comments !== null ? Math.round((comments / views) * 100_000) / 1_000 : null,
+      interactionRate: views && likes !== null && comments !== null && shares !== null
+        ? Math.round(((likes + comments + shares) / views) * 10_000) / 100
+        : null,
+    };
+  }).filter((video) => video.id);
 }
 
 async function trafficReport(period: Period, accessToken: string) {
