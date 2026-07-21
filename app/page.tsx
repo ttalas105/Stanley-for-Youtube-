@@ -533,19 +533,22 @@ function repairLegacyChannelResearch(messages: ChatMessage[]) {
 function IdeaWorkspace({ ideas }: { ideas: GeneratedIdea[] }) {
   const singleIdea = ideas.length === 1;
   return <section className={singleIdea ? "idea-workspace single-idea" : "idea-workspace"} aria-label={singleIdea ? "Refined video idea" : `${ideas.length} video ideas`}>
-    <div className="idea-results">
-      {ideas.map((item, index) => <article className={item.recommended ? "assistant-option idea-result recommended" : "assistant-option idea-result"} key={item.id}>
+    <ol className="idea-results">
+      {ideas.map((item, index) => <li className={item.recommended ? "assistant-option idea-result recommended" : "assistant-option idea-result"} key={item.id}>
         <div className="idea-result-body">
+          {!singleIdea ? <span className="idea-index" aria-hidden="true">{String(index + 1).padStart(2, "0")}</span> : null}
           <div className="idea-title-line">
-            <h3>{singleIdea ? null : <span aria-hidden="true">{index + 1}.</span>} {item.suggestedTitle || item.idea}</h3>
+            <h3>{item.suggestedTitle || item.idea}</h3>
             {!singleIdea && item.recommended ? <span className="top-pick">Top pick</span> : null}
           </div>
-          {item.suggestedTitle ? <p className="idea-premise"><strong>Premise</strong><span>{item.idea}</span></p> : null}
-          <p className="idea-why"><strong>{singleIdea ? "Why this direction" : "Why it could work"}</strong><span>{compactSentences(item.whyItCouldWork, 360)}</span></p>
-          {item.format || item.difficulty ? <div className="idea-meta-line">{item.format ? <span>{item.format}</span> : null}{item.difficulty ? <span>{item.difficulty} lift</span> : null}</div> : null}
+          <div className="idea-result-content">
+            {item.suggestedTitle ? <p className="idea-premise">{item.idea}</p> : null}
+            <p className="idea-why"><strong>{singleIdea ? "Why this direction:" : "Why it works:"}</strong> <span>{compactSentences(item.whyItCouldWork, 220)}</span></p>
+            {item.format || item.difficulty ? <div className="idea-meta-line">{item.format ? <span>{item.format}</span> : null}{item.difficulty ? <span>{item.difficulty} lift</span> : null}</div> : null}
+          </div>
         </div>
-      </article>)}
-    </div>
+      </li>)}
+    </ol>
 
     <details className="response-details">
       <summary><strong>{singleIdea ? "View the full story plan" : "See the thinking behind these ideas"}</strong><ChevronDown aria-hidden="true" /></summary>
