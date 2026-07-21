@@ -73,7 +73,7 @@ type GeneratedThumbnailImage = {
   id: string;
   mimeType: string;
   data?: string;
-  aspectRatio: "16:9";
+  aspectRatio: "16:9" | "9:16";
   width: number;
   height: number;
   sourceUsed: boolean;
@@ -563,6 +563,7 @@ function IdeaWorkspace({ ideas }: { ideas: GeneratedIdea[] }) {
 
 function ThumbnailWorkspace({ thumbnail, disabled, onEdit }: { thumbnail: GeneratedThumbnailImage; disabled: boolean; onEdit: () => void }) {
   const imageUrl = thumbnail.data ? `data:${thumbnail.mimeType};base64,${thumbnail.data}` : "";
+  const portrait = thumbnail.aspectRatio === "9:16";
   function downloadThumbnail() {
     if (!imageUrl) return;
     const link = document.createElement("a");
@@ -571,13 +572,13 @@ function ThumbnailWorkspace({ thumbnail, disabled, onEdit }: { thumbnail: Genera
     link.click();
   }
 
-  return <section className="thumbnail-workspace" aria-label="Generated YouTube thumbnail">
-    {imageUrl ? <figure className="generated-thumbnail">
+  return <section className={portrait ? "thumbnail-workspace portrait" : "thumbnail-workspace"} aria-label={portrait ? "Generated YouTube Shorts cover" : "Generated YouTube thumbnail"}>
+    {imageUrl ? <figure className={portrait ? "generated-thumbnail portrait" : "generated-thumbnail"}>
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img src={imageUrl} alt={thumbnail.alt} />
     </figure> : <div className="thumbnail-unavailable"><ImageIcon aria-hidden="true" /><p><strong>Thumbnail preview expired</strong><span>Generate it again to restore the full-size image.</span></p></div>}
     <div className="thumbnail-toolbar">
-      <div><strong>Generated thumbnail</strong><span>{thumbnail.width} x {thumbnail.height} / 16:9 / {thumbnail.sourceUsed ? "Reference image used" : "Created from your brief"}</span></div>
+      <div><strong>{portrait ? "Generated Shorts cover" : "Generated thumbnail"}</strong><span>{thumbnail.width} x {thumbnail.height} / {thumbnail.aspectRatio} / {thumbnail.sourceUsed ? "Reference image used" : "Created from your brief"}</span></div>
       <div>
         <button type="button" disabled={!imageUrl} onClick={downloadThumbnail}><Download aria-hidden="true" /> Download</button>
         <button className="thumbnail-edit" type="button" disabled={disabled || !imageUrl} onClick={onEdit}><WandSparkles aria-hidden="true" /> Refine in chat</button>

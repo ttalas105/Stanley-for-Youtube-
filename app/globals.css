@@ -2014,6 +2014,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, summary:focus
 .script-workspace { scroll-margin-block-start: 24px; }
 .thumbnail-workspace { width: min(760px, 100%); margin-top: 22px; }
 .generated-thumbnail { aspect-ratio: 16 / 9; overflow: hidden; margin: 0; border: 1px solid #303a49; border-radius: 14px; background: #111721; }
+.thumbnail-workspace.portrait { width: min(420px, 100%); }
+.generated-thumbnail.portrait { width: min(360px, 100%); aspect-ratio: 9 / 16; }
 .generated-thumbnail img { width: 100%; height: 100%; display: block; object-fit: cover; }
 .thumbnail-toolbar { min-height: 58px; display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 12px 0 0; }
 .thumbnail-toolbar > div:first-child { min-width: 0; display: grid; gap: 3px; }
@@ -2026,6 +2028,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, summary:focus
 .thumbnail-toolbar button svg { width: 15px; height: 15px; }
 .thumbnail-toolbar .thumbnail-edit { border-color: #5e55bf; background: #5f54d7; color: #fff; }
 .thumbnail-toolbar .thumbnail-edit:hover:not(:disabled) { border-color: #756be5; background: #7064e4; }
+.thumbnail-workspace.portrait .thumbnail-toolbar { align-items: flex-start; flex-wrap: wrap; }
 .thumbnail-unavailable { min-height: 220px; display: flex; align-items: center; justify-content: center; gap: 12px; border: 1px solid #303a49; border-radius: 14px; background: #101722; color: #727e90; }
 .thumbnail-unavailable > svg { width: 24px; height: 24px; }
 .thumbnail-unavailable p { display: grid; gap: 3px; margin: 0; }

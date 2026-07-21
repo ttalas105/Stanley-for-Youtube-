@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   buildThumbnailPrompt,
   generateThumbnailImage,
+  inferThumbnailAspectRatio,
   selectThumbnailReferenceInputs,
 } from "../app/api/generate-titles/thumbnail-image.mjs";
 
@@ -13,6 +14,16 @@ test("thumbnail prompt asks for one honest, legible 16:9 image", () => {
   assert.match(prompt, /Keep the visual claim honest/i);
   assert.match(prompt, /return only the completed thumbnail image/i);
   assert.doesNotMatch(prompt, /six.*concept/i);
+});
+
+test("thumbnail prompt preserves a Shorts format and excludes referenced public figures", () => {
+  const transcript = "Filming plan: Format: Vertical 9:16 Short, 45-55 seconds. Later, use David Goggins as a style reference.";
+  const prompt = buildThumbnailPrompt({ brief: "Generate the thumbnail for it", transcript });
+  assert.equal(inferThumbnailAspectRatio({ brief: "Generate the thumbnail for it", transcript }), "9:16");
+  assert.match(prompt, /Exactly 9:16/i);
+  assert.match(prompt, /vertical YouTube Shorts cover/i);
+  assert.match(prompt, /Do not depict that person/i);
+  assert.match(prompt, /do not invent the creator's appearance/i);
 });
 
 test("thumbnail references include images but exclude video and file URI parts", () => {
@@ -44,6 +55,24 @@ test("thumbnail layer calls the image interaction with a 16:9 1K response", asyn
   assert.equal(result.sourceUsed, true);
   assert.equal(result.width, 1376);
   assert.equal(result.height, 768);
+});
+
+test("thumbnail layer requests and returns a 9:16 Shorts cover", async () => {
+  let requestBody;
+  const imageData = "s".repeat(64);
+  const result = await generateThumbnailImage({
+    apiKey: "test-key",
+    brief: "Generate the thumbnail for this YouTube Short",
+    transcript: "Format: Vertical 9:16 Short, 45-55 seconds",
+    fetchImpl: async (_url, init) => {
+      requestBody = JSON.parse(init.body);
+      return new Response(JSON.stringify({ outputs: [{ type: "image", mime_type: "image/jpeg", data: imageData }] }), { status: 200 });
+    },
+  });
+  assert.equal(requestBody.response_format.aspect_ratio, "9:16");
+  assert.equal(result.aspectRatio, "9:16");
+  assert.equal(result.width, 768);
+  assert.equal(result.height, 1376);
 });
 
 test("thumbnail layer retries temporary image-model capacity errors", async () => {

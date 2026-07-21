@@ -6,7 +6,7 @@ import { requestedConnectedVideoCount, requestedResearchWindowHours, requestsBro
 import { storyboardSheetUrls } from "./youtube-storyboards.mjs";
 import { algorithmStrategyForIntent } from "./youtube-strategy.mjs";
 import { STANLEY_VOICE } from "./stanley-voice.mjs";
-import { generateThumbnailImage } from "./thumbnail-image.mjs";
+import { generateThumbnailImage, inferThumbnailAspectRatio } from "./thumbnail-image.mjs";
 import { channelContext, hasYouTubeCaptionAccess, readYouTubeSession } from "../youtube/oauth";
 import type { YouTubeSession } from "../youtube/oauth";
 import { resolveMemoryOwner } from "../memory/identity";
@@ -1676,12 +1676,14 @@ TRANSCRIPT_END
     }
     const renderThumbnailArtifact = async (thumbnailBrief = resolvedBrief) => {
       const runId = crypto.randomUUID();
+      const thumbnailAspectRatio = inferThumbnailAspectRatio({ brief: thumbnailBrief, transcript });
+      const thumbnailFormat = thumbnailAspectRatio === "9:16" ? "vertical Shorts cover" : "landscape thumbnail";
       await emitProgress?.({
         id: "thumbnail-render",
         label: "Rendering your thumbnail",
         detail: hasThumbnailReference
           ? "Using your image as visual source material"
-          : "Building one clear 16:9 composition",
+          : `Building one clear ${thumbnailAspectRatio} ${thumbnailFormat}`,
         status: "active",
         kind: "tool",
       });
@@ -1695,13 +1697,13 @@ TRANSCRIPT_END
       await emitProgress?.({
         id: "thumbnail-render",
         label: "Rendering your thumbnail",
-        detail: thumbnailImage.sourceUsed ? "Reference image applied" : "16:9 image ready",
+        detail: thumbnailImage.sourceUsed ? "Reference image applied" : `${thumbnailImage.aspectRatio} image ready`,
         status: "complete",
         kind: "tool",
       });
       const reply = thumbnailImage.sourceUsed
         ? "I used your image as the foundation and rebuilt it around one clear focal idea and an honest viewer promise."
-        : "I made one finished 16:9 thumbnail around the clearest promise in your video. You can ask me to edit any part of it.";
+        : `I made one finished ${thumbnailImage.aspectRatio} ${thumbnailImage.aspectRatio === "9:16" ? "Shorts cover" : "thumbnail"} around the clearest promise in your video. You can ask me to edit any part of it.`;
       return {
         reply,
         thumbnailImage: {
