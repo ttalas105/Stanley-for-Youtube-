@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { requestedResearchWindowHours, requestsBroadPopularVideos, requestsLatestConnectedVideo, resolveResearchAccess } from "../app/api/generate-titles/research-policy.mjs";
+import { requestedConnectedVideoCount, requestedResearchWindowHours, requestsBroadPopularVideos, requestsLatestConnectedVideo, resolveResearchAccess } from "../app/api/generate-titles/research-policy.mjs";
 
 test("does not treat a viral creative premise as permission to research", () => {
   assert.deepEqual(
@@ -35,6 +35,7 @@ test("opens public search for explicit trend windows and named channel analysis"
   for (const prompt of [
     "Find me the most popular videos in the last 24 hours, analyze them and create me a script.",
     "Can you access Casey Neistat's channel and analyze it?",
+    "Can you go to David Goggins' YouTube channel and make this idea similar to his?",
   ]) {
     assert.deepEqual(resolveResearchAccess(prompt), { publicSearch: true, channelSnapshot: false, videoEvidence: true }, prompt);
   }
@@ -45,6 +46,15 @@ test("keeps connected-channel analysis behind its own explicit request", () => {
     resolveResearchAccess("Based on my channel, suggest my next video."),
     { publicSearch: false, channelSnapshot: true, videoEvidence: true },
   );
+});
+
+test("recognizes bounded recent videos on the connected channel", () => {
+  assert.deepEqual(
+    resolveResearchAccess("Look at my last 3 videos and tell me what I should improve."),
+    { publicSearch: false, channelSnapshot: true, videoEvidence: true },
+  );
+  assert.equal(requestedConnectedVideoCount("Look at my last 3 videos and tell me what I should improve."), 3);
+  assert.equal(requestedConnectedVideoCount("Review my recent videos."), 0);
 });
 
 test("recognizes a request for the latest connected upload", () => {

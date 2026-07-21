@@ -124,6 +124,7 @@ test("recognizes explicit public YouTube trend and channel research", () => {
   const supported = [
     "Find me the most popular videos in the last 24 hours, analyze them and create me a script so I can replicate something similar in my own voice",
     "Can you access Casey Neistat's channel and analyze it?",
+    "Can you go to David Goggins' YouTube channel and make this idea similar to his?",
     "Do some research on a YouTuber named Jynxi and tell me why he does so well.",
     "Show me the top-performing YouTube videos from the past week.",
   ];

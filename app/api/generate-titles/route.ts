@@ -2,7 +2,7 @@ import { explicitYouTubeVideoId, looksLikeAttachedMediaAnalysis, looksLikeCreato
 import { isSimpleScriptFollowUp, resolveSelectedIdea } from "./conversation-context.mjs";
 import { sanitizeChannelFit } from "./idea-grounding.mjs";
 import { emptySemanticMemory, formatSemanticMemory, normalizeMemoryKey, selectRelevantSemanticMemory } from "./semantic-memory.mjs";
-import { requestedResearchWindowHours, requestsBroadPopularVideos, requestsLatestConnectedVideo, resolveResearchAccess } from "./research-policy.mjs";
+import { requestedConnectedVideoCount, requestedResearchWindowHours, requestsBroadPopularVideos, requestsLatestConnectedVideo, resolveResearchAccess } from "./research-policy.mjs";
 import { storyboardSheetUrls } from "./youtube-storyboards.mjs";
 import { algorithmStrategyForIntent } from "./youtube-strategy.mjs";
 import { STANLEY_VOICE } from "./stanley-voice.mjs";
@@ -848,7 +848,7 @@ async function classifyRequest(
         ? "idea_work"
         : requested.includes("title")
           ? "title_work"
-          : "youtube_guidance";
+          : "youtube_research";
     return {
       intent,
       deliverables: requested,
@@ -1079,6 +1079,7 @@ async function generateResponse(request: Request, emitProgress?: ProgressEmitter
   }
   const conversation = messages || [];
   const researchAccess = resolveResearchAccess(currentMessage, inputAttachments.some((attachment) => attachment.kind === "youtube"));
+  const connectedVideoLimit = requestedConnectedVideoCount(currentMessage) || 12;
   const researchWindowHours = requestedResearchWindowHours(currentMessage);
   const forceMostPopularChart = requestsBroadPopularVideos(currentMessage);
   const attachedContext = attachmentContext(inputAttachments);
@@ -1224,13 +1225,14 @@ async function generateResponse(request: Request, emitProgress?: ProgressEmitter
   const hasThumbnailReference = attachedMediaParts.some((part) => "inlineData" in part && part.inlineData.mimeType.startsWith("image/"));
   const hasUploadedSourceVideo = inputAttachments.some((attachment) => attachment.kind === "video" && attachment.data);
   const provider = new GeminiProviderAdapter(geminiKey, MODEL);
+  const allowSemanticPublicResearch = scope.intent === "youtube_research" && !researchAccess.channelSnapshot;
   const toolRegistry = createYouTubeToolRegistry({
     apiKey: youtubeKey,
     session: activeYouTubeSession,
     researchTopic,
     requestedPublishedWithinHours: researchWindowHours,
     forceMostPopularChart,
-    allowPublicSearch: demoCreator ? true : researchAccess.publicSearch,
+    allowPublicSearch: demoCreator ? true : researchAccess.publicSearch || allowSemanticPublicResearch,
     allowChannelSnapshot: demoCreator ? false : researchAccess.channelSnapshot,
     allowVideoEvidence: researchAccess.videoEvidence,
     fixedPublicChannelName: demoCreator?.channelName,
@@ -1451,7 +1453,7 @@ Answer the creator's exact question directly. If the channel snapshot has no upl
         });
         prefetchedEvidence = await toolRegistry.execute(
           prefetchedTool,
-          { scope: "connected_channel", maxVideos: 12 },
+          { scope: "connected_channel", maxVideos: connectedVideoLimit },
           request.signal,
         );
         prefetchedEvidenceDurationMs = Date.now() - snapshotStartedAt;
@@ -1567,7 +1569,7 @@ TRANSCRIPT_END
       scope.reason === "exact_youtube_video_evidence"
       || scope.reason === "connected_channel_research"
       || scope.reason === "public_youtube_research"
-      || (scope.intent === "youtube_research" && (Boolean(demoCreator) || researchAccess.publicSearch))
+      || scope.intent === "youtube_research"
     )
       ? await createResearchLayer(scope.intent !== "youtube_research")
       : null;

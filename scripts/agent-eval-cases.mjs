@@ -23,6 +23,15 @@ export const agentEvalCases = [
     requiredSuccessfulTools: ["youtube_channel_snapshot"],
   },
   {
+    id: "connected-channel-recent-review",
+    topic: "Look at my last 3 videos and tell me what I should improve.",
+    mode: "auto",
+    expects: "conversational",
+    requiredTools: ["youtube_channel_snapshot"],
+    requiredSuccessfulTools: ["youtube_channel_snapshot"],
+    forbiddenPatterns: ["I have reviewed your channel"],
+  },
+  {
     id: "latest-connected-video-summary",
     topic: "Hey Stanley, please look at my last YouTube video and tell me what it was about",
     mode: "auto",
@@ -37,6 +46,18 @@ export const agentEvalCases = [
     mode: "idea",
     expects: "ideas",
     requiredTools: ["youtube_search_reference_videos"],
+  },
+  {
+    id: "named-channel-style-reference",
+    topic: "Amazing. Can you go to David Goggins' YouTube channel and tell me how I can make this idea similar to his?",
+    mode: "idea",
+    messages: [
+      { role: "assistant", content: "Selected idea: Why my 5 AM routine failed and what I changed." },
+      { role: "user", content: "Amazing. Can you go to David Goggins' YouTube channel and tell me how I can make this idea similar to his?" },
+    ],
+    expects: "ideas",
+    requiredTools: ["youtube_search_reference_videos"],
+    requiredSuccessfulTools: ["youtube_search_reference_videos"],
   },
   {
     id: "exact-video-evidence",
