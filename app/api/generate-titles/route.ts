@@ -1247,33 +1247,86 @@ RUNTIME_CONTEXT_END`;
     const hasExistingArtifact = conversation.some((message) =>
       message.role === "assistant" && /(?:Title options|Idea options|Generated thumbnail):/.test(message.content),
     );
-    const createPublicResearchLayer = async (forArtifact: boolean) => {
+    const useConnectedChannelResearch = Boolean(!demoCreator && researchAccess.channelSnapshot);
+    const createResearchLayer = async (forArtifact: boolean) => {
+      let connectedSnapshot: Awaited<ReturnType<typeof toolRegistry.execute>> | null = null;
+      let connectedSnapshotDurationMs = 0;
+      if (useConnectedChannelResearch) {
+        const snapshotStartedAt = Date.now();
+        await emitProgress?.({
+          id: "connected-channel-snapshot",
+          label: "Reading your YouTube channel",
+          detail: "Reading the connected channel's current uploads and metrics",
+          status: "active",
+          kind: "tool",
+        });
+        connectedSnapshot = await toolRegistry.execute(
+          "youtube_channel_snapshot",
+          { scope: "connected_channel", maxVideos: 12 },
+          request.signal,
+        );
+        connectedSnapshotDurationMs = Date.now() - snapshotStartedAt;
+        await emitProgress?.({
+          id: "connected-channel-snapshot",
+          label: "Reading your YouTube channel",
+          detail: connectedSnapshot.summary,
+          status: connectedSnapshot.status === "complete" || connectedSnapshot.status === "partial" ? "complete" : "limited",
+          kind: "tool",
+        });
+      }
+      const researchInstruction = useConnectedChannelResearch
+        ? `The creator explicitly asked you to inspect their connected YouTube channel. Use youtube_channel_snapshot before answering.
+
+The channel snapshot has already been fetched and appears below. Do not call another tool. Analyze only that snapshot. Identify the few patterns that materially affect what they should improve next, distinguish observations from hypotheses, and never invent private metrics that the snapshot did not return. If it reports that no channel is connected, say so plainly instead of failing. ${forArtifact ? "Keep this research handoff under 140 words because a separate creation layer will use it next." : "Refer to specific returned uploads or metrics naturally when they support the advice."}
+
+CONNECTED_CHANNEL_SNAPSHOT_START
+${JSON.stringify(connectedSnapshot)}
+CONNECTED_CHANNEL_SNAPSHOT_END`
+        : `The creator explicitly asked for public YouTube research. Use youtube_search_reference_videos before answering.
+
+If they named a public creator or channel, search that exact channel with channelName. If they specified a period such as the last 24 hours, set publishedWithinHours to that exact window and do not add an invented topic query. Otherwise use one focused topic query. Analyze only the returned public metadata and statistics; never claim you watched footage or read a transcript. Give the useful pattern: what the examples have in common, what seems transferable, and what the sample cannot prove. ${forArtifact ? "Keep this research handoff under 140 words because a separate creation layer will use it next." : "Refer to specific returned examples naturally so the source list is useful."}`;
       const run = await creativeJson(
-        `The creator explicitly asked for public YouTube research. Use youtube_search_reference_videos before answering.
+        `${researchInstruction}
 
 TRANSCRIPT_START
 ${transcript}
 TRANSCRIPT_END
-
-If they named a public creator or channel, search that exact channel with channelName. If they specified a period such as the last 24 hours, set publishedWithinHours to that exact window and do not add an invented topic query. Otherwise use one focused topic query. Analyze only the returned public metadata and statistics; never claim you watched footage or read a transcript. Give the useful pattern: what the examples have in common, what seems transferable, and what the sample cannot prove. ${forArtifact ? "Keep this research handoff under 140 words because a separate creation layer will use it next." : "Refer to specific returned examples naturally so the source list is useful."}`,
+`,
         youtubeResearchSchema,
         forArtifact ? 1200 : 2200,
-        true,
+        !useConnectedChannelResearch,
         1,
       );
+      if (connectedSnapshot) {
+        run.toolResults.unshift(connectedSnapshot);
+        run.trace.toolCalls.unshift({
+          round: 0,
+          name: "youtube_channel_snapshot",
+          durationMs: connectedSnapshotDurationMs,
+          status: connectedSnapshot.status,
+          memoHit: false,
+          ...(connectedSnapshot.error?.code ? { errorCode: connectedSnapshot.error.code } : {}),
+        });
+      }
       const result = run.output as { reply?: unknown };
       const reply = cleanReply(result.reply, forArtifact ? 1_500 : 3_200);
       if (!reply) throw new Error("Gemini returned an empty YouTube research response");
-      const searchResults = run.toolResults.filter((item) => item.tool === "youtube_search_reference_videos" && item.ok);
-      if (!searchResults.length) throw new Error("The public YouTube research layer did not run its search");
-      const evidence = JSON.stringify(searchResults.map(({ summary, data, warnings }) => ({ summary, data, warnings }))).slice(0, 16_000);
-      return { run, reply, research: researchFromToolResults(run.toolResults), evidence };
+      const requiredTool = useConnectedChannelResearch ? "youtube_channel_snapshot" : "youtube_search_reference_videos";
+      const evidenceResults = run.toolResults.filter((item) => item.tool === requiredTool && (useConnectedChannelResearch || item.ok));
+      if (!evidenceResults.length) throw new Error(`The YouTube research layer did not run ${requiredTool}`);
+      const evidence = JSON.stringify(evidenceResults.map(({ summary, data, warnings }) => ({ summary, data, warnings }))).slice(0, 16_000);
+      return {
+        run,
+        reply,
+        research: useConnectedChannelResearch ? undefined : researchFromToolResults(run.toolResults),
+        evidence,
+      };
     };
-    const publicResearchLayer = (
+    const researchLayer = (
       scope.reason === "public_youtube_research"
       || (scope.intent === "youtube_research" && (Boolean(demoCreator) || researchAccess.publicSearch))
     )
-      ? await createPublicResearchLayer(scope.intent !== "youtube_research")
+      ? await createResearchLayer(scope.intent !== "youtube_research")
       : null;
     const renderThumbnailArtifact = async (thumbnailBrief = resolvedBrief) => {
       const runId = crypto.randomUUID();
@@ -1454,16 +1507,16 @@ Keep it conversational and easy to scan. Do not force an idea batch, script, tit
     }
 
     if (scope.intent === "youtube_research") {
-      if (!publicResearchLayer) throw new Error("The public YouTube research layer was not initialized");
+      if (!researchLayer) throw new Error("The YouTube research layer was not initialized");
       return Response.json({
-        reply: publicResearchLayer.reply,
-        ...(publicResearchLayer.research ? { research: publicResearchLayer.research } : {}),
+        reply: researchLayer.reply,
+        ...(researchLayer.research ? { research: researchLayer.research } : {}),
         conversationTopic: resolvedBrief,
         blocked: false,
         conversational: true,
         mode: "auto",
-        model: publicResearchLayer.run.trace.model,
-        agent: agentMetadata(publicResearchLayer.run),
+        model: researchLayer.run.trace.model,
+        agent: agentMetadata(researchLayer.run),
       });
     }
 
@@ -1678,7 +1731,7 @@ ${scope.intent === "social"
         status: "active",
         kind: "thinking",
       });
-      const scriptPrompt = `${followUpPrompt}${publicResearchLayer ? `\n\nPUBLIC_RESEARCH_HANDOFF_START\n${publicResearchLayer.reply}\n${publicResearchLayer.evidence}\nPUBLIC_RESEARCH_HANDOFF_END` : ""}\n\nWrite the complete word-for-word YouTube script requested in the final creator message. Follow the selected idea, hook, and outline from the transcript when present. If the creator refers to an earlier numbered option, resolve that exact option from the transcript before writing; never replace it with a generic adjacent topic. ${publicResearchLayer ? "Use the completed public research handoff. Extract a transferable premise or structure without copying distinctive wording, identity, or execution, and do not search again." : "Decide whether fresh comparable evidence is actually required; do not repeat research already represented in the transcript."}
+      const scriptPrompt = `${followUpPrompt}${researchLayer ? `\n\nYOUTUBE_RESEARCH_HANDOFF_START\n${researchLayer.reply}\n${researchLayer.evidence}\nYOUTUBE_RESEARCH_HANDOFF_END` : ""}\n\nWrite the complete word-for-word YouTube script requested in the final creator message. Follow the selected idea, hook, and outline from the transcript when present. If the creator refers to an earlier numbered option, resolve that exact option from the transcript before writing; never replace it with a generic adjacent topic. ${researchLayer ? "Use the completed YouTube research handoff. Extract a transferable premise or structure without copying distinctive wording, identity, or execution, and do not search again." : "Decide whether fresh comparable evidence is actually required; do not repeat research already represented in the transcript."}
 
 Set script.title to one polished, publishable YouTube title that matches the final script's specific promise. Treat a requested title as part of this script package, not as a separate job. Return only the script package defined by the schema. A filming plan is produced by a separate production layer only when the creator explicitly asks for one.
 
@@ -1701,20 +1754,20 @@ BAD OPENING: "They say this habit will change your life, but is it true?"
 BETTER: "At [time], I recorded [baseline]. Seven days from now, I'll run the same test again."
 BAD ENDING: "So was it a life-changing hack or a total waste of time?"
 BETTER: "The number moved from [baseline] to [result]. The part I'm keeping is [specific decision]."`;
-      const scriptToolsEnabled = !publicResearchLayer && (
+      const scriptToolsEnabled = !researchLayer && (
         researchAccess.publicSearch || researchAccess.channelSnapshot || researchAccess.videoEvidence
       );
       const scriptRun = await creativeJson(
         scriptPrompt,
         fullScriptSchema,
-        publicResearchLayer ? 5000 : 6500,
+        researchLayer ? 5000 : 6500,
         scriptToolsEnabled,
         1,
         MODEL,
         45_000,
       );
       const scriptResult = scriptRun.output as { reply?: unknown; script?: unknown };
-      const research = publicResearchLayer?.research || researchFromToolResults(scriptRun.toolResults);
+      const research = researchLayer?.research || researchFromToolResults(scriptRun.toolResults);
       const script = normalizeScript(scriptResult.script);
       if (!script) throw new Error("Gemini returned an incomplete script");
       await emitProgress?.({
@@ -1744,7 +1797,7 @@ FINAL_VIDEO_PACKAGE_END`)
       if (thumbnailArtifact) extraAgents.push(thumbnailArtifact.agent);
       return Response.json({
         reply: [
-          publicResearchLayer?.reply,
+          researchLayer?.reply,
           scriptReply,
           filmingArtifact?.reply,
           thumbnailArtifact ? `I also rendered the finished thumbnail${hasThumbnailReference ? " using your image" : ""}.` : "",
@@ -1757,12 +1810,12 @@ FINAL_VIDEO_PACKAGE_END`)
         mode: "idea",
         blocked: false,
         completedDeliverables: Array.from(requestedDeliverables),
-        model: [publicResearchLayer?.run.trace.model, scriptRun.trace.model, filmingArtifact?.model, thumbnailArtifact?.model].filter(Boolean).join(" + "),
+        model: [researchLayer?.run.trace.model, scriptRun.trace.model, filmingArtifact?.model, thumbnailArtifact?.model].filter(Boolean).join(" + "),
         agent: {
           runId: scriptAgent.runId,
-          modelRounds: (publicResearchLayer?.run.trace.modelRounds || 0) + scriptAgent.modelRounds + extraAgents.reduce((total, item) => total + item.modelRounds, 0),
-          durationMs: (publicResearchLayer?.run.trace.durationMs || 0) + scriptAgent.durationMs + extraAgents.reduce((total, item) => total + item.durationMs, 0),
-          toolCalls: [...(publicResearchLayer ? agentMetadata(publicResearchLayer.run).toolCalls : []), ...scriptAgent.toolCalls, ...extraAgents.flatMap((item) => item.toolCalls)],
+          modelRounds: (researchLayer?.run.trace.modelRounds || 0) + scriptAgent.modelRounds + extraAgents.reduce((total, item) => total + item.modelRounds, 0),
+          durationMs: (researchLayer?.run.trace.durationMs || 0) + scriptAgent.durationMs + extraAgents.reduce((total, item) => total + item.durationMs, 0),
+          toolCalls: [...(researchLayer ? agentMetadata(researchLayer.run).toolCalls : []), ...scriptAgent.toolCalls, ...extraAgents.flatMap((item) => item.toolCalls)],
         },
       });
     }
