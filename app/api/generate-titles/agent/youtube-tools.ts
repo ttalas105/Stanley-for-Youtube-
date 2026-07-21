@@ -245,7 +245,7 @@ function searchReferenceVideosTool(options: YouTubeToolOptions): ToolDefinition 
         channelName: { type: "string", minLength: 2, maxLength: 100, description: "Exact public creator or channel display name when the creator asks to analyze a named channel." },
         publishedWithinHours: { type: "integer", minimum: 1, maximum: 720, description: "Only return videos published within this many hours. Use 24 for 'the last 24 hours'." },
         maxResults: { type: "integer", minimum: 4, maximum: 25, description: "Maximum comparable videos to return. Defaults to 12." },
-        duration: { type: "string", enum: ["long_form", "any"], description: "long_form keeps videos at least 90 seconds. Defaults to long_form." },
+        duration: { type: "string", enum: ["long_form", "any"], description: "long_form prefers videos at least 90 seconds. Defaults to long_form; if none are found, shorter uploads are returned as partial style evidence." },
         order: { type: "string", enum: ["view_count", "relevance", "date"], description: "YouTube search order. Defaults to view_count for evidence discovery." },
         pageToken: { type: "string", maxLength: 100, description: "Opaque next-page cursor returned by a previous call." },
       },
@@ -360,13 +360,13 @@ function searchReferenceVideosTool(options: YouTubeToolOptions): ToolDefinition 
       const details = await youtubeRequest<VideoListResponse>(videosUrl, options, context.signal);
       const capturedAt = new Date().toISOString();
       const now = Date.now();
-      const videos = (details.items || []).flatMap((item): ResearchVideo[] => {
+      const allVideos = (details.items || []).flatMap((item): ResearchVideo[] => {
         const id = item.id || "";
         const title = item.snippet?.title?.trim() || "";
         const channel = item.snippet?.channelTitle?.trim() || "Unknown channel";
         const publishedAt = item.snippet?.publishedAt || "";
         const durationSeconds = parseDurationSeconds(item.contentDetails?.duration || "");
-        if (!id || !title || !publishedAt || (duration === "long_form" && durationSeconds < 90)) return [];
+        if (!id || !title || !publishedAt) return [];
         const views = numberValue(item.statistics?.viewCount);
         const ageDays = Math.max(1, (now - Date.parse(publishedAt)) / 86_400_000);
         const thumbnails = item.snippet?.thumbnails;
@@ -381,20 +381,34 @@ function searchReferenceVideosTool(options: YouTubeToolOptions): ToolDefinition 
           thumbnailUrl: thumbnails?.maxres?.url || thumbnails?.high?.url || thumbnails?.medium?.url || thumbnails?.default?.url || `https://i.ytimg.com/vi/${id}/hqdefault.jpg`,
           url: `https://www.youtube.com/watch?v=${id}`,
         }];
-      }).sort((left, right) => right.viewsPerDay - left.viewsPerDay || right.views - left.views).slice(0, maxResults);
+      });
+      const durationMatches = duration === "long_form"
+        ? allVideos.filter((video) => video.durationSeconds >= 90)
+        : allVideos;
+      const usedShorterFallback = duration === "long_form" && durationMatches.length === 0 && allVideos.length > 0;
+      const videos = (usedShorterFallback ? allVideos : durationMatches)
+        .sort((left, right) => right.viewsPerDay - left.viewsPerDay || right.views - left.views)
+        .slice(0, maxResults);
       const sources = videos.map((video) => youtubeSource(video, capturedAt));
       const searchLabel = channelName || query || `the last ${publishedWithinHours} hours`;
-      const status = videos.length >= Math.min(4, maxResults) ? "complete" : videos.length ? "partial" : "empty";
+      const status = usedShorterFallback ? "partial" : videos.length >= Math.min(4, maxResults) ? "complete" : videos.length ? "partial" : "empty";
       return {
         ok: true,
         tool: "youtube_search_reference_videos",
         status,
-        summary: videos.length ? `Found ${videos.length} public videos for “${searchLabel}”.` : `The search returned videos, but none matched the explicit duration filter for “${searchLabel}”.`,
+        summary: usedShorterFallback
+          ? `No long-form uploads appeared in this result set, so ${videos.length} shorter public uploads were kept as partial style evidence for “${searchLabel}”.`
+          : videos.length
+            ? `Found ${videos.length} public videos for “${searchLabel}”.`
+            : `The search returned videos, but none matched the requested duration for “${searchLabel}”.`,
         data: { query: searchLabel, videos } satisfies SearchData,
         handle: `youtube-search:${encodeURIComponent(searchLabel.toLowerCase()).slice(0, 80)}:${capturedAt.slice(0, 10)}`,
         coverage: { returned: videos.length, totalKnown: search.pageInfo?.totalResults, complete: !search.nextPageToken, ...(search.nextPageToken ? { nextCursor: search.nextPageToken } : {}) },
         sources,
-        warnings: ["Public view counts and views per day are current observations, not historical CTR, retention, or causal algorithm signals."],
+        warnings: [
+          ...(usedShorterFallback ? ["No long-form upload matched the first result set; use the shorter uploads only for observable channel style, not long-form structure."] : []),
+          "Public view counts and views per day are current observations, not historical CTR, retention, or causal algorithm signals.",
+        ],
       };
     },
   };

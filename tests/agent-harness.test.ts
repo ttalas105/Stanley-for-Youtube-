@@ -454,6 +454,48 @@ test("searches videos only after resolving one exact channel display name", asyn
   }
 });
 
+test("keeps shorter named-channel uploads when the long-form result set is empty", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input) => {
+    const url = new URL(String(input));
+    if (url.searchParams.get("type") === "channel") {
+      return Response.json({ items: [
+        { id: { channelId: "goggins-channel" }, snippet: { channelId: "goggins-channel", title: "David Goggins" } },
+      ] });
+    }
+    if (url.pathname.endsWith("/search")) {
+      return Response.json({ items: [
+        { id: { videoId: "short-one" } },
+        { id: { videoId: "short-two" } },
+      ] });
+    }
+    return Response.json({ items: [
+      {
+        id: "short-one",
+        snippet: { title: "Stay hard", channelTitle: "David Goggins", publishedAt: new Date(Date.now() - 86_400_000).toISOString(), thumbnails: {} },
+        statistics: { viewCount: "90000" },
+        contentDetails: { duration: "PT48S" },
+      },
+      {
+        id: "short-two",
+        snippet: { title: "No excuses", channelTitle: "David Goggins", publishedAt: new Date(Date.now() - 172_800_000).toISOString(), thumbnails: {} },
+        statistics: { viewCount: "60000" },
+        contentDetails: { duration: "PT39S" },
+      },
+    ] });
+  };
+  try {
+    const registry = createYouTubeToolRegistry({ apiKey: "test-key", session: null, allowPublicSearch: true, allowChannelSnapshot: false, allowVideoEvidence: false });
+    const result = await registry.execute("youtube_search_reference_videos", { channelName: "David Goggins", maxResults: 4, duration: "long_form" }, new AbortController().signal);
+    assert.equal(result.status, "partial");
+    assert.equal((result.data as { videos?: unknown[] }).videos?.length, 2);
+    assert.match(result.summary, /shorter public uploads/i);
+    assert.match(result.warnings[0] || "", /style/i);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("uses the most-popular chart for a broad recent-video window", async () => {
   const originalFetch = globalThis.fetch;
   const requestedUrls: string[] = [];
