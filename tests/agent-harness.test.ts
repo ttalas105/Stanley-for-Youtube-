@@ -454,6 +454,43 @@ test("searches videos only after resolving one exact channel display name", asyn
   }
 });
 
+test("recovers one-character creator misspellings without selecting clip channels", async () => {
+  const originalFetch = globalThis.fetch;
+  const requestedUrls: string[] = [];
+  globalThis.fetch = async (input) => {
+    const url = new URL(String(input));
+    requestedUrls.push(url.toString());
+    if (url.searchParams.get("type") === "channel") {
+      return Response.json({ items: [
+        { id: { channelId: "jynxzi-main" }, snippet: { channelId: "jynxzi-main", title: "Jynxzi" } },
+        { id: { channelId: "jynxzi-podcast" }, snippet: { channelId: "jynxzi-podcast", title: "Jynxzi Podcast" } },
+        { id: { channelId: "jynxi-clips" }, snippet: { channelId: "jynxi-clips", title: "Jynxi Clips" } },
+      ] });
+    }
+    if (url.pathname.endsWith("/search")) return Response.json({ items: [{ id: { videoId: "video123" } }] });
+    return Response.json({ items: [{
+      id: "video123",
+      snippet: { title: "A real upload", channelTitle: "Jynxzi", publishedAt: new Date(Date.now() - 86_400_000).toISOString(), thumbnails: {} },
+      statistics: { viewCount: "12000" },
+      contentDetails: { duration: "PT8M" },
+    }] });
+  };
+  try {
+    const registry = createYouTubeToolRegistry({ apiKey: "test-key", session: null, allowPublicSearch: true, allowChannelSnapshot: false, allowVideoEvidence: false });
+    const result = await registry.execute("youtube_search_reference_videos", { channelName: "Jynxi", maxResults: 4 }, new AbortController().signal);
+    assert.equal(result.status, "partial");
+    assert.equal(new URL(requestedUrls[1] || "http://invalid").searchParams.get("channelId"), "jynxzi-main");
+    assert.match(result.warnings.join(" "), /resolved.+Jynxi.+Jynxzi/i);
+    assert.deepEqual((result.data as { resolvedChannel?: unknown }).resolvedChannel, {
+      requestedName: "Jynxi",
+      title: "Jynxzi",
+      corrected: true,
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("keeps shorter named-channel uploads when the long-form result set is empty", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (input) => {
