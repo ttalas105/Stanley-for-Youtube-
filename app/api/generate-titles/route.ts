@@ -7,6 +7,7 @@ import { storyboardSheetUrls } from "./youtube-storyboards.mjs";
 import { algorithmStrategyForIntent } from "./youtube-strategy.mjs";
 import { STANLEY_VOICE } from "./stanley-voice.mjs";
 import { generateThumbnailImage, inferThumbnailAspectRatio } from "./thumbnail-image.mjs";
+import { hasPriorAssistantAnalysisForVideo } from "./attachment-policy.mjs";
 import { channelContext, hasYouTubeCaptionAccess, readYouTubeSession } from "../youtube/oauth";
 import type { YouTubeSession } from "../youtube/oauth";
 import { resolveMemoryOwner } from "../memory/identity";
@@ -625,12 +626,10 @@ async function mediaParts(attachments: InputAttachment[], signal: AbortSignal): 
         const readablePreviews = previews.filter((part): part is GeminiPart => Boolean(part));
         parts.push(...readablePreviews);
       }
-      // Public videos can be read directly. Private and unlisted owner videos
-      // are grounded through authenticated metadata, captions, and any
-      // preview/storyboard frames available above.
-      if (attachment.privacyStatus === "public") {
-        parts.push({ fileData: { fileUri: attachment.url } });
-      }
+      // Do not send YouTube watch URLs as Gemini file_data. Access to those
+      // URLs is permission-dependent and can fail the entire response with a
+      // 403. Public and owner-selected videos are grounded through the exact
+      // evidence tool, captions, metadata, and preview/storyboard frames.
     }
   }
   return { parts };
@@ -1221,7 +1220,12 @@ async function generateResponse(request: Request, emitProgress?: ProgressEmitter
     ? `SELECTED_CREATOR_SIMULATION_START\nThe tester selected ${demoCreator.title} (${demoCreator.handle}) as a public demo workspace. Build recommendations for that channel using observable public patterns. Do not use the signed-in tester's identity, memories, private analytics, or uploads. Do not claim to be ${demoCreator.title}; say "for ${demoCreator.title}'s channel" when the distinction matters. For channel-specific creation work, inspect the selected channel with the public YouTube search tool before making performance claims.\nSELECTED_CREATOR_SIMULATION_END`
     : "";
   const creativeSystem = [strategyGroundedSystem, agentRules, privateContexts, demoCreatorContext].filter(Boolean).join("\n\n");
-  const attachedMedia = await mediaParts(inputAttachments, request.signal);
+  const selectedYouTubeAttachment = inputAttachments.find((attachment) => attachment.kind === "youtube" && attachment.videoId);
+  const reusePriorVideoAnalysis = scope.intent === "video_analysis"
+    && hasPriorAssistantAnalysisForVideo(conversation, selectedYouTubeAttachment || {});
+  const attachedMedia = reusePriorVideoAnalysis
+    ? { parts: [] }
+    : await mediaParts(inputAttachments, request.signal);
   const attachedMediaParts = attachedMedia.parts;
   const hasThumbnailReference = attachedMediaParts.some((part) => "inlineData" in part && part.inlineData.mimeType.startsWith("image/"));
   const hasUploadedSourceVideo = inputAttachments.some((attachment) => attachment.kind === "video" && attachment.data);
@@ -1616,7 +1620,7 @@ TRANSCRIPT_END
         evidenceResult: evidenceResults.at(-1),
       };
     };
-    const researchLayer = (
+    const researchLayer = !reusePriorVideoAnalysis && (
       scope.reason === "exact_youtube_video_evidence"
       || scope.reason === "connected_channel_research"
       || scope.reason === "public_youtube_research"
@@ -1837,7 +1841,7 @@ For an open request such as "what can you tell me about this video?", answer in 
 Keep it conversational and easy to scan. Do not force an idea batch, script, title list, or thumbnail concepts unless the creator asks. Do not ask a question when the media and metadata already support a useful answer. If the video itself is inaccessible, clearly separate the metadata you can verify from content you cannot inspect.`,
         videoAnalysisSchema,
         1800,
-        true,
+        !reusePriorVideoAnalysis,
         1,
       );
       const analysisResult = analysisRun.output as { reply?: unknown };

@@ -51,6 +51,10 @@ test("keeps AI keys server-side and removes the disposable starter", async () =>
   assert.match(route, /createYouTubeToolRegistry/);
   assert.match(route, /connected_latest_video_research/);
   assert.match(route, /youtube_channel_snapshot[\s\S]*youtube_get_video_evidence/);
+  assert.doesNotMatch(route, /parts\.push\(\{\s*fileData:/);
+  assert.match(route, /Do not send YouTube watch URLs as Gemini file_data/);
+  assert.match(route, /1800,\s*!reusePriorVideoAnalysis,\s*1,/);
+  assert.match(route, /const researchLayer = !reusePriorVideoAnalysis && \(/);
   assert.match(route, /allowSemanticPublicResearch/);
   assert.doesNotMatch(route, /researchYouTube\(/);
   assert.match(youtubeTools, /youtube\/v3\/search/);
