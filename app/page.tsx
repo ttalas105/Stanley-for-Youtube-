@@ -2375,7 +2375,13 @@ function ChromeExtensionAccess() {
   return <section className="extension-access-view" aria-labelledby="extension-access-title">
     <article className="extension-access-card">
       <div className="extension-access-mascot" aria-hidden="true">
-        <span />
+        <span className="extension-access-halo" />
+        <span className="extension-access-orbit extension-access-orbit-wide"><i /><i /></span>
+        <span className="extension-access-orbit extension-access-orbit-tall"><i /><i /></span>
+        <i className="extension-access-star extension-access-star-one" />
+        <i className="extension-access-star extension-access-star-two" />
+        <i className="extension-access-star extension-access-star-three" />
+        <i className="extension-access-star extension-access-star-four" />
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src="/stanley-mascot-dashboard.png" alt="" />
       </div>
@@ -2388,7 +2394,6 @@ function ChromeExtensionAccess() {
           Open Chrome Web Store
           <ExternalLink aria-hidden="true" />
         </a>
-        <small>Install once. Turn Stanley on whenever you need it.</small>
       </div>
     </article>
   </section>;

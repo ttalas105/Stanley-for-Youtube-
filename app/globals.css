@@ -3042,14 +3042,17 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, summary:focus
 }
 
 .extension-access-card {
-  width: min(820px, 100%);
-  min-height: 390px;
+  position: relative;
+  width: min(860px, 100%);
+  min-height: 410px;
   display: grid;
-  grid-template-columns: 270px minmax(0, 1fr);
+  grid-template-columns: 315px minmax(0, 1fr);
   overflow: hidden;
   border: 1px solid var(--app-border);
   border-radius: 14px;
-  background: var(--app-surface, #0d121b);
+  background:
+    radial-gradient(circle at 19% 50%, rgba(99, 82, 225, .13), transparent 29%),
+    var(--app-surface, #0d121b);
   animation: extension-access-enter 240ms cubic-bezier(.16, 1, .3, 1) both;
 }
 
@@ -3057,25 +3060,101 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, summary:focus
   position: relative;
   display: grid;
   place-items: center;
-  overflow: hidden;
-  border-right: 1px solid var(--app-border);
-  background: #0a1019;
+  overflow: visible;
+  isolation: isolate;
 }
 
-.extension-access-mascot > span {
+.extension-access-halo {
   position: absolute;
-  width: 220px;
-  height: 220px;
+  width: 250px;
+  height: 250px;
   border-radius: 50%;
-  background: radial-gradient(circle, rgba(113, 99, 238, .2), rgba(113, 99, 238, .045) 52%, transparent 72%);
+  background: radial-gradient(circle, rgba(113, 99, 238, .25), rgba(113, 99, 238, .07) 48%, transparent 70%);
+}
+
+.extension-access-orbit {
+  position: absolute;
+  z-index: 0;
+  display: block;
+  border: 1px solid rgba(123, 104, 239, .3);
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+.extension-access-orbit-wide {
+  width: 276px;
+  height: 146px;
+  transform: rotate(-14deg);
+}
+
+.extension-access-orbit-tall {
+  width: 188px;
+  height: 276px;
+  border-color: rgba(111, 94, 225, .18);
+  transform: rotate(27deg);
+}
+
+.extension-access-orbit > i {
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  display: block;
+  border-radius: 50%;
+  background: #7464e9;
+  box-shadow: 0 0 7px rgba(116, 100, 233, .5);
+}
+
+.extension-access-orbit-wide > i:first-child { top: 5px; left: 62px; }
+.extension-access-orbit-wide > i:last-child { right: 8px; bottom: 34px; width: 5px; height: 5px; }
+.extension-access-orbit-tall > i:first-child { top: 30px; right: 18px; width: 4px; height: 4px; }
+.extension-access-orbit-tall > i:last-child { bottom: 17px; left: 43px; width: 6px; height: 6px; }
+
+.extension-access-star {
+  position: absolute;
+  z-index: 2;
+  width: 8px;
+  height: 8px;
+  display: block;
+  color: #9f94ff;
+  opacity: .82;
+}
+
+.extension-access-star::before,
+.extension-access-star::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  border-radius: 999px;
+  background: currentColor;
+}
+
+.extension-access-star::before { width: 1px; height: 100%; }
+.extension-access-star::after { width: 100%; height: 1px; }
+.extension-access-star-one { top: 74px; left: 38px; width: 11px; height: 11px; color: #c3bcff; }
+.extension-access-star-two { top: 92px; right: 25px; width: 5px; height: 5px; }
+.extension-access-star-three { bottom: 78px; left: 29px; width: 6px; height: 6px; opacity: .58; }
+.extension-access-star-four { right: 37px; bottom: 57px; width: 9px; height: 9px; color: #8172ed; }
+
+.extension-access-mascot::after {
+  content: "";
+  position: absolute;
+  bottom: 87px;
+  z-index: 0;
+  width: 118px;
+  height: 10px;
+  border-radius: 50%;
+  background: rgba(77, 61, 192, .24);
+  filter: blur(6px);
 }
 
 .extension-access-mascot img {
   position: relative;
-  z-index: 1;
-  width: 184px;
-  height: 184px;
+  z-index: 3;
+  width: 198px;
+  height: 198px;
   object-fit: contain;
+  filter: drop-shadow(0 7px 10px rgba(42, 27, 128, .24));
 }
 
 .extension-access-copy {
@@ -3084,7 +3163,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, summary:focus
   flex-direction: column;
   align-items: flex-start;
   justify-content: center;
-  padding: 52px;
+  padding: 56px 60px 56px 42px;
 }
 
 .extension-access-product {
@@ -3163,12 +3242,6 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, summary:focus
   margin-left: 2px;
 }
 
-.extension-access-copy > small {
-  margin-top: 12px;
-  color: #707b8d;
-  font-size: .66rem;
-}
-
 @keyframes extension-access-enter {
   from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: none; }
@@ -3177,8 +3250,11 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, summary:focus
 @media (max-width: 760px) {
   .extension-access-view { align-items: start; padding: 24px 18px 40px; }
   .extension-access-card { grid-template-columns: 1fr; }
-  .extension-access-mascot { min-height: 210px; border-right: 0; border-bottom: 1px solid var(--app-border); }
-  .extension-access-mascot img { width: 150px; height: 150px; }
+  .extension-access-mascot { min-height: 250px; }
+  .extension-access-orbit-wide { width: 250px; height: 130px; }
+  .extension-access-orbit-tall { width: 170px; height: 244px; }
+  .extension-access-mascot::after { bottom: 43px; }
+  .extension-access-mascot img { width: 168px; height: 168px; }
   .extension-access-copy { padding: 34px 28px 38px; }
   .extension-access-copy h1 { font-size: 1.72rem; }
 }
