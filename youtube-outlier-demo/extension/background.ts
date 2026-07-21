@@ -3,6 +3,7 @@ import type { ChannelAnalysisResponse, ExtensionResponse, SupportedChannelIdenti
 
 const BACKEND_ORIGIN = "http://localhost:3000";
 const BACKEND_URL = `${BACKEND_ORIGIN}/analyze-channel`;
+const BACKEND_TIMEOUT_MS = 25_000;
 
 chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) => {
   if (!isBackgroundMessage(message)) {
@@ -24,12 +25,14 @@ async function analyzeChannel(channel: SupportedChannelIdentifier): Promise<Chan
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(channel),
+      signal: AbortSignal.timeout(BACKEND_TIMEOUT_MS),
     });
     const payload: unknown = await response.json().catch(() => null);
     if (!response.ok) throw new Error(errorFromPayload(payload) || `Backend returned ${response.status}`);
     if (!isChannelAnalysisResponse(payload)) throw new Error("Backend returned an invalid analysis response.");
     return payload;
   } catch (error: unknown) {
+    if (isTimeoutError(error)) throw new Error("Channel analysis timed out. Try again in a moment.");
     if (error instanceof TypeError) throw new Error("Backend not running. Start the server on http://localhost:3000 and try again.");
     throw error;
   }
@@ -37,12 +40,13 @@ async function analyzeChannel(channel: SupportedChannelIdentifier): Promise<Chan
 
 async function backendGet(path: string): Promise<unknown> {
   try {
-    const response = await fetch(`${BACKEND_ORIGIN}${path}`);
+    const response = await fetch(`${BACKEND_ORIGIN}${path}`, { signal: AbortSignal.timeout(BACKEND_TIMEOUT_MS) });
     const payload: unknown = await response.json().catch(() => null);
     if (!response.ok) throw new Error(errorFromPayload(payload) || `Backend returned ${response.status}`);
     if (!isRecord(payload)) throw new Error("Backend returned an invalid snapshot response.");
     return payload;
   } catch (error: unknown) {
+    if (isTimeoutError(error)) throw new Error("Channel history timed out. Try again in a moment.");
     if (error instanceof TypeError) throw new Error("Backend not running. Start the server on http://localhost:3000 and try again.");
     throw error;
   }
@@ -50,4 +54,8 @@ async function backendGet(path: string): Promise<unknown> {
 
 function errorFromPayload(payload: unknown): string | null {
   return isRecord(payload) && typeof payload.error === "string" ? payload.error : null;
+}
+
+function isTimeoutError(error: unknown): boolean {
+  return error instanceof DOMException && error.name === "TimeoutError";
 }

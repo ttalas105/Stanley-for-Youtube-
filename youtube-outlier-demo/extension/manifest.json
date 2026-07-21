@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Stanley for YouTube — Outliers",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Automatically analyze YouTube channels and show recent long-form video outliers.",
   "permissions": ["activeTab", "scripting", "storage"],
   "host_permissions": ["http://localhost:3000/*", "https://*.youtube.com/*"],

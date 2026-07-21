@@ -1,67 +1,89 @@
 import { getErrorMessage, isRecord } from "../shared/guards";
 
 const AUTO_SCAN_KEY = "autoScanEnabled";
-const startButton = document.querySelector<HTMLButtonElement>("#start");
-const startLabel = document.querySelector<HTMLSpanElement>("#start-label");
-const subtitle = document.querySelector<HTMLParagraphElement>("#subtitle");
-const statusText = document.querySelector<HTMLParagraphElement>("#status");
+const toggleButton = requiredElement<HTMLButtonElement>("#start");
+const toggleLabel = requiredElement<HTMLSpanElement>("#start-label");
+const subtitle = requiredElement<HTMLParagraphElement>("#subtitle");
+const stateIndicator = requiredElement<HTMLSpanElement>("#state-indicator");
+const statusText = requiredElement<HTMLParagraphElement>("#status");
 
-if (!startButton || !startLabel || !subtitle || !statusText) throw new Error("Popup markup is missing required controls.");
+let enabled = false;
+let busy = false;
 
 void initialize();
 
-startButton.addEventListener("click", async () => {
-  const transitionStartedAt = performance.now();
-  document.body.dataset.state = "activating";
-  startButton.disabled = true;
-  startButton.dataset.loading = "true";
-  startButton.setAttribute("aria-busy", "true");
-  startLabel.textContent = "Starting...";
-  setStatus("");
-  try {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (tab?.id && isYouTubeUrl(tab.url)) await ensureContentScript(tab.id);
-    await chrome.storage.local.set({ [AUTO_SCAN_KEY]: true });
-    await finishActivationTransition(transitionStartedAt);
-    renderRunning();
-  } catch (error: unknown) {
-    document.body.dataset.state = "idle";
-    startButton.disabled = false;
-    startLabel.textContent = "Start Stanley";
-    setStatus(getErrorMessage(error) || "Could not start automatic analysis.");
-  } finally {
-    delete startButton.dataset.loading;
-    startButton.removeAttribute("aria-busy");
-  }
+toggleButton.addEventListener("click", () => {
+  if (busy) return;
+  void setEnabled(!enabled);
 });
 
 async function initialize(): Promise<void> {
   try {
     const stored = await chrome.storage.local.get(AUTO_SCAN_KEY);
-    if (stored[AUTO_SCAN_KEY] === true) {
-      renderRunning();
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-      if (tab?.id && isYouTubeUrl(tab.url)) await ensureContentScript(tab.id);
+    enabled = stored[AUTO_SCAN_KEY] === true;
+    renderState();
+    if (!enabled) return;
+
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (tab?.id && isYouTubeUrl(tab.url)) {
+      try {
+        await ensureContentScript(tab.id);
+      } catch (error: unknown) {
+        setStatus(getErrorMessage(error) || "Reload YouTube to reconnect Stanley.");
+      }
     }
   } catch (error: unknown) {
+    renderState();
     setStatus(getErrorMessage(error) || "Could not read extension settings.");
   }
 }
 
-function renderRunning(): void {
-  document.body.dataset.state = "running";
-  if (startLabel) startLabel.textContent = "Stanley ready";
-  if (subtitle) subtitle.textContent = "Channel scanning is on.";
-  if (startButton) {
-    startButton.disabled = true;
-    startButton.setAttribute("aria-label", "Stanley ready");
+async function setEnabled(nextEnabled: boolean): Promise<void> {
+  const transitionStartedAt = performance.now();
+  busy = true;
+  document.body.dataset.state = nextEnabled ? "activating" : "deactivating";
+  toggleButton.disabled = true;
+  toggleButton.dataset.loading = "true";
+  toggleButton.setAttribute("aria-busy", "true");
+  toggleLabel.textContent = nextEnabled ? "Turning on…" : "Turning off…";
+  setStatus("");
+
+  try {
+    if (nextEnabled) {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (tab?.id && isYouTubeUrl(tab.url)) await ensureContentScript(tab.id);
+    }
+
+    await chrome.storage.local.set({ [AUTO_SCAN_KEY]: nextEnabled });
+    await finishToggleTransition(transitionStartedAt);
+    enabled = nextEnabled;
+    renderState();
+  } catch (error: unknown) {
+    renderState();
+    setStatus(getErrorMessage(error) || `Could not turn Stanley ${nextEnabled ? "on" : "off"}.`);
+  } finally {
+    busy = false;
+    toggleButton.disabled = false;
+    delete toggleButton.dataset.loading;
+    toggleButton.removeAttribute("aria-busy");
   }
+}
+
+function renderState(): void {
+  document.body.dataset.state = enabled ? "running" : "idle";
+  toggleLabel.textContent = enabled ? "Turn Stanley off" : "Turn Stanley on";
+  subtitle.textContent = enabled
+    ? "Stanley is active while you browse YouTube."
+    : "Turn Stanley on for channel outliers and analysis.";
+  stateIndicator.textContent = enabled ? "On" : "Off";
+  toggleButton.setAttribute("aria-pressed", String(enabled));
+  toggleButton.setAttribute("aria-label", enabled ? "Turn Stanley off" : "Turn Stanley on");
   setStatus("");
 }
 
-async function finishActivationTransition(startedAt: number): Promise<void> {
+async function finishToggleTransition(startedAt: number): Promise<void> {
   if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-  const remaining = 320 - (performance.now() - startedAt);
+  const remaining = 280 - (performance.now() - startedAt);
   if (remaining > 0) await new Promise<void>((resolve) => setTimeout(resolve, remaining));
 }
 
@@ -70,7 +92,9 @@ function isYouTubeUrl(url: string | undefined): boolean {
   try {
     const parsed = new URL(url);
     return parsed.hostname === "youtube.com" || parsed.hostname.endsWith(".youtube.com");
-  } catch { return false; }
+  } catch {
+    return false;
+  }
 }
 
 async function ensureContentScript(tabId: number): Promise<void> {
@@ -83,4 +107,12 @@ async function ensureContentScript(tabId: number): Promise<void> {
   }
 }
 
-function setStatus(message: string): void { if (statusText) statusText.textContent = message; }
+function setStatus(message: string): void {
+  statusText.textContent = message;
+}
+
+function requiredElement<T extends Element>(selector: string): T {
+  const element = document.querySelector<T>(selector);
+  if (!element) throw new Error(`Popup markup is missing ${selector}.`);
+  return element;
+}

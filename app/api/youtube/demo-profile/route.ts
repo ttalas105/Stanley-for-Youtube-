@@ -1,4 +1,5 @@
 import { WILL_TENNYSON_DEMO, publicDemoCreator } from "../../../creator-profiles";
+import { publicDemoApiKey, willTennysonProfileSnapshot } from "../demo-data";
 import { PUBLIC_DEMO_CACHE, cached } from "../server-cache";
 
 type ChannelResponse = {
@@ -29,20 +30,13 @@ export async function GET(request: Request) {
   if (!creator) return Response.json({ error: "That demo creator is not available." }, { status: 404 });
 
   const force = requestUrl.searchParams.get("refresh") === "true";
-  const result = await cached(`demo-profile:${creator.id}`, 6 * 60 * 60 * 1000, async () => {
-    const key = process.env.YOUTUBE_API_KEY?.trim();
+  const result = await cached(`demo-profile:v2:${creator.id}`, 6 * 60 * 60 * 1000, async () => {
+    const key = publicDemoApiKey();
     if (!key) {
       return {
-        profile: {
-          id: `demo:${creator.id}`,
-          title: creator.title,
-          thumbnailUrl: "",
-          subscriberCount: 0,
-          videoCount: 0,
-          totalViews: 0,
-          analyzedAt: new Date().toISOString(),
-        },
-        limited: true,
+        profile: willTennysonProfileSnapshot(),
+        demo: true,
+        source: "built-in-snapshot",
       };
     }
 
@@ -69,20 +63,15 @@ export async function GET(request: Request) {
           totalViews: numeric(channel.statistics?.viewCount),
           analyzedAt: new Date().toISOString(),
         },
+        demo: true,
+        source: "youtube-public-api",
       };
     } catch (error) {
       console.warn("Public demo profile could not be refreshed.", error);
       return {
-        profile: {
-          id: `demo:${creator.id}`,
-          title: creator.title,
-          thumbnailUrl: "",
-          subscriberCount: 0,
-          videoCount: 0,
-          totalViews: 0,
-          analyzedAt: new Date().toISOString(),
-        },
-        limited: true,
+        profile: willTennysonProfileSnapshot(),
+        demo: true,
+        source: "built-in-snapshot",
       };
     }
   }, { force });

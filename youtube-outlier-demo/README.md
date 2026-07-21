@@ -27,7 +27,7 @@ Local `*.test.ts` files are intentionally ignored and are not distributed with t
 
 ## Configuration
 
-Create `server/.env` from `server/.env.example`:
+The backend works without OAuth or a YouTube API key by reading the channel's public RSS feed and public watch-page metadata. For the official YouTube Data API path, create `server/.env` from `server/.env.example`:
 
 ```text
 YOUTUBE_API_KEY=PASTE_KEY_HERE
@@ -36,7 +36,7 @@ PORT=3000
 # SNAPSHOT_FILE=/optional/custom/snapshots.json
 ```
 
-The YouTube API key is read only by the backend. `PORT` defaults to `3000`; `EXTENSION_ID` optionally restricts CORS to one unpacked extension; `SNAPSHOT_FILE` optionally changes the local snapshot file.
+When configured, the YouTube API key is read only by the backend and takes precedence over the public-data fallback. `PORT` defaults to `3000`; `EXTENSION_ID` optionally restricts CORS to one unpacked extension; `SNAPSHOT_FILE` optionally changes the local snapshot file.
 
 ## Load the extension
 

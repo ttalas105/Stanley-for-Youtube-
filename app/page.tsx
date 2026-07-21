@@ -11,7 +11,7 @@ import { type CreatorProfileId, WILL_TENNYSON_DEMO, isCreatorProfileId } from ".
 import { PerformanceTimelinePanel } from "./PerformanceTimelinePanel";
 
 type CreationMode = "auto" | "idea" | "title" | "thumbnail";
-type WorkspaceView = "dashboard" | "creatorTwin" | "create";
+type WorkspaceView = "dashboard" | "creatorTwin" | "extension" | "create";
 
 type StanleyAppProps = {
   initialView?: WorkspaceView;
@@ -312,6 +312,7 @@ type MessageAttachment = Pick<ComposerAttachment, "id" | "kind" | "name" | "prev
 
 const DRAFTS_KEY = "stanley-title-drafts";
 const ONBOARDING_KEY = "stanley-onboarding-v1";
+const PREVIEW_MODE_KEY = "stanley-preview-mode-v1";
 const SIDEBAR_KEY = "stanley-sidebar-collapsed";
 const CREATOR_PROFILE_KEY = "stanley-creator-profile";
 const TOP_VIDEOS_PAGE_SIZE = 6;
@@ -319,7 +320,7 @@ const TOP_VIDEOS_PAGE_SIZE = 6;
 const NAV_ITEMS: Array<{ icon: string; label: string; view?: WorkspaceView }> = [
   { icon: "dashboard", label: "Dashboard", view: "dashboard" },
   { icon: "creatorTwin", label: "Creator Twin", view: "creatorTwin" },
-  { icon: "extension", label: "Chrome extension" },
+  { icon: "extension", label: "Chrome extension", view: "extension" },
 ];
 
 const MODE_PLACEHOLDERS: Record<CreationMode, string[]> = {
@@ -986,6 +987,7 @@ function Onboarding({
   onContinue,
   onBack,
   onConnect,
+  onPreview,
 }: {
   step: Exclude<OnboardingStep, "loading" | "done">;
   direction: OnboardingDirection;
@@ -995,6 +997,7 @@ function Onboarding({
   onContinue: () => void;
   onBack: () => void;
   onConnect: () => void;
+  onPreview: () => void;
 }) {
   const index = step === "welcome" ? 1 : step === "features" ? 2 : 3;
   return (
@@ -1040,6 +1043,7 @@ function Onboarding({
             {!configured && <p className="oauth-dev-note"><strong>Preview setup</strong><span>Private Google credentials are needed before connection can open.</span></p>}
             <div className="onboarding-connect-actions">
               <button className="onboarding-primary youtube-button" type="button" onClick={onConnect}><span className="youtube-button-icon"><YouTubeIcon /></span> Connect YouTube</button>
+              {!configured && <button className="onboarding-preview" type="button" onClick={onPreview}>Explore the demo instead <ChevronRight aria-hidden="true" /></button>}
             </div>
             <button className="onboarding-back standalone" type="button" onClick={onBack}>Back</button>
           </>}
@@ -1807,9 +1811,9 @@ function ChannelDashboard({
   const [creatorTwinRevealActive, setCreatorTwinRevealActive] = useState(false);
   const [showPerformanceReport, setShowPerformanceReport] = useState(false);
   const [reportDiagnosticId, setReportDiagnosticId] = useState("");
+  const [activeChartMetric, setActiveChartMetric] = useState<DashboardChartMetric>("views");
   const analyticsCacheRef = useRef(new Map<string, DashboardAnalytics>());
   const signalStripRef = useRef<HTMLElement>(null);
-  const activeChartMetricRef = useRef<DashboardChartMetric>("views");
   const creatorTwinRunRef = useRef(0);
   const drawerCloseRef = useRef<HTMLButtonElement>(null);
   const performanceReportRef = useRef<HTMLElement>(null);
@@ -2141,7 +2145,7 @@ function ChannelDashboard({
     { label: "Net subscribers", value: currentNet, previous: comparisonNet, formatter: formatDashboardNet, metric: "netSubscribers" as const, icon: <Users aria-hidden="true" /> },
   ];
   const highlightChartMetric = (metric: DashboardChartMetric) => {
-    activeChartMetricRef.current = metric;
+    setActiveChartMetric(metric);
     signalStripRef.current?.querySelectorAll<HTMLElement>("[data-dashboard-signal-metric]").forEach((card) => {
       card.toggleAttribute("data-chart-active", card.dataset.dashboardSignalMetric === metric);
     });
@@ -2193,7 +2197,7 @@ function ChannelDashboard({
         <div className={dashboardStyles.signalScroller}>{metricSignals.map((metric) => {
           const change = percentDelta(metric.value, metric.previous);
           const direction = change === null || Math.abs(change) < 0.05 ? "flat" : change > 0 ? "up" : "down";
-          return <article className={dashboardStyles.signalMetric} key={`${metric.label}-${dashboardRange}-${refreshVersion}`} data-dashboard-signal-metric={metric.metric} data-chart-active={activeChartMetricRef.current === metric.metric ? "" : undefined}>
+          return <article className={dashboardStyles.signalMetric} key={`${metric.label}-${dashboardRange}-${refreshVersion}`} data-dashboard-signal-metric={metric.metric} data-chart-active={activeChartMetric === metric.metric ? "" : undefined}>
             <span className={dashboardStyles.signalLabel}>{metric.icon}{metric.label}</span>
             <strong>{analyticsLoading && !analytics ? "—" : <AnimatedMetric value={metric.value} formatter={metric.formatter} />}</strong>
             <small className={dashboardStyles[direction]}>{direction === "up" ? <ArrowUpRight aria-hidden="true" /> : direction === "down" ? <ArrowDownRight aria-hidden="true" /> : <Minus aria-hidden="true" />}{change === null ? "No comparison" : `${change >= 0 ? "+" : "−"}${Math.abs(change).toFixed(1)}% vs prior ${analytics?.comparisonPeriod?.days ?? dashboardRange} days`}</small>
@@ -2365,6 +2369,31 @@ function ChannelDashboard({
   </section>;
 }
 
+const CHROME_WEB_STORE_URL = process.env.NEXT_PUBLIC_CHROME_WEB_STORE_URL || "https://chromewebstore.google.com/";
+
+function ChromeExtensionAccess() {
+  return <section className="extension-access-view" aria-labelledby="extension-access-title">
+    <article className="extension-access-card">
+      <div className="extension-access-mascot" aria-hidden="true">
+        <span />
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src="/stanley-mascot-dashboard.png" alt="" />
+      </div>
+      <div className="extension-access-copy">
+        <span className="extension-access-product"><Puzzle aria-hidden="true" /> Stanley Chrome extension</span>
+        <h1 id="extension-access-title">Stanley, right inside YouTube.</h1>
+        <p>See video outliers and channel insights while you browse.</p>
+        <a href={CHROME_WEB_STORE_URL} target="_blank" rel="noreferrer">
+          <Download aria-hidden="true" />
+          Open Chrome Web Store
+          <ExternalLink aria-hidden="true" />
+        </a>
+        <small>Install once. Turn Stanley on whenever you need it.</small>
+      </div>
+    </article>
+  </section>;
+}
+
 export default function Home({ initialView = "create" }: StanleyAppProps = {}) {
   const topicRef = useRef<HTMLTextAreaElement>(null);
   const conversationEndRef = useRef<HTMLDivElement>(null);
@@ -2395,6 +2424,7 @@ export default function Home({ initialView = "create" }: StanleyAppProps = {}) {
   const [onboardingStep, setOnboardingStep] = useState<OnboardingStep>("loading");
   const [onboardingDirection, setOnboardingDirection] = useState<OnboardingDirection>("forward");
   const [youtubeStatus, setYouTubeStatus] = useState<YouTubeStatus>({ configured: false, connected: false, profile: null });
+  const [previewMode, setPreviewMode] = useState(false);
   const [youtubeError, setYouTubeError] = useState("");
   const [placeholderIndex, setPlaceholderIndex] = useState(0);
   const [typedPlaceholder, setTypedPlaceholder] = useState("");
@@ -2429,7 +2459,13 @@ export default function Home({ initialView = "create" }: StanleyAppProps = {}) {
 
   useEffect(() => {
     const syncRoute = () => {
-      const nextView: WorkspaceView = window.location.pathname === "/dashboard" ? "dashboard" : window.location.pathname === "/creator-twin" ? "creatorTwin" : "create";
+      const nextView: WorkspaceView = window.location.pathname === "/dashboard"
+        ? "dashboard"
+        : window.location.pathname === "/creator-twin"
+          ? "creatorTwin"
+          : window.location.pathname === "/extension"
+            ? "extension"
+            : "create";
       setActiveView(nextView);
       if (window.location.pathname === "/") {
         window.history.replaceState({}, "", `/chat${window.location.search}${window.location.hash}`);
@@ -2482,7 +2518,7 @@ export default function Home({ initialView = "create" }: StanleyAppProps = {}) {
   }, [creatorMenuOpen]);
   useEffect(() => {
     const controller = new AbortController();
-    void fetch(`/api/youtube/demo-profile?creator=${WILL_TENNYSON_DEMO.id}`, { signal: controller.signal })
+    void fetch(`/api/youtube/demo-profile?creator=${WILL_TENNYSON_DEMO.id}`, { signal: controller.signal, cache: "no-store" })
       .then(async (response) => {
         const payload = await response.json() as { profile?: YouTubeProfile };
         if (response.ok && payload.profile) setWillProfile(payload.profile);
@@ -2508,6 +2544,7 @@ export default function Home({ initialView = "create" }: StanleyAppProps = {}) {
         ? params.get("stanleyPrompt")?.trim().slice(0, 600) || ""
         : "";
       const savedOnboarding = window.localStorage.getItem(ONBOARDING_KEY);
+      const savedPreviewMode = window.localStorage.getItem(PREVIEW_MODE_KEY) === "true";
       let status: YouTubeStatus = { configured: false, connected: false, profile: null };
       try {
         const response = await fetch("/api/youtube/status", { cache: "no-store" });
@@ -2518,7 +2555,14 @@ export default function Home({ initialView = "create" }: StanleyAppProps = {}) {
       if (!active) return;
       setYouTubeStatus(status);
 
-      if (extensionPrompt) {
+      const dashboardPreview = window.location.pathname === "/dashboard" && !status.connected;
+      if ((savedPreviewMode || dashboardPreview) && !status.connected) {
+        window.localStorage.setItem(PREVIEW_MODE_KEY, "true");
+        window.localStorage.setItem(CREATOR_PROFILE_KEY, WILL_TENNYSON_DEMO.id);
+        setPreviewMode(true);
+        setCreatorProfile(WILL_TENNYSON_DEMO.id);
+        setOnboardingStep("done");
+      } else if (extensionPrompt) {
         setActiveView("create");
         setMode("idea");
         setTopic(extensionPrompt);
@@ -2530,7 +2574,18 @@ export default function Home({ initialView = "create" }: StanleyAppProps = {}) {
       } else if (replayOnboarding) {
         setOnboardingStep("welcome");
       } else if (result === "connected" && status.connected && status.profile) {
-        setActiveView("create");
+        const callbackView: WorkspaceView = window.location.pathname === "/dashboard"
+          ? "dashboard"
+          : window.location.pathname === "/creator-twin"
+            ? "creatorTwin"
+            : window.location.pathname === "/extension"
+              ? "extension"
+              : "create";
+        setActiveView(callbackView);
+        setPreviewMode(false);
+        setCreatorProfile("connected");
+        window.localStorage.removeItem(PREVIEW_MODE_KEY);
+        window.localStorage.setItem(CREATOR_PROFILE_KEY, "connected");
         setOnboardingStep("analyzing");
         window.localStorage.setItem(ONBOARDING_KEY, "complete");
         window.history.replaceState({}, "", window.location.pathname);
@@ -2609,7 +2664,7 @@ export default function Home({ initialView = "create" }: StanleyAppProps = {}) {
       setWillVideosLoading(true);
       setWillVideosError("");
       try {
-        const response = await fetch(`/api/youtube/demo-videos?creator=${WILL_TENNYSON_DEMO.id}`, { signal: controller.signal });
+        const response = await fetch(`/api/youtube/demo-videos?creator=${WILL_TENNYSON_DEMO.id}`, { signal: controller.signal, cache: "no-store" });
         const payload = await response.json() as { videos?: YouTubeVideoOption[]; error?: string };
         if (!response.ok) throw new Error(payload.error || "Will's public videos could not be loaded.");
         setWillVideos(selectableYouTubeVideos(payload.videos || []));
@@ -2961,7 +3016,13 @@ export default function Home({ initialView = "create" }: StanleyAppProps = {}) {
   }
 
   function navigateWorkspace(view: WorkspaceView, replace = false) {
-    const path = view === "dashboard" ? "/dashboard" : view === "creatorTwin" ? "/creator-twin" : "/chat";
+    const path = view === "dashboard"
+      ? "/dashboard"
+      : view === "creatorTwin"
+        ? "/creator-twin"
+        : view === "extension"
+          ? "/extension"
+          : "/chat";
     if (window.location.pathname !== path) {
       window.history[replace ? "replaceState" : "pushState"]({}, "", path);
     }
@@ -3031,7 +3092,22 @@ export default function Home({ initialView = "create" }: StanleyAppProps = {}) {
   }
 
   function connectYouTube() {
-    window.location.assign("/api/youtube/connect?returnTo=/chat");
+    window.localStorage.removeItem(PREVIEW_MODE_KEY);
+    const returnTo = ["/chat", "/dashboard", "/creator-twin", "/extension"].includes(window.location.pathname)
+      ? window.location.pathname
+      : "/chat";
+    window.location.assign(`/api/youtube/connect?returnTo=${encodeURIComponent(returnTo)}`);
+  }
+
+  function enterPreviewMode() {
+    window.localStorage.setItem(ONBOARDING_KEY, "complete");
+    window.localStorage.setItem(PREVIEW_MODE_KEY, "true");
+    window.localStorage.setItem(CREATOR_PROFILE_KEY, WILL_TENNYSON_DEMO.id);
+    setPreviewMode(true);
+    setCreatorProfile(WILL_TENNYSON_DEMO.id);
+    setYouTubeError("");
+    setOnboardingStep("done");
+    setNotice(`Demo workspace loaded for ${WILL_TENNYSON_DEMO.title}`);
   }
 
   function removeAttachment(id: string) {
@@ -3418,7 +3494,7 @@ export default function Home({ initialView = "create" }: StanleyAppProps = {}) {
   }
 
   if (onboardingStep === "loading") return <main className="onboarding-loading" aria-label="Loading Stanley" />;
-  if (onboardingStep !== "done" || !youtubeStatus.connected) {
+  if (onboardingStep !== "done" || (!youtubeStatus.connected && !previewMode)) {
     return <Onboarding
       step={onboardingStep === "done" ? "connect" : onboardingStep}
       direction={onboardingDirection}
@@ -3428,6 +3504,7 @@ export default function Home({ initialView = "create" }: StanleyAppProps = {}) {
       onContinue={continueOnboarding}
       onBack={backOnboarding}
       onConnect={connectYouTube}
+      onPreview={enterPreviewMode}
     />;
   }
 
@@ -3449,7 +3526,7 @@ export default function Home({ initialView = "create" }: StanleyAppProps = {}) {
             const active = item.view === activeView;
             return (
             <div className={active ? "nav-item active" : "nav-item"} data-label={item.label} key={item.label}>
-              {item.view ? <a className="nav-tool-button" href={item.view === "dashboard" ? "/dashboard" : item.view === "creatorTwin" ? "/creator-twin" : "/chat"} onClick={(event) => { event.preventDefault(); openTool(item); }} aria-current={active ? "page" : undefined}>
+              {item.view ? <a className="nav-tool-button" href={item.view === "dashboard" ? "/dashboard" : item.view === "creatorTwin" ? "/creator-twin" : item.view === "extension" ? "/extension" : "/chat"} onClick={(event) => { event.preventDefault(); openTool(item); }} aria-current={active ? "page" : undefined}>
                 <span className="nav-icon" aria-hidden="true"><ToolIcon name={item.icon} /></span>
                 <span>{item.label}</span>
               </a> : <button className="nav-tool-button" type="button" onClick={() => openTool(item)}>
@@ -3536,6 +3613,7 @@ export default function Home({ initialView = "create" }: StanleyAppProps = {}) {
           onRefresh={() => void refreshDashboard()}
           publicOnly={publicDemoSelected}
         />
+        {activeView === "extension" ? <ChromeExtensionAccess /> : null}
         {activeView === "create" ? <>
         <div className={inConversation ? "content conversation-mode" : "content"}>
           {!inConversation ? (

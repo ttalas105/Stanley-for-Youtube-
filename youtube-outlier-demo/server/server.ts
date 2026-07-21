@@ -65,34 +65,44 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 
 app.post("/analyze-channel", async (req: Request, res: Response) => {
   try {
-    if (!API_KEY || API_KEY === "PASTE_KEY_HERE") {
-      res.status(500).json({ error: "Missing YouTube API key. Add it to server/.env as YOUTUBE_API_KEY." });
-      return;
-    }
-
     const channelRequest = validateChannelRequest(req.body);
-    const channel = await resolveChannel(channelRequest);
-    const playlistItems = await getUploads(channel.uploadsPlaylistId);
+    let channelSummary: ChannelAnalysisResponse["channel"];
+    let normalizedVideos: ApiVideo[];
 
-    if (playlistItems.length === 0) {
-      res.status(404).json({ error: "No recent uploads found for this channel." });
-      return;
-    }
+    if (API_KEY && API_KEY !== "PASTE_KEY_HERE") {
+      const channel = await resolveChannel(channelRequest);
+      const playlistItems = await getUploads(channel.uploadsPlaylistId);
 
-    const videoIds = playlistItems.map((item) => item.contentDetails?.videoId).filter((id): id is string => Boolean(id));
-    const videos = await getVideos(videoIds);
-    const normalizedVideos = videos.map(normalizeVideo);
+      if (playlistItems.length === 0) {
+        res.status(404).json({ error: "No recent uploads found for this channel." });
+        return;
+      }
 
-    const capturedAt = new Date().toISOString();
-    const payload = {
-      channel: {
+      const videoIds = playlistItems.map((item) => item.contentDetails?.videoId).filter((id): id is string => Boolean(id));
+      const videos = await getVideos(videoIds);
+      normalizedVideos = videos.map(normalizeVideo);
+      channelSummary = {
         id: channel.id,
         title: channel.title,
         handle: channel.handle,
         avatarUrl: channel.avatarUrl,
         subscriberCount: channel.subscriberCount,
         totalChannelViews: channel.totalChannelViews
-      },
+      };
+    } else {
+      const publicResult = await analyzePublicChannel(channelRequest);
+      channelSummary = publicResult.channel;
+      normalizedVideos = publicResult.videos;
+    }
+
+    if (normalizedVideos.length < 3) {
+      res.status(404).json({ error: "Not enough public long-form uploads were available to analyze this channel." });
+      return;
+    }
+
+    const capturedAt = new Date().toISOString();
+    const payload = {
+      channel: channelSummary,
       scannedAt: capturedAt,
       videos: normalizedVideos
     };
@@ -219,6 +229,199 @@ async function getVideos(videoIds: string[]): Promise<YouTubeVideoItem[]> {
   });
 
   return data.items || [];
+}
+
+interface PublicFeedEntry {
+  videoId: string;
+  title: string;
+  publishedAt: string;
+}
+
+interface PublicPlayerResponse {
+  videoDetails?: {
+    videoId?: string;
+    title?: string;
+    lengthSeconds?: string;
+    viewCount?: string;
+    thumbnail?: { thumbnails?: Array<{ url?: string; width?: number; height?: number }> };
+  };
+  microformat?: {
+    playerMicroformatRenderer?: {
+      publishDate?: string;
+      uploadDate?: string;
+    };
+  };
+}
+
+async function analyzePublicChannel(channelRequest: SupportedChannelIdentifier): Promise<{ channel: ChannelAnalysisResponse["channel"]; videos: ApiVideo[] }> {
+  const pageUrl = channelRequest.type === "handle"
+    ? `https://www.youtube.com/${channelRequest.value}`
+    : `https://www.youtube.com/channel/${channelRequest.value}`;
+  const channelHtml = await publicYouTubeText(pageUrl, "channel page");
+  const channelId = channelRequest.type === "channelId" ? channelRequest.value : extractCanonicalChannelId(channelHtml);
+  if (!channelId) throw httpError(404, "Channel ID could not be found from the public channel page.");
+
+  let feedXml = "";
+  let entries: PublicFeedEntry[] = [];
+  try {
+    feedXml = await publicYouTubeText(`https://www.youtube.com/feeds/videos.xml?channel_id=${encodeURIComponent(channelId)}`, "channel feed");
+    entries = parsePublicFeed(feedXml).slice(0, 15);
+  } catch {
+    // Some valid channels do not expose the legacy RSS feed. The public Videos
+    // tab still contains their upload IDs, and each watch page supplies the
+    // remaining metadata needed by the analyzer.
+  }
+  if (!entries.length) {
+    const videosHtml = await publicYouTubeText(`${pageUrl}/videos`, "channel videos page");
+    entries = parsePublicVideoPage(videosHtml).slice(0, 15);
+  }
+  if (!entries.length) throw httpError(404, "No recent public uploads found for this channel.");
+
+  const videos: ApiVideo[] = [];
+  for (let index = 0; index < entries.length; index += 5) {
+    const batch = entries.slice(index, index + 5);
+    const results = await Promise.all(batch.map(async (entry) => {
+      try {
+        return await publicVideoDetails(entry);
+      } catch {
+        return null;
+      }
+    }));
+    videos.push(...results.filter((video): video is ApiVideo => video !== null));
+  }
+
+  return {
+    channel: {
+      id: channelId,
+      title: readMetaContent(channelHtml, "og:title") || readXmlTag(feedXml, "title") || "Unknown channel",
+      handle: channelRequest.type === "handle" ? channelRequest.value : null,
+      avatarUrl: readMetaContent(channelHtml, "og:image"),
+      subscriberCount: null,
+      totalChannelViews: null,
+    },
+    videos,
+  };
+}
+
+async function publicVideoDetails(entry: PublicFeedEntry): Promise<ApiVideo | null> {
+  const html = await publicYouTubeText(`https://www.youtube.com/watch?v=${encodeURIComponent(entry.videoId)}`, "video page");
+  const player = extractAssignedJson(html, "var ytInitialPlayerResponse = ") as PublicPlayerResponse | null;
+  const details = player?.videoDetails;
+  const viewCount = Number(details?.viewCount);
+  const durationSeconds = Number(details?.lengthSeconds);
+  const playerDate = player?.microformat?.playerMicroformatRenderer?.publishDate
+    || player?.microformat?.playerMicroformatRenderer?.uploadDate
+    || "";
+  const publishedAt = Number.isFinite(Date.parse(entry.publishedAt)) ? entry.publishedAt : playerDate;
+  if (!details || !Number.isSafeInteger(viewCount) || viewCount < 0 || !Number.isFinite(durationSeconds) || durationSeconds < 0 || !Number.isFinite(Date.parse(publishedAt))) return null;
+  const thumbnails = details.thumbnail?.thumbnails || [];
+  const thumbnailUrl = [...thumbnails].reverse().find((thumbnail) => typeof thumbnail.url === "string")?.url || null;
+  return {
+    id: details.videoId || entry.videoId,
+    title: details.title || entry.title,
+    thumbnailUrl,
+    publishedAt: new Date(publishedAt).toISOString(),
+    durationSeconds,
+    viewCount,
+    likeCount: null,
+    commentCount: null,
+    youtubeUrl: `https://www.youtube.com/watch?v=${entry.videoId}`,
+  };
+}
+
+async function publicYouTubeText(url: string, label: string): Promise<string> {
+  const response = await fetch(url, {
+    redirect: "follow",
+    headers: {
+      "Accept-Language": "en-US,en;q=0.9",
+      "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/126 Safari/537.36",
+    },
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  });
+  if (!response.ok) throw httpError(response.status === 404 ? 404 : 502, `YouTube public ${label} returned ${response.status}.`);
+  const text = await response.text();
+  if (!text.trim()) throw httpError(502, `YouTube public ${label} was empty.`);
+  return text;
+}
+
+function parsePublicFeed(xml: string): PublicFeedEntry[] {
+  return [...xml.matchAll(/<entry>([\s\S]*?)<\/entry>/g)].map((match) => {
+    const entry = match[1] || "";
+    return {
+      videoId: readXmlTag(entry, "yt:videoId") || "",
+      title: readXmlTag(entry, "title") || "Untitled video",
+      publishedAt: readXmlTag(entry, "published") || "",
+    };
+  }).filter((entry) => /^[a-zA-Z0-9_-]{6,20}$/.test(entry.videoId) && Number.isFinite(Date.parse(entry.publishedAt)));
+}
+
+function parsePublicVideoPage(html: string): PublicFeedEntry[] {
+  const entries: PublicFeedEntry[] = [];
+  const seen = new Set<string>();
+  for (const match of html.matchAll(/"videoId":"([a-zA-Z0-9_-]{11})"/g)) {
+    const videoId = match[1];
+    if (!videoId || seen.has(videoId)) continue;
+    seen.add(videoId);
+    entries.push({ videoId, title: "Untitled video", publishedAt: "" });
+  }
+  return entries;
+}
+
+function readXmlTag(xml: string, tag: string): string | null {
+  const escaped = tag.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = new RegExp(`<${escaped}>([\\s\\S]*?)<\\/${escaped}>`).exec(xml);
+  return match?.[1] ? decodeEntities(match[1].trim()) : null;
+}
+
+function readMetaContent(html: string, property: string): string | null {
+  const escaped = property.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = new RegExp(`<meta\\s+property="${escaped}"\\s+content="([^"]*)"`, "i").exec(html);
+  return match?.[1] ? decodeEntities(match[1]) : null;
+}
+
+function extractCanonicalChannelId(html: string): string | null {
+  return /<link\s+rel="canonical"\s+href="https:\/\/www\.youtube\.com\/channel\/(UC[a-zA-Z0-9_-]{20,})"/i.exec(html)?.[1]
+    || /<meta\s+property="og:url"\s+content="https:\/\/www\.youtube\.com\/channel\/(UC[a-zA-Z0-9_-]{20,})"/i.exec(html)?.[1]
+    || null;
+}
+
+function extractAssignedJson(html: string, marker: string): unknown {
+  const markerIndex = html.indexOf(marker);
+  if (markerIndex < 0) return null;
+  const start = html.indexOf("{", markerIndex + marker.length);
+  if (start < 0) return null;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let index = start; index < html.length; index += 1) {
+    const character = html[index];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (character === "\\") escaped = true;
+      else if (character === '"') inString = false;
+      continue;
+    }
+    if (character === '"') inString = true;
+    else if (character === "{") depth += 1;
+    else if (character === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        try { return JSON.parse(html.slice(start, index + 1)); } catch { return null; }
+      }
+    }
+  }
+  return null;
+}
+
+function decodeEntities(value: string): string {
+  return value
+    .replace(/&#(\d+);/g, (_match, code: string) => String.fromCodePoint(Number(code)))
+    .replace(/&#x([0-9a-f]+);/gi, (_match, code: string) => String.fromCodePoint(Number.parseInt(code, 16)))
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&amp;/g, "&");
 }
 
 async function youtubeGet<T>(path: string, params: Record<string, string>): Promise<YouTubeListResponse<T>> {

@@ -40,6 +40,7 @@ const OVERLAY_SELECTOR = ".stanley-outlier-badge";
 const VIDEO_LINK_SELECTOR = "a[href*='/watch?v=']";
 const STANLEY_APP_URL = "http://localhost:3001/";
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+const FAILED_SCAN_COOLDOWN_MS = 30_000;
 
 let currentUrl = location.href;
 let currentChannelKey = channelKey(getChannelFromUrl());
@@ -56,6 +57,7 @@ let openAnalyticsAfterScan = false;
 let pageObserver: MutationObserver | null = null;
 let disposed = false;
 const activeScans = new Set<string>();
+const failedScans = new Map<string, number>();
 
 window.__ytOutlierDispose?.();
 window.__ytOutlierDemoLoaded = true;
@@ -196,7 +198,8 @@ function refreshUi(): void {
 
 async function autoScanChannel(channel: SupportedChannelIdentifier): Promise<void> {
   const key = channelKey(channel);
-  if (disposed || !key || key === lastScannedChannelKey || activeScans.has(key)) return;
+  const failedAt = failedScans.get(key) || 0;
+  if (disposed || !key || key === lastScannedChannelKey || activeScans.has(key) || Date.now() - failedAt < FAILED_SCAN_COOLDOWN_MS) return;
   if (!extensionContextAvailable()) {
     dispose();
     return;
@@ -221,6 +224,7 @@ async function autoScanChannel(channel: SupportedChannelIdentifier): Promise<voi
     analysis = nextAnalysis;
     channelPulse = nextPulse;
     lastScannedChannelKey = key;
+    failedScans.delete(key);
     renderVideoOverlays();
     renderChannelLauncher();
     showStatus("success", "Outliers ready", 1500);
@@ -234,6 +238,7 @@ async function autoScanChannel(channel: SupportedChannelIdentifier): Promise<voi
       return;
     }
     if (!disposed && token === scanToken && autoScanEnabled && channelKey(getChannelFromUrl()) === key) {
+      failedScans.set(key, Date.now());
       showStatus("error", "Couldn’t load channel analytics", 0, true);
       console.warn("Stanley channel analysis failed:", getErrorMessage(error));
     }
@@ -272,8 +277,22 @@ function renderChannelLauncher(): void {
     launcher.type = "button";
     launcher.setAttribute("aria-haspopup", "dialog");
     launcher.innerHTML = `
-      <img src="${escapeHtml(chrome.runtime.getURL("stanley-mascot-dashboard.png"))}" alt="" />
-      <span><strong>Stanley</strong><small>Analyze this channel</small></span>`;
+      <span class="stanley-launcher-mascot" aria-hidden="true">
+        <i class="stanley-launcher-star stanley-launcher-star-one"></i>
+        <i class="stanley-launcher-star stanley-launcher-star-two"></i>
+        <i class="stanley-launcher-star stanley-launcher-star-three"></i>
+        <i class="stanley-launcher-star stanley-launcher-star-four"></i>
+        <img src="${escapeHtml(chrome.runtime.getURL("stanley-mascot-dashboard.png"))}" alt="" />
+      </span>
+      <span class="stanley-launcher-panel">
+        <span class="stanley-launcher-panel-stars" aria-hidden="true">
+          <i class="stanley-launcher-panel-star stanley-launcher-panel-star-one"></i>
+          <i class="stanley-launcher-panel-star stanley-launcher-panel-star-two"></i>
+          <i class="stanley-launcher-panel-star stanley-launcher-panel-star-three"></i>
+        </span>
+        <span class="stanley-launcher-copy"><strong>Stanley</strong><small>Analyze this channel</small></span>
+        <span class="stanley-launcher-action" aria-hidden="true"><b>&rarr;</b></span>
+      </span>`;
     launcher.addEventListener("click", handleChannelLauncherClick);
     host.appendChild(launcher);
   }
@@ -944,6 +963,8 @@ function showStatus(kind: StatusKind, message: string, hideAfter = 0, retry = fa
   status.innerHTML = `<span class="stanley-status-icon" aria-hidden="true"></span><span>${escapeHtml(message)}</span>${retry ? '<button type="button">Retry</button>' : ""}`;
   status.querySelector<HTMLButtonElement>("button")?.addEventListener("click", () => {
     lastScannedChannelKey = "";
+    const key = channelKey(getChannelFromUrl());
+    if (key) failedScans.delete(key);
     status?.remove();
     refreshUi();
   });
@@ -957,6 +978,7 @@ function clearChannelUi(): void {
   lastScannedChannelKey = "";
   openAnalyticsAfterScan = false;
   activeScans.clear();
+  failedScans.clear();
   removeInjectedUi();
 }
 

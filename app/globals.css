@@ -3031,6 +3031,178 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, summary:focus
   animation: none;
 }
 .onboarding-connect-actions .onboarding-primary { margin-top: 0; }
+
+/* Chrome extension access — a focused install handoff inside the app shell. */
+.extension-access-view {
+  min-height: calc(100dvh - 62px);
+  display: grid;
+  place-items: center;
+  padding: 48px;
+  background: var(--app-bg);
+}
+
+.extension-access-card {
+  width: min(820px, 100%);
+  min-height: 390px;
+  display: grid;
+  grid-template-columns: 270px minmax(0, 1fr);
+  overflow: hidden;
+  border: 1px solid var(--app-border);
+  border-radius: 14px;
+  background: var(--app-surface, #0d121b);
+  animation: extension-access-enter 240ms cubic-bezier(.16, 1, .3, 1) both;
+}
+
+.extension-access-mascot {
+  position: relative;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border-right: 1px solid var(--app-border);
+  background: #0a1019;
+}
+
+.extension-access-mascot > span {
+  position: absolute;
+  width: 220px;
+  height: 220px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(113, 99, 238, .2), rgba(113, 99, 238, .045) 52%, transparent 72%);
+}
+
+.extension-access-mascot img {
+  position: relative;
+  z-index: 1;
+  width: 184px;
+  height: 184px;
+  object-fit: contain;
+}
+
+.extension-access-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 52px;
+}
+
+.extension-access-product {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: #a9a1ff;
+  font-size: .72rem;
+  font-weight: 680;
+}
+
+.extension-access-product svg {
+  width: 16px;
+  height: 16px;
+  stroke-width: 1.9;
+}
+
+.extension-access-copy h1 {
+  max-width: 440px;
+  margin: 17px 0 0;
+  color: var(--app-text);
+  font-size: 2.08rem;
+  font-weight: 700;
+  line-height: 1.08;
+  letter-spacing: -.035em;
+  text-wrap: balance;
+}
+
+.extension-access-copy p {
+  max-width: 430px;
+  margin: 15px 0 0;
+  color: #9aa5b5;
+  font-size: .88rem;
+  line-height: 1.6;
+  text-wrap: pretty;
+}
+
+.extension-access-copy > a {
+  min-height: 46px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  margin-top: 29px;
+  padding: 0 17px;
+  border-radius: 9px;
+  background: #7163ee;
+  color: #fff;
+  font-size: .78rem;
+  font-weight: 700;
+  text-decoration: none;
+  transition: background-color 160ms ease-out, transform 160ms ease-out;
+}
+
+.extension-access-copy > a:hover {
+  background: #8175f7;
+  transform: translateY(-1px);
+}
+
+.extension-access-copy > a:active { transform: translateY(0); }
+
+.extension-access-copy > a:focus-visible {
+  outline: 2px solid #a69fff;
+  outline-offset: 3px;
+}
+
+.extension-access-copy > a svg {
+  width: 16px;
+  height: 16px;
+  stroke-width: 2;
+}
+
+.extension-access-copy > a svg:last-child {
+  width: 14px;
+  height: 14px;
+  margin-left: 2px;
+}
+
+.extension-access-copy > small {
+  margin-top: 12px;
+  color: #707b8d;
+  font-size: .66rem;
+}
+
+@keyframes extension-access-enter {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+
+@media (max-width: 760px) {
+  .extension-access-view { align-items: start; padding: 24px 18px 40px; }
+  .extension-access-card { grid-template-columns: 1fr; }
+  .extension-access-mascot { min-height: 210px; border-right: 0; border-bottom: 1px solid var(--app-border); }
+  .extension-access-mascot img { width: 150px; height: 150px; }
+  .extension-access-copy { padding: 34px 28px 38px; }
+  .extension-access-copy h1 { font-size: 1.72rem; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .extension-access-card { animation: none; }
+  .extension-access-copy > a { transition: none; }
+}
+.onboarding-preview {
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 4px;
+  border: 0;
+  background: transparent;
+  color: #aaa3e8;
+  cursor: pointer;
+  font: 680 .67rem/1 Inter, Arial, sans-serif;
+  transition: color 160ms ease-out;
+}
+.onboarding-preview:hover { color: #d0caff; }
+.onboarding-preview:focus-visible { outline: 2px solid #8f82ff; outline-offset: 2px; border-radius: 5px; }
+.onboarding-preview svg { width: 14px; height: 14px; }
 .onboarding-back.standalone { margin-top: 4px; }
 .youtube-button { min-width: 204px; }
 .analysis-steps {

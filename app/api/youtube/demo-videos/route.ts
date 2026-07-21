@@ -1,4 +1,5 @@
 import { WILL_TENNYSON_DEMO, publicDemoCreator } from "../../../creator-profiles";
+import { publicDemoApiKey, willTennysonVideosSnapshot } from "../demo-data";
 import { PUBLIC_DEMO_CACHE, cached } from "../server-cache";
 
 type ChannelResponse = {
@@ -50,48 +51,54 @@ export async function loadDemoVideos(creatorId: string, force = false) {
   const creator = publicDemoCreator(creatorId);
   if (!creator) throw new Error("That demo creator is not available.");
 
-  return cached(`demo-videos:${creator.id}`, 15 * 60 * 1000, async () => {
-    const key = process.env.YOUTUBE_API_KEY?.trim();
-    if (!key) throw new Error("YouTube public data is not configured.");
+  return cached(`demo-videos:v2:${creator.id}`, 15 * 60 * 1000, async () => {
+    const key = publicDemoApiKey();
+    if (!key) return { videos: willTennysonVideosSnapshot(), updatedAt: new Date().toISOString(), demo: true, source: "built-in-snapshot" };
 
-    const channelPayload = await youtubeJson<ChannelResponse>(youtubeUrl("channels", {
-      part: "contentDetails",
-      forHandle: creator.handle.replace(/^@/, ""),
-    }, key));
-    const uploadsPlaylist = channelPayload.items?.[0]?.contentDetails?.relatedPlaylists?.uploads;
-    if (!uploadsPlaylist) throw new Error("The creator upload feed was not returned.");
+    try {
+      const channelPayload = await youtubeJson<ChannelResponse>(youtubeUrl("channels", {
+        part: "contentDetails",
+        forHandle: creator.handle.replace(/^@/, ""),
+      }, key));
+      const uploadsPlaylist = channelPayload.items?.[0]?.contentDetails?.relatedPlaylists?.uploads;
+      if (!uploadsPlaylist) throw new Error("The creator upload feed was not returned.");
 
-    const playlistPayload = await youtubeJson<PlaylistResponse>(youtubeUrl("playlistItems", {
-      part: "contentDetails",
-      playlistId: uploadsPlaylist,
-      maxResults: "36",
-    }, key));
-    const ids = (playlistPayload.items || [])
-      .map((item) => item.contentDetails?.videoId)
-      .filter((id): id is string => Boolean(id));
-    if (!ids.length) return { videos: [], updatedAt: new Date().toISOString() };
+      const playlistPayload = await youtubeJson<PlaylistResponse>(youtubeUrl("playlistItems", {
+        part: "contentDetails",
+        playlistId: uploadsPlaylist,
+        maxResults: "36",
+      }, key));
+      const ids = (playlistPayload.items || [])
+        .map((item) => item.contentDetails?.videoId)
+        .filter((id): id is string => Boolean(id));
+      if (!ids.length) throw new Error("No public demo uploads were returned.");
 
-    const videosPayload = await youtubeJson<VideosResponse>(youtubeUrl("videos", {
-      part: "snippet,statistics,contentDetails,status",
-      id: ids.join(","),
-      maxResults: "36",
-    }, key));
-    const videos = (videosPayload.items || []).flatMap((video) => {
-      if (!video.id || video.status?.privacyStatus !== "public") return [];
-      const thumbnails = video.snippet?.thumbnails;
-      return [{
-        id: video.id,
-        title: video.snippet?.title?.trim() || "Untitled video",
-        thumbnailUrl: thumbnails?.maxres?.url || thumbnails?.high?.url || thumbnails?.medium?.url || thumbnails?.default?.url || "",
-        publishedAt: video.snippet?.publishedAt || new Date(0).toISOString(),
-        views: Number(video.statistics?.viewCount || 0),
-        duration: video.contentDetails?.duration || "PT0S",
-        privacyStatus: "public",
-        url: `https://www.youtube.com/watch?v=${video.id}`,
-      }];
-    }).sort((left, right) => new Date(right.publishedAt).getTime() - new Date(left.publishedAt).getTime());
+      const videosPayload = await youtubeJson<VideosResponse>(youtubeUrl("videos", {
+        part: "snippet,statistics,contentDetails,status",
+        id: ids.join(","),
+        maxResults: "36",
+      }, key));
+      const videos = (videosPayload.items || []).flatMap((video) => {
+        if (!video.id || video.status?.privacyStatus !== "public") return [];
+        const thumbnails = video.snippet?.thumbnails;
+        return [{
+          id: video.id,
+          title: video.snippet?.title?.trim() || "Untitled video",
+          thumbnailUrl: thumbnails?.maxres?.url || thumbnails?.high?.url || thumbnails?.medium?.url || thumbnails?.default?.url || "",
+          publishedAt: video.snippet?.publishedAt || new Date(0).toISOString(),
+          views: Number(video.statistics?.viewCount || 0),
+          duration: video.contentDetails?.duration || "PT0S",
+          privacyStatus: "public",
+          url: `https://www.youtube.com/watch?v=${video.id}`,
+        }];
+      }).sort((left, right) => new Date(right.publishedAt).getTime() - new Date(left.publishedAt).getTime());
+      if (!videos.length) throw new Error("No usable public demo uploads were returned.");
 
-    return { videos, updatedAt: new Date().toISOString() };
+      return { videos, updatedAt: new Date().toISOString(), demo: true, source: "youtube-public-api" };
+    } catch (error) {
+      console.warn("Live public demo videos were unavailable; using the built-in snapshot.", error);
+      return { videos: willTennysonVideosSnapshot(), updatedAt: new Date().toISOString(), demo: true, source: "built-in-snapshot" };
+    }
   }, { force });
 }
 
