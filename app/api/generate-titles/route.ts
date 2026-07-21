@@ -1269,7 +1269,10 @@ If they named a public creator or channel, search that exact channel with channe
       const evidence = JSON.stringify(searchResults.map(({ summary, data, warnings }) => ({ summary, data, warnings }))).slice(0, 16_000);
       return { run, reply, research: researchFromToolResults(run.toolResults), evidence };
     };
-    const publicResearchLayer = (scope.reason === "public_youtube_research" || (scope.intent === "youtube_research" && researchAccess.publicSearch))
+    const publicResearchLayer = (
+      scope.reason === "public_youtube_research"
+      || (scope.intent === "youtube_research" && (Boolean(demoCreator) || researchAccess.publicSearch))
+    )
       ? await createPublicResearchLayer(scope.intent !== "youtube_research")
       : null;
     const renderThumbnailArtifact = async (thumbnailBrief = resolvedBrief) => {
@@ -1913,6 +1916,7 @@ export async function POST(request: Request) {
                 request: {
                   topic: debugRequest.topic,
                   mode: debugRequest.mode,
+                  creatorProfile: debugRequest.creatorProfile,
                   messages: debugRequest.messages,
                   attachments,
                 },

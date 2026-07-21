@@ -78,7 +78,7 @@ test("keeps AI keys server-side and removes the disposable starter", async () =>
   assert.match(route, /youtube_guidance/);
   assert.match(route, /youtube_research/);
   assert.match(route, /public_youtube_research/);
-  assert.match(route, /scope\.intent === "youtube_research" && researchAccess\.publicSearch/);
+  assert.match(route, /scope\.intent === "youtube_research" && \(Boolean\(demoCreator\) \|\| researchAccess\.publicSearch\)/);
   assert.match(route, /publishedWithinHours/);
   assert.doesNotMatch(route, /GEMINI_SCRIPT_MODEL|SCRIPT_MODEL/);
   assert.match(youtubeTools, /chart: "mostPopular"/);
@@ -165,9 +165,9 @@ test("keeps AI keys server-side and removes the disposable starter", async () =>
   assert.doesNotMatch(route, /Server semantic memory:/);
   assert.match(route, /researchTopic/);
   assert.match(route, /resolveResearchAccess/);
-  assert.match(route, /allowPublicSearch: researchAccess\.publicSearch/);
+  assert.match(route, /allowPublicSearch: demoCreator \? true : researchAccess\.publicSearch/);
   assert.match(route, /local golf course reviews/);
-  assert.match(route, /maxToolCallsPerTurn: Math\.max\(1, Math\.min\(2, researchBudget\)\)/);
+  assert.match(route, /maxToolCallsPerTurn: Math\.max\(1, Math\.min\(2, effectiveResearchBudget\)\)/);
   assert.match(memoryIdentity, /MEMORY_CHANNEL_COOKIE/);
   assert.match(memoryIdentity, /mergeMemoryOwners/);
   assert.match(route, /researchFromToolResults/);
