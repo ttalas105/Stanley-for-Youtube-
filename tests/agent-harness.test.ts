@@ -395,6 +395,65 @@ test("requires a topic, channel, or recent window for public video search", asyn
   assert.equal(result.error?.code, "INVALID_ARGUMENTS");
 });
 
+test("refuses to substitute among multiple exact-name public channels", async () => {
+  const originalFetch = globalThis.fetch;
+  const requestedUrls: string[] = [];
+  globalThis.fetch = async (input) => {
+    requestedUrls.push(String(input));
+    return Response.json({ items: [
+      { id: { channelId: "fan-one" }, snippet: { channelId: "fan-one", title: "David Goggins" } },
+      { id: { channelId: "fan-two" }, snippet: { channelId: "fan-two", title: "David Goggins" } },
+      { id: { channelId: "other" }, snippet: { channelId: "other", title: "Goggins Motivation" } },
+    ] });
+  };
+  try {
+    const registry = createYouTubeToolRegistry({ apiKey: "test-key", session: null, allowPublicSearch: true, allowChannelSnapshot: false, allowVideoEvidence: false });
+    const result = await registry.execute("youtube_search_reference_videos", { channelName: "David Goggins", maxResults: 8 }, new AbortController().signal);
+    assert.equal(result.status, "empty");
+    assert.match(result.summary, /multiple public youtube channels/i);
+    assert.match(result.warnings[0] || "", /exact channel url/i);
+    assert.equal(requestedUrls.length, 1);
+    assert.match(requestedUrls[0] || "", /type=channel/);
+    assert.match(requestedUrls[0] || "", /maxResults=10/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("searches videos only after resolving one exact channel display name", async () => {
+  const originalFetch = globalThis.fetch;
+  const requestedUrls: string[] = [];
+  globalThis.fetch = async (input) => {
+    const url = new URL(String(input));
+    requestedUrls.push(url.toString());
+    if (url.searchParams.get("type") === "channel") {
+      return Response.json({ items: [
+        { id: { channelId: "exact-channel" }, snippet: { channelId: "exact-channel", title: "Example Creator" } },
+        { id: { channelId: "near-channel" }, snippet: { channelId: "near-channel", title: "Example Creator Clips" } },
+      ] });
+    }
+    if (url.pathname.endsWith("/search")) {
+      return Response.json({ items: [{ id: { videoId: "video123" } }] });
+    }
+    return Response.json({ items: [{
+      id: "video123",
+      snippet: { title: "A real upload", channelTitle: "Example Creator", publishedAt: new Date(Date.now() - 86_400_000).toISOString(), thumbnails: {} },
+      statistics: { viewCount: "12000" },
+      contentDetails: { duration: "PT8M" },
+    }] });
+  };
+  try {
+    const registry = createYouTubeToolRegistry({ apiKey: "test-key", session: null, allowPublicSearch: true, allowChannelSnapshot: false, allowVideoEvidence: false });
+    const result = await registry.execute("youtube_search_reference_videos", { channelName: "Example Creator", maxResults: 4 }, new AbortController().signal);
+    assert.equal(result.status, "partial");
+    assert.equal((result.data as { videos?: unknown[] }).videos?.length, 1);
+    assert.equal(new URL(requestedUrls[1] || "http://invalid").searchParams.get("channelId"), "exact-channel");
+    assert.equal(new URL(requestedUrls[1] || "http://invalid").searchParams.has("q"), false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("uses the most-popular chart for a broad recent-video window", async () => {
   const originalFetch = globalThis.fetch;
   const requestedUrls: string[] = [];

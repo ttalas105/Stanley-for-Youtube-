@@ -55,9 +55,10 @@ export const agentEvalCases = [
       { role: "assistant", content: "Selected idea: Why my 5 AM routine failed and what I changed." },
       { role: "user", content: "Amazing. Can you go to David Goggins' YouTube channel and tell me how I can make this idea similar to his?" },
     ],
-    expects: "ideas",
+    expects: "conversational",
     requiredTools: ["youtube_search_reference_videos"],
-    requiredSuccessfulTools: ["youtube_search_reference_videos"],
+    requiredPatterns: ["couldn't verify|could not verify", "exact (?:youtube )?channel url", "fan uploads|lookalike"],
+    forbiddenPatterns: ["Huberman|PowerfulJRE|Motivation Madness"],
   },
   {
     id: "exact-video-evidence",

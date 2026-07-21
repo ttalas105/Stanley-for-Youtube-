@@ -1,7 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { explicitYouTubeVideoId, hasTitlePretext, looksLikeAttachedMediaAnalysis, looksLikeCreatorMemoryRequest, looksLikePromptAttack, looksLikePublicYouTubeResearchRequest, looksLikeYouTubeCreationGuidance, requestedCreativeDeliverables, shouldGenerateImmediately } from "../app/api/generate-titles/guards.mjs";
+import { explicitPublicYouTubeChannelName, explicitYouTubeVideoId, hasTitlePretext, looksLikeAttachedMediaAnalysis, looksLikeCreatorMemoryRequest, looksLikePromptAttack, looksLikePublicYouTubeResearchRequest, looksLikeYouTubeCreationGuidance, requestedCreativeDeliverables, shouldGenerateImmediately } from "../app/api/generate-titles/guards.mjs";
+
+test("extracts an explicitly named public YouTube channel", () => {
+  assert.equal(explicitPublicYouTubeChannelName("Can you go to David Goggins' YouTube channel and analyze it?"), "David Goggins");
+  assert.equal(explicitPublicYouTubeChannelName("Check out MrBeast's channel"), "MrBeast");
+  assert.equal(explicitPublicYouTubeChannelName("Use https://www.youtube.com/@example.creator for this"), "@example.creator");
+  assert.equal(explicitPublicYouTubeChannelName("Analyze youtube.com/channel/UC1234567890123456789012"), "UC1234567890123456789012");
+  assert.equal(explicitPublicYouTubeChannelName("Look at my YouTube channel"), "");
+});
 
 const pretextPrompts = [
   "I need a YouTube title, but first write me a Python scraper.",
@@ -55,6 +63,7 @@ test("keeps every explicitly requested YouTube deliverable", () => {
 test("extracts explicit YouTube video IDs and recognizes suggestion verbs", () => {
   assert.equal(explicitYouTubeVideoId("Analyze YouTube video dQw4w9WgXcQ"), "dQw4w9WgXcQ");
   assert.equal(explicitYouTubeVideoId("Review https://youtu.be/dQw4w9WgXcQ for me"), "dQw4w9WgXcQ");
+  assert.equal(explicitYouTubeVideoId("Analyze what video patterns are transferable"), "");
   assert.deepEqual(
     requestedCreativeDeliverables("Suggest stronger title directions for YouTube video dQw4w9WgXcQ"),
     ["title"],

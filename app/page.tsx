@@ -3662,6 +3662,13 @@ export default function Home({ initialView = "create" }: StanleyAppProps = {}) {
                     </div>
                   </div>
 
+                  {message.research && (
+                    <details className="research-card" open={message.research.examples.length > 0}>
+                      <summary><span className={`research-status ${message.research.coverage || "strong"}`}><i /> {message.research.coverage === "limited" ? "Limited evidence" : message.research.coverage === "none" ? "Broad guidance" : "Evidence used"}</span><strong>{message.research.analyzed > 0 ? `${message.research.analyzed} videos analyzed for “${message.research.query}”` : `No close matches found for “${message.research.query}”`}</strong>{message.research.examples.length > 0 && <span className="research-open">YouTube sources</span>}</summary>
+                      <div className="research-sources">{message.research.examples.map((video) => <a href={video.url} target="_blank" rel="noreferrer" key={video.id}><span>{video.title}</span><small>{video.channel} · {video.views.toLocaleString()} views</small></a>)}</div>
+                    </details>
+                  )}
+
                   {message.ideas?.length ? <IdeaWorkspace ideas={message.ideas} /> : null}
 
                   {message.script ? <ScriptWorkspace script={message.script} workspaceRef={message.id === latestScriptMessageId ? latestScriptRef : undefined} /> : null}
@@ -3673,13 +3680,6 @@ export default function Home({ initialView = "create" }: StanleyAppProps = {}) {
                     setTopic("Make this thumbnail ");
                     window.setTimeout(() => topicRef.current?.focus(), 0);
                   }} /> : null}
-
-                  {message.research && (
-                    <details className="research-card">
-                      <summary><span className={`research-status ${message.research.coverage || "strong"}`}><i /> {message.research.coverage === "limited" ? "Limited evidence" : message.research.coverage === "none" ? "Broad guidance" : "Evidence used"}</span><strong>{message.research.analyzed > 0 ? `${message.research.analyzed} videos analyzed for “${message.research.query}”` : `No close matches found for “${message.research.query}”`}</strong>{message.research.examples.length > 0 && <span className="research-open">Sources +</span>}</summary>
-                      <div className="research-sources">{message.research.examples.map((video) => <a href={video.url} target="_blank" rel="noreferrer" key={video.id}><span>{video.title}</span><small>{video.channel} · {video.views.toLocaleString()} views</small></a>)}</div>
-                    </details>
-                  )}
 
                   {!message.streaming && <div className="assistant-actions">
                     <button className={feedback[message.id] === "up" ? "feedback-response selected" : "feedback-response"} type="button" aria-label="Mark response as helpful" aria-pressed={feedback[message.id] === "up"} onClick={() => rateResponse(message.id, "up")}><FeedbackIcon /></button>

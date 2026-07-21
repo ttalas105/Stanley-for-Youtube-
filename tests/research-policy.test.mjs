@@ -36,6 +36,7 @@ test("opens public search for explicit trend windows and named channel analysis"
     "Find me the most popular videos in the last 24 hours, analyze them and create me a script.",
     "Can you access Casey Neistat's channel and analyze it?",
     "Can you go to David Goggins' YouTube channel and make this idea similar to his?",
+    "Use https://www.youtube.com/@example.creator as the reference channel.",
   ]) {
     assert.deepEqual(resolveResearchAccess(prompt), { publicSearch: true, channelSnapshot: false, videoEvidence: true }, prompt);
   }

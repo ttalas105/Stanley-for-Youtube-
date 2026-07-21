@@ -77,12 +77,27 @@ export function looksLikePublicYouTubeResearchRequest(value) {
   return publicYouTubeResearchAction.test(message) && publicYouTubeResearchTarget.test(message);
 }
 
+export function explicitPublicYouTubeChannelName(value) {
+  const message = typeof value === "string" ? value.trim() : "";
+  if (!message) return "";
+  const channelUrl = /(?:https?:\/\/)?(?:www\.)?youtube\.com\/(?:channel\/(UC[A-Za-z0-9_-]{20,30})|@([A-Za-z0-9._-]{3,30}))\b/i.exec(message);
+  if (channelUrl?.[1]) return channelUrl[1];
+  if (channelUrl?.[2]) return `@${channelUrl[2]}`;
+  const match = /\b(?:go\s+to|visit|check\s+out|pull\s+up|look\s+(?:up|at)|take\s+a\s+look\s+at|access|analy[sz]e|review|audit|break\s+down|compare\s+(?:me\s+)?(?:to|with))\s+(?:the\s+)?["“”']?(.{2,80}?)["“”']?(?:['’]s?)?\s+(?:youtube\s+)?channel\b/i.exec(message);
+  const channelName = match?.[1]
+    ?.replace(/\s+/g, " ")
+    .replace(/["“”']+$/g, "")
+    .trim();
+  if (!channelName || /^(?:my|our|your|their|the|this|that)$/i.test(channelName)) return "";
+  return channelName;
+}
+
 export function explicitYouTubeVideoId(value) {
   const message = typeof value === "string" ? value.trim() : "";
   if (!message) return "";
-  const urlMatch = /(?:youtu\.be\/|youtube\.com\/watch\?[^\s]*v=)([A-Za-z0-9_-]{6,20})\b/i.exec(message);
+  const urlMatch = /(?:youtu\.be\/|youtube\.com\/watch\?[^\s]*v=)([A-Za-z0-9_-]{11})\b/i.exec(message);
   if (urlMatch?.[1]) return urlMatch[1];
-  const labelMatch = /\b(?:youtube\s+)?video(?:\s+id)?\s+([A-Za-z0-9_-]{6,20})\b/i.exec(message);
+  const labelMatch = /\b(?:youtube\s+)?video(?:\s+id)?\s+([A-Za-z0-9_-]{11})\b/i.exec(message);
   return labelMatch?.[1] || "";
 }
 

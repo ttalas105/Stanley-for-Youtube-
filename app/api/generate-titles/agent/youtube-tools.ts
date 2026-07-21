@@ -33,9 +33,14 @@ type YouTubeToolOptions = {
 };
 
 type SearchResponse = {
-  items?: Array<{ id?: { videoId?: string; channelId?: string }; snippet?: { channelId?: string } }>;
+  items?: Array<{ id?: { videoId?: string; channelId?: string }; snippet?: { channelId?: string; title?: string } }>;
   nextPageToken?: string;
   pageInfo?: { totalResults?: number };
+  error?: { message?: string };
+};
+
+type ChannelListResponse = {
+  items?: Array<{ id?: string; snippet?: { title?: string } }>;
   error?: { message?: string };
 };
 
@@ -73,6 +78,14 @@ function researchWords(value: string) {
   return new Set((value.toLowerCase().match(/[a-z0-9]+/g) || [])
     .map((word) => word.length > 4 && word.endsWith("s") ? word.slice(0, -1) : word)
     .filter((word) => word.length >= 3 && !RESEARCH_STOP_WORDS.has(word)));
+}
+
+function normalizedChannelName(value: string) {
+  return value.normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
 }
 
 export function focusResearchQuery(requestedQuery: string, researchTopic = "") {
@@ -258,28 +271,57 @@ function searchReferenceVideosTool(options: YouTubeToolOptions): ToolDefinition 
       const channelName = options.fixedPublicChannelName?.trim()
         || (typeof args.channelName === "string" ? args.channelName.trim() : "");
       const requestedQuery = typeof args.query === "string" ? args.query : "";
-      const query = focusResearchQuery(requestedQuery, options.researchTopic);
+      const query = channelName ? requestedQuery.trim().slice(0, 100) : focusResearchQuery(requestedQuery, options.researchTopic);
       const maxResults = Number(args.maxResults || 12);
       const duration = args.duration === "any" || args.publishedWithinHours ? "any" : "long_form";
       const order = String(args.order || "view_count").replace("view_count", "viewCount");
       let channelId = "";
       if (channelName) {
-        const channelUrl = new URL("https://www.googleapis.com/youtube/v3/search");
-        channelUrl.search = new URLSearchParams({ part: "snippet", type: "channel", maxResults: "1", q: channelName }).toString();
-        const channelSearch = await youtubeRequest<SearchResponse>(channelUrl, options, context.signal);
-        channelId = channelSearch.items?.[0]?.id?.channelId || channelSearch.items?.[0]?.snippet?.channelId || "";
-        if (!channelId) {
+        let exactMatches: Array<{ id: string; title: string }> = [];
+        if (/^UC[A-Za-z0-9_-]{20,30}$/.test(channelName)) {
+          const channelUrl = new URL("https://www.googleapis.com/youtube/v3/channels");
+          channelUrl.search = new URLSearchParams({ part: "snippet", id: channelName }).toString();
+          const channelLookup = await youtubeRequest<ChannelListResponse>(channelUrl, options, context.signal);
+          exactMatches = (channelLookup.items || []).flatMap((item) => item.id
+            ? [{ id: item.id, title: item.snippet?.title?.trim() || item.id }]
+            : []);
+        } else if (/^@[A-Za-z0-9._-]{3,30}$/.test(channelName)) {
+          const channelUrl = new URL("https://www.googleapis.com/youtube/v3/channels");
+          channelUrl.search = new URLSearchParams({ part: "snippet", forHandle: channelName.slice(1) }).toString();
+          const channelLookup = await youtubeRequest<ChannelListResponse>(channelUrl, options, context.signal);
+          exactMatches = (channelLookup.items || []).flatMap((item) => item.id
+            ? [{ id: item.id, title: item.snippet?.title?.trim() || channelName }]
+            : []);
+        } else {
+          const channelUrl = new URL("https://www.googleapis.com/youtube/v3/search");
+          channelUrl.search = new URLSearchParams({ part: "snippet", type: "channel", maxResults: "10", q: channelName }).toString();
+          const channelSearch = await youtubeRequest<SearchResponse>(channelUrl, options, context.signal);
+          const requestedName = normalizedChannelName(channelName);
+          exactMatches = (channelSearch.items || []).flatMap((item) => {
+            const id = item.id?.channelId || item.snippet?.channelId || "";
+            const title = item.snippet?.title?.trim() || "";
+            return id && title && normalizedChannelName(title) === requestedName ? [{ id, title }] : [];
+          });
+        }
+        const uniqueMatches = Array.from(new Map(exactMatches.map((item) => [item.id, item])).values());
+        if (uniqueMatches.length !== 1) {
+          const ambiguous = uniqueMatches.length > 1;
           return {
             ok: true,
             tool: "youtube_search_reference_videos",
             status: "empty",
-            summary: `No public YouTube channel matched “${channelName}”.`,
-            data: { query: channelName, videos: [] },
+            summary: ambiguous
+              ? `Multiple public YouTube channels use the exact name “${channelName}”, so ownership could not be verified.`
+              : `No exact public YouTube channel matched “${channelName}”.`,
+            data: { query: channelName, videos: [], candidates: uniqueMatches },
             coverage: { returned: 0, complete: true },
             sources: [],
-            warnings: ["Ask for the channel URL or exact display name instead of silently substituting another creator."],
+            warnings: [ambiguous
+              ? "Ask for the exact channel URL instead of selecting a lookalike or fan channel."
+              : "Ask for the channel URL or exact display name instead of silently substituting another creator."],
           };
         }
+        channelId = uniqueMatches[0].id;
       }
       const publishedWithinHours = Number(args.publishedWithinHours || options.requestedPublishedWithinHours || 0);
       if (publishedWithinHours && !channelId && (options.forceMostPopularChart || researchWords(query).size === 0)) {

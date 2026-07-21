@@ -1,4 +1,4 @@
-import { explicitYouTubeVideoId, looksLikeAttachedMediaAnalysis, looksLikeCreatorMemoryRequest, looksLikePromptAttack, looksLikePublicYouTubeResearchRequest, looksLikeYouTubeCreationGuidance, requestedCreativeDeliverables, shouldGenerateImmediately } from "./guards.mjs";
+import { explicitPublicYouTubeChannelName, explicitYouTubeVideoId, looksLikeAttachedMediaAnalysis, looksLikeCreatorMemoryRequest, looksLikePromptAttack, looksLikePublicYouTubeResearchRequest, looksLikeYouTubeCreationGuidance, requestedCreativeDeliverables, shouldGenerateImmediately } from "./guards.mjs";
 import { isSimpleScriptFollowUp, resolveSelectedIdea } from "./conversation-context.mjs";
 import { sanitizeChannelFit } from "./idea-grounding.mjs";
 import { emptySemanticMemory, formatSemanticMemory, normalizeMemoryKey, selectRelevantSemanticMemory } from "./semantic-memory.mjs";
@@ -1079,6 +1079,7 @@ async function generateResponse(request: Request, emitProgress?: ProgressEmitter
   }
   const conversation = messages || [];
   const researchAccess = resolveResearchAccess(currentMessage, inputAttachments.some((attachment) => attachment.kind === "youtube"));
+  const namedPublicChannel = !researchAccess.channelSnapshot ? explicitPublicYouTubeChannelName(currentMessage) : "";
   const connectedVideoLimit = requestedConnectedVideoCount(currentMessage) || 12;
   const researchWindowHours = requestedResearchWindowHours(currentMessage);
   const forceMostPopularChart = requestsBroadPopularVideos(currentMessage);
@@ -1235,7 +1236,7 @@ async function generateResponse(request: Request, emitProgress?: ProgressEmitter
     allowPublicSearch: demoCreator ? true : researchAccess.publicSearch || allowSemanticPublicResearch,
     allowChannelSnapshot: demoCreator ? false : researchAccess.channelSnapshot,
     allowVideoEvidence: researchAccess.videoEvidence,
-    fixedPublicChannelName: demoCreator?.channelName,
+    fixedPublicChannelName: demoCreator?.channelName || namedPublicChannel,
   });
   const creativeJson = async (
     prompt: string,
@@ -1464,6 +1465,50 @@ Answer the creator's exact question directly. If the channel snapshot has no upl
           status: prefetchedEvidence.status === "complete" || prefetchedEvidence.status === "partial" ? "complete" : "limited",
           kind: "tool",
         });
+      } else if (namedPublicChannel && researchAccess.publicSearch) {
+        prefetchedTool = "youtube_search_reference_videos";
+        const evidenceStartedAt = Date.now();
+        await emitProgress?.({
+          id: "named-public-channel",
+          label: `Finding ${namedPublicChannel}'s channel`,
+          detail: "Resolving the exact public YouTube channel before analyzing its videos",
+          status: "active",
+          kind: "tool",
+        });
+        prefetchedEvidence = await toolRegistry.execute(
+          prefetchedTool,
+          { channelName: namedPublicChannel, maxResults: 8, duration: "any", order: "view_count" },
+          request.signal,
+        );
+        prefetchedEvidenceDurationMs = Date.now() - evidenceStartedAt;
+        await emitProgress?.({
+          id: "named-public-channel",
+          label: `Finding ${namedPublicChannel}'s channel`,
+          detail: prefetchedEvidence.summary,
+          status: prefetchedEvidence.status === "complete" || prefetchedEvidence.status === "partial" ? "complete" : "limited",
+          kind: "tool",
+        });
+      }
+      if (namedPublicChannel && prefetchedTool === "youtube_search_reference_videos" && prefetchedEvidence?.status === "empty") {
+        const reply = `I searched YouTube for ${namedPublicChannel}, but I couldn't verify one unique channel owned by them. Multiple or lookalike channels can use the same display name, so I won't treat fan uploads or interview clips as their channel. Send me the exact YouTube channel URL and I'll analyze that channel; otherwise, I can research specific ${namedPublicChannel} interviews and appearances instead.`;
+        const run: AgentResult = {
+          output: { reply },
+          text: JSON.stringify({ reply }),
+          toolResults: [prefetchedEvidence],
+          trace: {
+            runId: crypto.randomUUID(),
+            provider: "youtube",
+            model: "youtube-data-api",
+            startedAt: new Date(Date.now() - prefetchedEvidenceDurationMs).toISOString(),
+            durationMs: prefetchedEvidenceDurationMs,
+            modelRounds: 0,
+            promptTokens: 0,
+            completionTokens: 0,
+            cachedTokens: 0,
+            toolCalls: [{ round: 0, name: prefetchedTool, durationMs: prefetchedEvidenceDurationMs, status: prefetchedEvidence.status, memoHit: false }],
+          },
+        };
+        return { run, reply, research: undefined, evidence: JSON.stringify(prefetchedEvidence), evidenceResult: prefetchedEvidence };
       }
       if (useExactVideoResearch && prefetchedEvidence) {
         const exactData = prefetchedEvidence.data && typeof prefetchedEvidence.data === "object"
@@ -1520,6 +1565,12 @@ The channel snapshot has already been fetched and appears below. Do not call ano
 CONNECTED_CHANNEL_SNAPSHOT_START
 ${JSON.stringify(prefetchedEvidence)}
 CONNECTED_CHANNEL_SNAPSHOT_END`
+        : namedPublicChannel && prefetchedEvidence
+        ? `The creator explicitly named the public YouTube channel “${namedPublicChannel}”. The exact-channel lookup has already run and appears below. Do not call another tool, broaden the query, or substitute third-party uploads. Analyze only videos returned from the resolved channel. ${forArtifact ? "Keep this research handoff under 140 words because a separate creation layer will use it next." : "Refer to specific returned videos naturally and distinguish observed packaging from creative inference."}
+
+NAMED_CHANNEL_EVIDENCE_START
+${JSON.stringify(prefetchedEvidence)}
+NAMED_CHANNEL_EVIDENCE_END`
         : `The creator explicitly asked for public YouTube research. Use youtube_search_reference_videos before answering.
 
 If they named a public creator or channel, search that exact channel with channelName. If they specified a period such as the last 24 hours, set publishedWithinHours to that exact window and do not add an invented topic query. Otherwise use one focused topic query. Analyze only the returned public metadata and statistics; never claim you watched footage or read a transcript. Give the useful pattern: what the examples have in common, what seems transferable, and what the sample cannot prove. ${forArtifact ? "Keep this research handoff under 140 words because a separate creation layer will use it next." : "Refer to specific returned examples naturally so the source list is useful."}`;
@@ -1573,6 +1624,17 @@ TRANSCRIPT_END
     )
       ? await createResearchLayer(scope.intent !== "youtube_research")
       : null;
+    if (namedPublicChannel && researchLayer?.evidenceResult?.status === "empty") {
+      return Response.json({
+        reply: researchLayer.reply,
+        conversationTopic: resolvedBrief,
+        blocked: false,
+        conversational: true,
+        mode: "auto",
+        model: researchLayer.run.trace.model,
+        agent: agentMetadata(researchLayer.run),
+      });
+    }
     if (requiresExactTranscript && researchLayer?.evidenceResult) {
       const evidenceData = researchLayer.evidenceResult.data && typeof researchLayer.evidenceResult.data === "object"
         ? researchLayer.evidenceResult.data as { transcript?: { status?: string; reason?: string } }
