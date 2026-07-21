@@ -500,26 +500,57 @@ function assistantCopyLabel(message: ChatMessage) {
   return "Copy response";
 }
 
+function namedPublicChannelFromPrompt(value: string) {
+  const urlMatch = /(?:https?:\/\/)?(?:www\.)?youtube\.com\/(?:channel\/(UC[A-Za-z0-9_-]{20,30})|@([A-Za-z0-9._-]{3,30}))\b/i.exec(value);
+  if (urlMatch?.[1]) return urlMatch[1];
+  if (urlMatch?.[2]) return `@${urlMatch[2]}`;
+  const nameMatch = /\b(?:go\s+to|visit|check\s+out|pull\s+up|look\s+(?:up|at)|take\s+a\s+look\s+at|access|analy[sz]e|review|audit|break\s+down)\s+(?:the\s+)?["“”']?(.{2,80}?)["“”']?(?:['’]s?)?\s+(?:youtube\s+)?channel\b/i.exec(value);
+  return nameMatch?.[1]?.replace(/\s+/g, " ").replace(/["“”']+$/g, "").trim() || "";
+}
+
+function normalizedResearchTarget(value: string) {
+  return value.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+function repairLegacyChannelResearch(messages: ChatMessage[]) {
+  return messages.map((message, index) => {
+    if (message.role !== "assistant" || !message.research?.examples.length) return message;
+    const priorMessage = messages[index - 1];
+    if (priorMessage?.role !== "user") return message;
+    const namedChannel = namedPublicChannelFromPrompt(priorMessage.content);
+    if (!namedChannel || normalizedResearchTarget(message.research.query) === normalizedResearchTarget(namedChannel)) return message;
+    return {
+      ...message,
+      content: `I couldn't verify one unique YouTube channel for ${namedChannel}. The earlier answer used third-party videos, so I'm not treating it as channel analysis. Send the exact YouTube channel URL and I'll analyze only that channel.`,
+      ideas: undefined,
+      research: undefined,
+      activity: undefined,
+      agent: undefined,
+    };
+  });
+}
+
 function IdeaWorkspace({ ideas }: { ideas: GeneratedIdea[] }) {
-  return <section className="idea-workspace" aria-label={`${ideas.length} video ideas`}>
+  const singleIdea = ideas.length === 1;
+  return <section className={singleIdea ? "idea-workspace single-idea" : "idea-workspace"} aria-label={singleIdea ? "Refined video idea" : `${ideas.length} video ideas`}>
     <div className="idea-results">
       {ideas.map((item, index) => <article className={item.recommended ? "assistant-option idea-result recommended" : "assistant-option idea-result"} key={item.id}>
         <div className="idea-result-body">
           <div className="idea-title-line">
-            <h3><span aria-hidden="true">{index + 1}.</span> {item.suggestedTitle || item.idea}</h3>
-            {item.recommended ? <span className="top-pick">Top pick</span> : null}
+            <h3>{singleIdea ? null : <span aria-hidden="true">{index + 1}.</span>} {item.suggestedTitle || item.idea}</h3>
+            {!singleIdea && item.recommended ? <span className="top-pick">Top pick</span> : null}
           </div>
-          {item.suggestedTitle ? <p className="idea-premise">{item.idea}</p> : null}
-          <p className="idea-why"><strong>Why it could work:</strong> {compactSentences(item.whyItCouldWork, 360)}</p>
-          {item.format || item.difficulty ? <p className="idea-meta-line">{[item.format, item.difficulty].filter(Boolean).join(" · ")}</p> : null}
+          {item.suggestedTitle ? <p className="idea-premise"><strong>Premise</strong><span>{item.idea}</span></p> : null}
+          <p className="idea-why"><strong>{singleIdea ? "Why this direction" : "Why it could work"}</strong><span>{compactSentences(item.whyItCouldWork, 360)}</span></p>
+          {item.format || item.difficulty ? <div className="idea-meta-line">{item.format ? <span>{item.format}</span> : null}{item.difficulty ? <span>{item.difficulty} lift</span> : null}</div> : null}
         </div>
       </article>)}
     </div>
 
     <details className="response-details">
-      <summary><strong>See the thinking behind these ideas</strong><ChevronDown aria-hidden="true" /></summary>
+      <summary><strong>{singleIdea ? "View the full story plan" : "See the thinking behind these ideas"}</strong><ChevronDown aria-hidden="true" /></summary>
       <div className="idea-plans">{ideas.map((item, index) => <section key={item.id}>
-        <h3>{index + 1}. {item.suggestedTitle || item.idea}</h3>
+        <h3>{singleIdea ? item.suggestedTitle || item.idea : `${index + 1}. ${item.suggestedTitle || item.idea}`}</h3>
         <p><strong>Opening hook:</strong> {item.scriptOutline?.opening || item.hook}</p>
         {item.channelFit ? <p><strong>Why it fits:</strong> {item.channelFit}</p> : null}
         {item.researchBasis ? <p><strong>Evidence:</strong> {item.researchBasis}</p> : null}
@@ -618,7 +649,7 @@ function fileToDataUrl(file: File) {
 }
 
 function restoreMessages(draft: Draft): ChatMessage[] {
-  if (draft.messages?.length) return draft.messages;
+  if (draft.messages?.length) return repairLegacyChannelResearch(draft.messages);
   if (!draft.titles?.length) return [];
   return [
     { id: `${draft.id}-user`, role: "user", content: draft.topic },
@@ -3635,7 +3666,7 @@ export default function Home({ initialView = "create" }: StanleyAppProps = {}) {
             </>
           ) : (
             <section className="conversation" aria-live="polite">
-              {messages.map((message) => message.role === "user" ? (
+              {repairLegacyChannelResearch(messages).map((message) => message.role === "user" ? (
                 <div className="user-message" key={message.id}>
                   {message.attachments?.length ? <div className="user-message-attachments">{message.attachments.map((attachment) => <div key={attachment.id}>
                     {attachment.previewUrl || attachment.thumbnailUrl ? <>

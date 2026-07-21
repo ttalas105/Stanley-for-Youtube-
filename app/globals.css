@@ -1979,10 +1979,14 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, summary:focus
 .idea-title-line h3 { max-width: 62ch; margin: 0; color: #f1f3f6; font-size: 1rem; font-weight: 680; line-height: 1.45; letter-spacing: -.01em; text-wrap: pretty; }
 .idea-title-line h3 span { color: #8f99a9; font-weight: 560; }
 .top-pick { flex: 0 0 auto; color: #a9a1ff; font-size: .69rem; font-weight: 650; }
-.idea-premise { max-width: 68ch; margin: 7px 0 0; color: #bdc5d0; font-size: .88rem; line-height: 1.62; text-wrap: pretty; }
-.idea-why { max-width: 69ch; margin: 8px 0 0; color: #98a4b4; font-size: .83rem; line-height: 1.62; text-wrap: pretty; }
-.idea-why strong { color: #cbd1da; font-weight: 650; }
-.idea-meta-line { margin: 7px 0 0; color: #778396; font-size: .72rem; line-height: 1.4; }
+.idea-premise, .idea-why { max-width: 69ch; display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 14px; margin: 12px 0 0; color: #9da8b7; font-size: .83rem; line-height: 1.58; text-wrap: pretty; }
+.idea-premise strong, .idea-why strong { color: #cbd1da; font-weight: 650; }
+.idea-premise span, .idea-why span { min-width: 0; }
+.idea-meta-line { display: flex; flex-wrap: wrap; gap: 7px; margin: 14px 0 0 126px; color: #8d98a8; font-size: .7rem; line-height: 1.4; }
+.idea-meta-line span { padding: 3px 8px; border: 1px solid #2a3341; border-radius: 999px; }
+.single-idea { margin-top: 24px; }
+.single-idea .idea-title-line h3 { max-width: 65ch; font-size: 1.08rem; line-height: 1.42; }
+.single-idea .response-details { margin-top: 18px; }
 
 .response-details { margin: 24px 0 0; }
 .response-details > summary { min-height: 40px; width: fit-content; display: flex; align-items: center; gap: 7px; color: #99a4b4; cursor: pointer; list-style: none; }
@@ -2000,6 +2004,11 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, summary:focus
 .story-beats ol { margin: 0; padding-left: 20px; }
 .story-beats li { margin: 5px 0; padding-left: 3px; color: #929eae; font-size: .78rem; line-height: 1.55; }
 .idea-payoff { color: #9ca7b6; }
+
+@media (max-width: 640px) {
+  .idea-premise, .idea-why { grid-template-columns: 1fr; gap: 3px; }
+  .idea-meta-line { margin-left: 0; }
+}
 
 .script-workspace.assistant-answer { max-width: 760px; color: inherit; }
 .script-workspace { scroll-margin-block-start: 24px; }
