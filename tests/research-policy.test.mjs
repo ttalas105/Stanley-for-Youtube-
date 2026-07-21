@@ -47,6 +47,14 @@ test("keeps connected-channel analysis behind its own explicit request", () => {
     resolveResearchAccess("Based on my channel, suggest my next video."),
     { publicSearch: false, channelSnapshot: true, videoEvidence: true },
   );
+  assert.deepEqual(
+    resolveResearchAccess("howdey. How are my latest stats doing ?"),
+    { publicSearch: false, channelSnapshot: true, videoEvidence: true },
+  );
+  assert.deepEqual(
+    resolveResearchAccess("Review my recent metrics."),
+    { publicSearch: false, channelSnapshot: true, videoEvidence: true },
+  );
 });
 
 test("recognizes bounded recent videos on the connected channel", () => {
