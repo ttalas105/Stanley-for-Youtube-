@@ -2522,7 +2522,7 @@ export default function Home({ initialView = "create" }: StanleyAppProps = {}) {
         setActiveView("create");
         setMode("idea");
         setTopic(extensionPrompt);
-        setOnboardingStep(status.connected ? (savedOnboarding ? "done" : "welcome") : (savedOnboarding ? "connect" : "welcome"));
+        setOnboardingStep(status.connected && savedOnboarding ? "done" : "welcome");
         window.history.replaceState({}, "", window.location.pathname);
         analysisTimer = window.setTimeout(() => {
           if (active && savedOnboarding && status.connected) topicRef.current?.focus();
@@ -2559,7 +2559,7 @@ export default function Home({ initialView = "create" }: StanleyAppProps = {}) {
         window.history.replaceState({}, "", window.location.pathname);
         setOnboardingStep("connect");
       } else {
-        setOnboardingStep(status.connected ? (savedOnboarding ? "done" : "welcome") : (savedOnboarding ? "connect" : "welcome"));
+        setOnboardingStep(status.connected && savedOnboarding ? "done" : "welcome");
       }
       document.documentElement.dataset.stanleyReady = "true";
     }

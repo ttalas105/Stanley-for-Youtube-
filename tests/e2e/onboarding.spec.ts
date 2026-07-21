@@ -72,19 +72,18 @@ test("shows a real product still when reduced motion is requested", async ({ pag
   await expect(frames.first().locator("img")).toHaveAttribute("src", "/product-reel/stanley-home.png");
 });
 
-test("requires YouTube even when a legacy skipped state is saved", async ({ page }) => {
+test("restarts onboarding when a legacy skipped state is saved without YouTube", async ({ page }) => {
   await page.addInitScript(() => localStorage.setItem("stanley-onboarding-v1", "skipped"));
   await mockStatus(page);
   await page.goto("/");
   await waitForApp(page);
 
-  await expect(page.getByRole("heading", { name: "Connect your YouTube channel." })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Connect YouTube" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Continue without YouTube" })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Plan your next YouTube video." })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Skip setup" })).toHaveCount(0);
 
   await page.reload();
   await waitForApp(page);
-  await expect(page.getByRole("heading", { name: "Connect your YouTube channel." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Plan your next YouTube video." })).toBeVisible();
 });
 
 test("turns a successful OAuth callback into a personalized first chat", async ({ page }) => {

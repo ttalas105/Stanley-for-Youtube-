@@ -3073,8 +3073,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, summary:focus
 }
 .product-reel-stage::after { display: none; }
 .product-reel-frame {
-  animation-duration: 18s;
-  animation-delay: calc(var(--reel-index) * 6s);
+  animation-duration: 9s;
+  animation-delay: calc(var(--reel-index) * 3s);
 }
 .onboarding-label,
 .product-reel-header,
