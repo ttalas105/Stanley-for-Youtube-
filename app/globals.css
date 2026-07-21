@@ -177,8 +177,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, summary:focus
 .feature-list p { margin: 3px 0 0; color: #64708a; font-size: .69rem; line-height: 1.45; }
 .onboarding-actions { width: 100%; display: flex; align-items: center; justify-content: space-between; margin-top: 22px; }
 .onboarding-actions .onboarding-primary { margin-top: 0; }
-.onboarding-back, .onboarding-skip { min-height: 42px; padding: 0 12px; border: 0; border-radius: 10px; background: transparent; color: #64708b; cursor: pointer; font-size: .75rem; font-weight: 640; }
-.onboarding-back:hover, .onboarding-skip:hover { background: var(--grey-1); color: var(--navy); }
+.onboarding-back { min-height: 42px; padding: 0 12px; border: 0; border-radius: 10px; background: transparent; color: #64708b; cursor: pointer; font-size: .75rem; font-weight: 640; }
+.onboarding-back:hover { background: var(--grey-1); color: var(--navy); }
 .onboarding-back.standalone { margin-top: 13px; }
 .connect-benefits { display: grid; gap: 9px; margin-top: 25px; color: #3f4e69; font-size: .76rem; font-weight: 650; }
 .connect-benefits span::first-letter { color: var(--success); }
@@ -186,7 +186,6 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, summary:focus
 .youtube-button { min-width: 210px; }
 .youtube-button svg { width: 22px; height: 22px; fill: currentColor; }
 .youtube-button .youtube-play { fill: var(--purple); }
-.onboarding-skip { margin-top: 5px; }
 .oauth-dev-note, .onboarding-error { max-width: 480px; margin: 13px 0 0; padding: 9px 11px; border-radius: 9px; font-size: .67rem; line-height: 1.45; }
 .oauth-dev-note { background: #f7f5ff; color: #5c518f; }
 .onboarding-error { background: #fff1f0; color: var(--danger); }
@@ -286,8 +285,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, summary:focus
 .feature-list article > span { background: rgba(118, 103, 255, .13); color: #968bff; }
 .feature-list h2 { color: #e8ebf1; }
 .feature-list p { color: #7d8798; }
-.onboarding-back, .onboarding-skip { color: #8993a4; transition: background-color 160ms ease, color 160ms ease, transform 160ms ease; }
-.onboarding-back:hover, .onboarding-skip:hover { background: #171e29; color: #f0f2f6; transform: translateY(-1px); }
+.onboarding-back { color: #8993a4; transition: background-color 160ms ease, color 160ms ease, transform 160ms ease; }
+.onboarding-back:hover { background: #171e29; color: #f0f2f6; transform: translateY(-1px); }
 .connect-benefits { color: #aab2c0; }
 .connect-benefits span::first-letter { color: #48c78e; }
 .oauth-dev-note { border: 1px solid rgba(118, 103, 255, .2); background: rgba(118, 103, 255, .09); color: #aaa2ed; }
@@ -2942,15 +2941,13 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, summary:focus
   gap: 10px;
   margin-top: 29px;
 }
-.onboarding-welcome-actions .onboarding-skip { margin: 0; }
 .onboarding-footnote {
   margin-top: 14px;
   color: #747f91;
   font-size: .66rem;
   animation: none;
 }
-.onboarding-back,
-.onboarding-skip {
+.onboarding-back {
   min-height: 40px;
   padding: 0 11px;
   border-radius: 8px;
@@ -2959,8 +2956,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, summary:focus
   font-weight: 620;
   transition: background-color 150ms ease-out, color 150ms ease-out;
 }
-.onboarding-back:hover,
-.onboarding-skip:hover {
+.onboarding-back:hover {
   background: #161d28;
   color: #f0f2f6;
   transform: none;
@@ -3035,7 +3031,6 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, summary:focus
   animation: none;
 }
 .onboarding-connect-actions .onboarding-primary { margin-top: 0; }
-.onboarding-connect-actions .onboarding-skip { margin-top: 2px; }
 .onboarding-back.standalone { margin-top: 4px; }
 .youtube-button { min-width: 204px; }
 .analysis-steps {
@@ -3199,10 +3194,6 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, summary:focus
 .creator-profile-option small { color: #7f8a9c; font-size: .56rem; }
 .creator-profile-option > svg { width: 15px; height: 15px; color: #8d82ff; opacity: 0; }
 .creator-profile-option[aria-checked="true"] > svg { opacity: 1; }
-.creator-menu-separator { height: 1px; margin: 6px 4px; background: #263040; }
-.creator-disconnect { width: 100%; min-height: 36px; display: flex; align-items: center; gap: 10px; padding: 0 10px; border: 0; border-radius: 8px; background: transparent; color: #8f99a9; cursor: pointer; font-size: .63rem; font-weight: 580; text-align: left; transition: background-color 150ms ease-out, color 150ms ease-out; }
-.creator-disconnect:hover { background: #2a1920; color: #ee9aaa; }
-.creator-disconnect svg { width: 15px; height: 15px; }
 
 @media (max-width: 680px) {
   .creator-profile-menu { position: fixed; top: 58px; left: 50%; width: min(308px, calc(100vw - 24px)); transform: translateX(-50%); }

@@ -2,7 +2,7 @@
 
 import { ChangeEvent, FormEvent, KeyboardEvent, useEffect, useRef, useState } from "react";
 import { createPortal, flushSync } from "react-dom";
-import { ArrowDownRight, ArrowLeft, ArrowUpRight, Check, ChevronDown, ChevronRight, Clock3, Copy as CopyIcon, Download, ExternalLink, Eye, Facebook, FileText, Globe2, Image as ImageIcon, Instagram, LayoutDashboard, LogOut, MessageCircle, Minus, PanelLeftClose, PanelLeftOpen, Puzzle, RefreshCw, Search, Sparkles, SquarePen, ThumbsDown, ThumbsUp, Users, Video, WandSparkles, X } from "lucide-react";
+import { ArrowDownRight, ArrowLeft, ArrowUpRight, Check, ChevronDown, ChevronRight, Clock3, Copy as CopyIcon, Download, ExternalLink, Eye, Facebook, FileText, Globe2, Image as ImageIcon, Instagram, LayoutDashboard, MessageCircle, Minus, PanelLeftClose, PanelLeftOpen, Puzzle, RefreshCw, Search, Sparkles, SquarePen, ThumbsDown, ThumbsUp, Users, Video, WandSparkles, X } from "lucide-react";
 import { InputText } from "primereact/inputtext";
 import { Paginator } from "primereact/paginator";
 import dashboardStyles from "./dashboard.module.css";
@@ -986,7 +986,6 @@ function Onboarding({
   onContinue,
   onBack,
   onConnect,
-  onSkip,
 }: {
   step: Exclude<OnboardingStep, "loading" | "done">;
   direction: OnboardingDirection;
@@ -996,7 +995,6 @@ function Onboarding({
   onContinue: () => void;
   onBack: () => void;
   onConnect: () => void;
-  onSkip: () => void;
 }) {
   const index = step === "welcome" ? 1 : step === "features" ? 2 : 3;
   return (
@@ -1018,7 +1016,6 @@ function Onboarding({
             <p className="onboarding-copy">Stanley can research a topic, develop the idea, write titles and scripts, and make thumbnails in one conversation.</p>
             <div className="onboarding-welcome-actions">
               <button className="onboarding-primary" type="button" onClick={onContinue}>Continue <ChevronRight aria-hidden="true" /></button>
-              <button className="onboarding-skip" type="button" onClick={onSkip}>Skip setup</button>
             </div>
           </>}
 
@@ -1036,14 +1033,13 @@ function Onboarding({
           {step === "connect" && <>
             <div className="onboarding-youtube-mark" aria-hidden="true"><YouTubeIcon /></div>
             <h1>Connect your YouTube channel.</h1>
-            <p className="onboarding-copy">Stanley can use your videos and analytics when it researches ideas. Connecting is optional.</p>
+            <p className="onboarding-copy">Stanley uses your videos and analytics to research ideas for your channel. A connected YouTube account is required.</p>
             <div className="connect-benefits"><span><Check aria-hidden="true" /> Use recent channel performance</span><span><Check aria-hidden="true" /> Find topics and title patterns</span><span><Check aria-hidden="true" /> Personalize ideas to your audience</span></div>
             <p className="onboarding-permission"><strong>Read-only access.</strong> Stanley cannot upload, edit, or delete videos.</p>
             {error && <p className="onboarding-error" role="alert">{error}</p>}
             {!configured && <p className="oauth-dev-note"><strong>Preview setup</strong><span>Private Google credentials are needed before connection can open.</span></p>}
             <div className="onboarding-connect-actions">
               <button className="onboarding-primary youtube-button" type="button" onClick={onConnect}><span className="youtube-button-icon"><YouTubeIcon /></span> Connect YouTube</button>
-              <button className="onboarding-skip" type="button" onClick={onSkip}>Continue without YouTube</button>
             </div>
             <button className="onboarding-back standalone" type="button" onClick={onBack}>Back</button>
           </>}
@@ -1061,7 +1057,7 @@ function Onboarding({
         <aside className="onboarding-visual-panel"><OnboardingVisual step={step} profile={profile} /></aside>
       </section>
 
-      <footer className="onboarding-footer"><span>Setup takes about 30 seconds</span><span>YouTube can be connected later</span></footer>
+      <footer className="onboarding-footer"><span>Setup takes about 30 seconds</span><span>Read-only YouTube access</span></footer>
     </main>
   );
 }
@@ -2517,7 +2513,7 @@ export default function Home({ initialView = "create" }: StanleyAppProps = {}) {
         const response = await fetch("/api/youtube/status", { cache: "no-store" });
         if (response.ok) status = normalizeYouTubeStatus(await response.json() as YouTubeStatus);
       } catch {
-        // The generic Stanley experience still works if Google is temporarily unavailable.
+        // Keep the connection gate visible if Google is temporarily unavailable.
       }
       if (!active) return;
       setYouTubeStatus(status);
@@ -2526,10 +2522,10 @@ export default function Home({ initialView = "create" }: StanleyAppProps = {}) {
         setActiveView("create");
         setMode("idea");
         setTopic(extensionPrompt);
-        setOnboardingStep(savedOnboarding ? "done" : "welcome");
+        setOnboardingStep(status.connected ? (savedOnboarding ? "done" : "welcome") : (savedOnboarding ? "connect" : "welcome"));
         window.history.replaceState({}, "", window.location.pathname);
         analysisTimer = window.setTimeout(() => {
-          if (active && savedOnboarding) topicRef.current?.focus();
+          if (active && savedOnboarding && status.connected) topicRef.current?.focus();
         }, 120);
       } else if (replayOnboarding) {
         setOnboardingStep("welcome");
@@ -2561,14 +2557,9 @@ export default function Home({ initialView = "create" }: StanleyAppProps = {}) {
         const resultMessage = messagesByResult[result] || "YouTube could not be connected.";
         setYouTubeError(resultMessage);
         window.history.replaceState({}, "", window.location.pathname);
-        if (savedOnboarding) {
-          setNotice(resultMessage);
-          setOnboardingStep("done");
-        } else {
-          setOnboardingStep("connect");
-        }
+        setOnboardingStep("connect");
       } else {
-        setOnboardingStep(savedOnboarding ? "done" : "welcome");
+        setOnboardingStep(status.connected ? (savedOnboarding ? "done" : "welcome") : (savedOnboarding ? "connect" : "welcome"));
       }
       document.documentElement.dataset.stanleyReady = "true";
     }
@@ -3043,26 +3034,6 @@ export default function Home({ initialView = "create" }: StanleyAppProps = {}) {
     window.location.assign("/api/youtube/connect?returnTo=/chat");
   }
 
-  async function disconnectYouTube() {
-    const previousStatus = youtubeStatus;
-    setYouTubeStatus((current) => ({ ...current, connected: false, profile: null }));
-    try {
-      const response = await fetch("/api/youtube/disconnect", { method: "POST" });
-      if (!response.ok) throw new Error("YouTube disconnect failed");
-      setYouTubeVideos([]);
-      setAttachments((current) => current.filter((attachment) => attachment.kind !== "youtube"));
-    } catch {
-      setYouTubeStatus(previousStatus);
-    }
-  }
-
-  function skipOnboarding() {
-    window.localStorage.setItem(ONBOARDING_KEY, "skipped");
-    navigateWorkspace("create", true);
-    setOnboardingStep("done");
-    window.setTimeout(() => topicRef.current?.focus(), 0);
-  }
-
   function removeAttachment(id: string) {
     setUploadedVideoCache((current) => {
       if (!current.has(id)) return current;
@@ -3447,9 +3418,9 @@ export default function Home({ initialView = "create" }: StanleyAppProps = {}) {
   }
 
   if (onboardingStep === "loading") return <main className="onboarding-loading" aria-label="Loading Stanley" />;
-  if (onboardingStep !== "done") {
+  if (onboardingStep !== "done" || !youtubeStatus.connected) {
     return <Onboarding
-      step={onboardingStep}
+      step={onboardingStep === "done" ? "connect" : onboardingStep}
       direction={onboardingDirection}
       error={youtubeError}
       configured={youtubeStatus.configured}
@@ -3457,7 +3428,6 @@ export default function Home({ initialView = "create" }: StanleyAppProps = {}) {
       onContinue={continueOnboarding}
       onBack={backOnboarding}
       onConnect={connectYouTube}
-      onSkip={skipOnboarding}
     />;
   }
 
@@ -3545,8 +3515,6 @@ export default function Home({ initialView = "create" }: StanleyAppProps = {}) {
                 <span><strong>{WILL_TENNYSON_DEMO.title}</strong><small>Demo · {willProfile.subscriberCount ? `${formatViews(willProfile.subscriberCount)} subscribers` : "Public channel data"}</small></span>
                 <Check aria-hidden="true" />
               </button>
-              <div className="creator-menu-separator" />
-              <button className="creator-disconnect" type="button" role="menuitem" onClick={() => { setCreatorMenuOpen(false); void disconnectYouTube(); }}><LogOut aria-hidden="true" /><span>Disconnect YouTube</span></button>
             </div>}
           </div> : <button className="youtube-connect-header" type="button" onClick={connectYouTube}><YouTubeIcon /><span>Connect YouTube</span></button>}
           <div className="header-actions">
