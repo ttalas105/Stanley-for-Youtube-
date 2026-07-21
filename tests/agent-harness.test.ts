@@ -491,6 +491,132 @@ test("recovers one-character creator misspellings without selecting clip channel
   }
 });
 
+test("uses the current video topic to resolve a creator whose public channel has a decorated name", async () => {
+  const originalFetch = globalThis.fetch;
+  const requestedUrls: string[] = [];
+  globalThis.fetch = async (input) => {
+    const url = new URL(String(input));
+    requestedUrls.push(url.toString());
+    if (url.searchParams.get("type") === "channel") {
+      const contextual = url.searchParams.get("q")?.toLowerCase().includes("csgo");
+      return Response.json({ items: contextual ? [
+        { id: { channelId: "warowl-main" }, snippet: { channelId: "warowl-main", title: "TheWarOwl" } },
+        { id: { channelId: "warowl-junior" }, snippet: { channelId: "warowl-junior", title: "Jr. Warowl" } },
+      ] : [
+        { id: { channelId: "warowl-main" }, snippet: { channelId: "warowl-main", title: "TheWarOwl" } },
+        { id: { channelId: "empty-lookalike" }, snippet: { channelId: "empty-lookalike", title: "🦉warowl" } },
+        { id: { channelId: "clips" }, snippet: { channelId: "clips", title: "Unofficial WarOwl Clips" } },
+      ] });
+    }
+    if (url.pathname.endsWith("/search")) return Response.json({ items: [{ id: { videoId: "video123" } }] });
+    return Response.json({ items: [{
+      id: "video123",
+      snippet: { title: "Counter-Strike upload", channelTitle: "TheWarOwl", publishedAt: new Date(Date.now() - 86_400_000).toISOString(), thumbnails: {} },
+      statistics: { viewCount: "12000" },
+      contentDetails: { duration: "PT8M" },
+    }] });
+  };
+  try {
+    const registry = createYouTubeToolRegistry({
+      apiKey: "test-key",
+      session: null,
+      researchContext: "He makes CSGO content. How can I film this video like his?",
+      allowPublicSearch: true,
+      allowChannelSnapshot: false,
+      allowVideoEvidence: false,
+    });
+    const result = await registry.execute("youtube_search_reference_videos", { channelName: "WarOwl", maxResults: 4 }, new AbortController().signal);
+    assert.equal(result.status, "partial");
+    assert.equal(new URL(requestedUrls[1] || "http://invalid").searchParams.get("q"), "WarOwl csgo");
+    assert.equal(new URL(requestedUrls[2] || "http://invalid").searchParams.get("channelId"), "warowl-main");
+    assert.match(result.warnings.join(" "), /current video topic/i);
+    assert.deepEqual((result.data as { resolvedChannel?: unknown }).resolvedChannel, {
+      requestedName: "WarOwl",
+      title: "TheWarOwl",
+      corrected: true,
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("recovers when the model mixes the creator name and topic into channelName", async () => {
+  const originalFetch = globalThis.fetch;
+  const requestedUrls: string[] = [];
+  globalThis.fetch = async (input) => {
+    const url = new URL(String(input));
+    requestedUrls.push(url.toString());
+    if (url.searchParams.get("type") === "channel") {
+      return Response.json({ items: [
+        { id: { channelId: "warowl-main" }, snippet: { channelId: "warowl-main", title: "TheWarOwl" } },
+        { id: { channelId: "warowl-junior" }, snippet: { channelId: "warowl-junior", title: "Jr. Warowl" } },
+      ] });
+    }
+    if (url.pathname.endsWith("/search")) return Response.json({ items: [{ id: { videoId: "video123" } }] });
+    return Response.json({ items: [{
+      id: "video123",
+      snippet: { title: "Counter-Strike upload", channelTitle: "TheWarOwl", publishedAt: new Date(Date.now() - 86_400_000).toISOString(), thumbnails: {} },
+      statistics: { viewCount: "12000" },
+      contentDetails: { duration: "PT8M" },
+    }] });
+  };
+  try {
+    const registry = createYouTubeToolRegistry({ apiKey: "test-key", session: null, allowPublicSearch: true, allowChannelSnapshot: false, allowVideoEvidence: false });
+    const result = await registry.execute("youtube_search_reference_videos", { channelName: "WarOwl CSGO", maxResults: 4 }, new AbortController().signal);
+    assert.equal(result.status, "partial");
+    assert.equal(new URL(requestedUrls[1] || "http://invalid").searchParams.get("channelId"), "warowl-main");
+    assert.deepEqual((result.data as { resolvedChannel?: unknown }).resolvedChannel, {
+      requestedName: "WarOwl CSGO",
+      title: "TheWarOwl",
+      corrected: true,
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("uses topic context to disambiguate duplicate exact channel display names", async () => {
+  const originalFetch = globalThis.fetch;
+  const requestedUrls: string[] = [];
+  globalThis.fetch = async (input) => {
+    const url = new URL(String(input));
+    requestedUrls.push(url.toString());
+    if (url.searchParams.get("type") === "channel") {
+      const contextual = url.searchParams.get("q")?.toLowerCase().includes("csgo");
+      return Response.json({ items: contextual ? [
+        { id: { channelId: "warowl-main" }, snippet: { channelId: "warowl-main", title: "TheWarOwl" } },
+        { id: { channelId: "warowl-junior" }, snippet: { channelId: "warowl-junior", title: "Jr. Warowl" } },
+      ] : [
+        { id: { channelId: "warowl-main" }, snippet: { channelId: "warowl-main", title: "TheWarOwl" } },
+        { id: { channelId: "empty-copy" }, snippet: { channelId: "empty-copy", title: "TheWarOwl" } },
+      ] });
+    }
+    if (url.pathname.endsWith("/search")) return Response.json({ items: [{ id: { videoId: "video123" } }] });
+    return Response.json({ items: [{
+      id: "video123",
+      snippet: { title: "Counter-Strike upload", channelTitle: "TheWarOwl", publishedAt: new Date(Date.now() - 86_400_000).toISOString(), thumbnails: {} },
+      statistics: { viewCount: "12000" },
+      contentDetails: { duration: "PT8M" },
+    }] });
+  };
+  try {
+    const registry = createYouTubeToolRegistry({
+      apiKey: "test-key",
+      session: null,
+      researchContext: "The creator makes CSGO videos.",
+      allowPublicSearch: true,
+      allowChannelSnapshot: false,
+      allowVideoEvidence: false,
+    });
+    const result = await registry.execute("youtube_search_reference_videos", { channelName: "TheWarOwl", maxResults: 4 }, new AbortController().signal);
+    assert.equal(result.status, "partial");
+    assert.equal(new URL(requestedUrls[2] || "http://invalid").searchParams.get("channelId"), "warowl-main");
+    assert.match(result.warnings.join(" "), /current video topic/i);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("keeps shorter named-channel uploads when the long-form result set is empty", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (input) => {

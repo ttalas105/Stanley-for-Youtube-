@@ -29,6 +29,7 @@ type YouTubeToolOptions = {
   apiKey?: string;
   session: YouTubeSession | null;
   researchTopic?: string;
+  researchContext?: string;
   requestedPublishedWithinHours?: number;
   forceMostPopularChart?: boolean;
   allowPublicSearch?: boolean;
@@ -76,7 +77,7 @@ function numberValue(value: unknown) {
 }
 
 const RESEARCH_STOP_WORDS = new Set([
-  "about", "best", "channel", "content", "create", "creator", "day", "days", "film", "hour", "hours", "last", "local", "long", "minute", "minutes", "most", "past", "performing", "popular", "recent", "review", "reviews", "script", "the", "their", "top", "trending", "video", "videos", "viral", "week", "weeks", "youtube",
+  "about", "based", "best", "can", "channel", "content", "create", "creator", "day", "days", "film", "from", "generate", "help", "her", "his", "hour", "hours", "how", "idea", "last", "like", "local", "long", "look", "make", "minute", "minutes", "most", "need", "one", "our", "past", "performing", "please", "popular", "recent", "review", "reviews", "say", "saying", "script", "similar", "style", "tell", "the", "their", "this", "top", "trending", "use", "video", "videos", "viral", "want", "week", "weeks", "with", "you", "your", "youtube", "youtuber",
 ]);
 
 function researchWords(value: string) {
@@ -95,6 +96,51 @@ function normalizedChannelName(value: string) {
 
 function compactChannelName(value: string) {
   return normalizedChannelName(value).replace(/\s+/g, "");
+}
+
+const LOOKALIKE_CHANNEL_WORDS = /\b(?:archive|clips?|compilation|fan|highlights?|moments?|podcast|reuploads?|unofficial)\b/i;
+
+function channelCandidates(response: SearchResponse) {
+  return (response.items || []).flatMap((item) => {
+    const id = item.id?.channelId || item.snippet?.channelId || "";
+    const title = item.snippet?.title?.trim() || "";
+    return id && title ? [{ id, title }] : [];
+  });
+}
+
+function relatedChannelName(requestedName: string, candidateTitle: string) {
+  const requested = compactChannelName(requestedName);
+  const candidate = compactChannelName(candidateTitle);
+  return requested.length >= 4 && candidate.length >= 4 && (candidate.includes(requested) || requested.includes(candidate));
+}
+
+function contextualChannelQuery(channelName: string, context: string) {
+  const channelWords = researchWords(channelName);
+  const contextWords = Array.from(researchWords(context))
+    .filter((word) => !channelWords.has(word) && !compactChannelName(channelName).includes(word))
+    .slice(0, 4);
+  return contextWords.length ? `${channelName} ${contextWords.join(" ")}`.slice(0, 100) : "";
+}
+
+export function sharedContextualChannelMatch(
+  requestedName: string,
+  baseCandidates: Array<{ id: string; title: string }>,
+  contextualCandidates: Array<{ id: string; title: string }>,
+) {
+  const baseTop = baseCandidates[0];
+  const contextualTop = contextualCandidates[0];
+  if (!baseTop || !contextualTop || baseTop.id !== contextualTop.id) return null;
+  if (!relatedChannelName(requestedName, baseTop.title) || LOOKALIKE_CHANNEL_WORDS.test(normalizedChannelName(baseTop.title))) return null;
+  return baseTop;
+}
+
+function leadingChannelMatchFromMixedQuery(requestedName: string, candidates: Array<{ id: string; title: string }>) {
+  const requestedWords = Array.from(researchWords(requestedName));
+  if (requestedWords.length < 2) return null;
+  const top = candidates[0];
+  if (!top || LOOKALIKE_CHANNEL_WORDS.test(normalizedChannelName(top.title))) return null;
+  const candidate = compactChannelName(top.title);
+  return requestedWords.some((word) => word.length >= 4 && candidate.includes(word)) ? top : null;
 }
 
 function editDistance(left: string, right: string) {
@@ -314,6 +360,7 @@ function searchReferenceVideosTool(options: YouTubeToolOptions): ToolDefinition 
       let channelId = "";
       let resolvedChannelTitle = "";
       let correctedChannelName = false;
+      let channelResolution: "exact" | "typo" | "context" = "exact";
       if (channelName) {
         let exactMatches: Array<{ id: string; title: string }> = [];
         if (/^UC[A-Za-z0-9_-]{20,30}$/.test(channelName)) {
@@ -335,17 +382,46 @@ function searchReferenceVideosTool(options: YouTubeToolOptions): ToolDefinition 
           channelUrl.search = new URLSearchParams({ part: "snippet", type: "channel", maxResults: "10", q: channelName }).toString();
           const channelSearch = await youtubeRequest<SearchResponse>(channelUrl, options, context.signal);
           const requestedName = normalizedChannelName(channelName);
-          const candidates = (channelSearch.items || []).flatMap((item) => {
-            const id = item.id?.channelId || item.snippet?.channelId || "";
-            const title = item.snippet?.title?.trim() || "";
-            return id && title ? [{ id, title }] : [];
-          });
+          const candidates = channelCandidates(channelSearch);
           exactMatches = candidates.filter((candidate) => normalizedChannelName(candidate.title) === requestedName);
+          const topCandidate = candidates[0];
+          const topRelatedCandidateChallengesExact = exactMatches.length === 1
+            && topCandidate
+            && topCandidate.id !== exactMatches[0].id
+            && relatedChannelName(channelName, topCandidate.title)
+            && !LOOKALIKE_CHANNEL_WORDS.test(normalizedChannelName(topCandidate.title));
+          if (topRelatedCandidateChallengesExact) exactMatches = [];
           if (!exactMatches.length) {
             const nearMatch = uniqueNearChannelMatch(channelName, candidates);
-            if (nearMatch) {
+            if (nearMatch && nearMatch.id === topCandidate?.id) {
               exactMatches = [nearMatch];
               correctedChannelName = true;
+              channelResolution = "typo";
+            }
+          }
+          if (exactMatches.length !== 1) {
+            const contextualQuery = contextualChannelQuery(
+              channelName,
+              [requestedQuery, options.researchContext, options.researchTopic].filter(Boolean).join(" "),
+            );
+            if (contextualQuery) {
+              const contextualUrl = new URL("https://www.googleapis.com/youtube/v3/search");
+              contextualUrl.search = new URLSearchParams({ part: "snippet", type: "channel", maxResults: "10", q: contextualQuery }).toString();
+              const contextualSearch = await youtubeRequest<SearchResponse>(contextualUrl, options, context.signal);
+              const contextualMatch = sharedContextualChannelMatch(channelName, candidates, channelCandidates(contextualSearch));
+              if (contextualMatch) {
+                exactMatches = [contextualMatch];
+                correctedChannelName = true;
+                channelResolution = "context";
+              }
+            }
+          }
+          if (!exactMatches.length) {
+            const mixedQueryMatch = leadingChannelMatchFromMixedQuery(channelName, candidates);
+            if (mixedQueryMatch) {
+              exactMatches = [mixedQueryMatch];
+              correctedChannelName = true;
+              channelResolution = "context";
             }
           }
         }
@@ -459,7 +535,8 @@ function searchReferenceVideosTool(options: YouTubeToolOptions): ToolDefinition 
         coverage: { returned: videos.length, totalKnown: search.pageInfo?.totalResults, complete: !search.nextPageToken, ...(search.nextPageToken ? { nextCursor: search.nextPageToken } : {}) },
         sources,
         warnings: [
-          ...(correctedChannelName ? [`Resolved the likely misspelling “${channelName}” to the unique near-match channel “${resolvedChannelTitle}”.`] : []),
+          ...(channelResolution === "typo" ? [`Resolved the likely misspelling “${channelName}” to the unique near-match channel “${resolvedChannelTitle}”.`] : []),
+          ...(channelResolution === "context" ? [`Resolved “${channelName}” to “${resolvedChannelTitle}” because it was the leading name match for both the creator search and the current video topic.`] : []),
           ...(usedShorterFallback ? ["No long-form upload matched the first result set; use the shorter uploads only for observable channel style, not long-form structure."] : []),
           "Public view counts and views per day are current observations, not historical CTR, retention, or causal algorithm signals.",
         ],

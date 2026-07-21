@@ -1213,6 +1213,7 @@ async function generateResponse(request: Request, emitProgress?: ProgressEmitter
 - For an initial evidence-backed idea or packaging request, search only when current comparable examples materially improve the answer. One clear query is normally enough. If it is empty, broaden once and then continue honestly.
 - Every public-video search must preserve the runtime research topic. Never substitute the creator's broader channel theme, a recent upload, or an unrelated memory for the current video's central subject.
 - Never invent a tool result, source, transcript, metric, or completed action. Treat partial and empty results exactly as reported.
+- If a named-channel search returns empty, do not describe that creator's style from memory. Say the channel could not be verified and request its exact URL.
 - Public performance is evidence of audience response, not proof of a ranking rule. Separate observations, inferences, and creative hypotheses.
 - Never claim a topic, person, or pet already appears on the creator's channel unless a successful youtube_channel_snapshot result actually shows it. Without that evidence, describe only fit to the creator's current brief.
 - After any useful tool calls, answer the creator directly and return JSON matching the requested response schema. Do not expose tool syntax or internal reasoning.`;
@@ -1235,6 +1236,7 @@ async function generateResponse(request: Request, emitProgress?: ProgressEmitter
     apiKey: youtubeKey,
     session: activeYouTubeSession,
     researchTopic,
+    researchContext: currentMessage,
     requestedPublishedWithinHours: researchWindowHours,
     forceMostPopularChart,
     allowPublicSearch: demoCreator ? true : researchAccess.publicSearch || allowSemanticPublicResearch,
@@ -1312,6 +1314,23 @@ RUNTIME_CONTEXT_END`;
       durationMs: available.reduce((total, run) => total + run.trace.durationMs, 0),
       toolCalls: available.flatMap((run) => agentMetadata(run).toolCalls),
     };
+  };
+  const unresolvedNamedChannelResponse = (run: AgentResult) => {
+    const searches = run.toolResults.filter((result) => result.tool === "youtube_search_reference_videos");
+    if (!searches.length || searches.some((result) => result.status === "complete" || result.status === "partial")) return null;
+    const searchData = searches.at(-1)?.data && typeof searches.at(-1)?.data === "object"
+      ? searches.at(-1)?.data as { query?: unknown }
+      : {};
+    const requestedChannel = namedPublicChannel || cleanText(searchData.query, 100) || "that creator";
+    return Response.json({
+      reply: `I searched YouTube for ${requestedChannel}, but I couldn't verify usable videos from one unique channel. I won't invent their style from memory. Send the exact channel URL and I'll analyze it directly.`,
+      conversationTopic: resolvedBrief,
+      blocked: false,
+      conversational: true,
+      mode: "auto",
+      model: run.trace.model,
+      agent: agentMetadata(run),
+    });
   };
   try {
     const transcript = conversation.length
@@ -1602,7 +1621,7 @@ TRANSCRIPT_END
         });
       }
       const result = run.output as { reply?: unknown };
-      const reply = cleanReply(result.reply, forArtifact ? 1_500 : 3_200);
+      let reply = cleanReply(result.reply, forArtifact ? 1_500 : 3_200);
       if (!reply) throw new Error("Gemini returned an empty YouTube research response");
       const requiredTool = useExactVideoResearch
         ? "youtube_get_video_evidence"
@@ -1612,12 +1631,20 @@ TRANSCRIPT_END
       const evidenceResults = run.toolResults.filter((item) => item.tool === requiredTool && (useExactVideoResearch || useConnectedChannelResearch || item.ok));
       if (!evidenceResults.length) throw new Error(`The YouTube research layer did not run ${requiredTool}`);
       const evidence = JSON.stringify(evidenceResults.map(({ summary, data, warnings }) => ({ summary, data, warnings }))).slice(0, 16_000);
+      const evidenceResult = evidenceResults.at(-1);
+      if (requiredTool === "youtube_search_reference_videos" && !evidenceResults.some((item) => item.status === "complete" || item.status === "partial")) {
+        const evidenceData = evidenceResult?.data && typeof evidenceResult.data === "object"
+          ? evidenceResult.data as { query?: unknown }
+          : {};
+        const requestedChannel = namedPublicChannel || cleanText(evidenceData.query, 100) || "that creator";
+        reply = `I searched YouTube for ${requestedChannel}, but I couldn't verify usable videos from one unique channel. I won't invent their style from memory. Send the exact channel URL and I'll analyze it directly.`;
+      }
       return {
         run,
         reply,
         research: useExactVideoResearch || useConnectedChannelResearch ? undefined : researchFromToolResults(run.toolResults),
         evidence,
-        evidenceResult: evidenceResults.at(-1),
+        evidenceResult,
       };
     };
     const researchLayer = !reusePriorVideoAnalysis && (
@@ -1886,6 +1913,8 @@ Give a useful explanation, not a refusal and not an artifact batch. Lead with th
         researchAccess.publicSearch,
         1,
       );
+      const unresolvedChannel = unresolvedNamedChannelResponse(guidanceRun);
+      if (unresolvedChannel) return unresolvedChannel;
       const guidanceResult = guidanceRun.output as { reply?: unknown };
       const guidanceReply = formatGuidanceReply(guidanceResult.reply);
       if (!guidanceReply) throw new Error("Gemini returned an empty YouTube guidance response");
@@ -1956,6 +1985,8 @@ ${scope.intent === "social"
         2400,
         !researchLayer,
       );
+      const unresolvedChannel = unresolvedNamedChannelResponse(titleRun);
+      if (unresolvedChannel) return unresolvedChannel;
       const titleResult = titleRun.output as { reply?: unknown; titles?: unknown };
       const research = researchLayer?.research || researchFromToolResults(titleRun.toolResults);
       const titles = normalizeTitles(titleResult.titles);
@@ -2017,6 +2048,8 @@ ${scope.intent === "social"
         4000,
         !researchLayer,
       );
+      const unresolvedChannel = unresolvedNamedChannelResponse(ideaRun);
+      if (unresolvedChannel) return unresolvedChannel;
       const ideaResult = ideaRun.output as { reply?: unknown; ideas?: unknown };
       const research = researchLayer?.research || researchFromToolResults(ideaRun.toolResults);
       const usedChannelEvidence = [...(researchLayer?.run.toolResults || []), ...ideaRun.toolResults]
@@ -2121,6 +2154,8 @@ BETTER: "The number moved from [baseline] to [result]. The part I'm keeping is [
         MODEL,
         45_000,
       );
+      const unresolvedChannel = unresolvedNamedChannelResponse(scriptRun);
+      if (unresolvedChannel) return unresolvedChannel;
       const scriptResult = scriptRun.output as { reply?: unknown; script?: unknown };
       const research = researchLayer?.research || researchFromToolResults(scriptRun.toolResults);
       const script = normalizeScript(scriptResult.script);
@@ -2180,6 +2215,8 @@ FINAL_VIDEO_PACKAGE_END`)
         ? `\n\nSELECTED_IDEA_START\nOption ${selectedIdea.optionNumber}: ${selectedIdea.idea}\nSELECTED_IDEA_END\nThe creator selected this exact existing idea. Return exactly one updated idea. Preserve its central premise, format, viewer promise, and progression. Apply only the changes explicitly requested in the final creator message. A new game, subject, length, tone, or constraint replaces that detail inside the selected premise; it does not authorize a different concept. Do not generate a fresh batch and do not substitute a neighboring idea.`
         : "";
       const ideaRun = await creativeJson(`${followUpPrompt}${ideaRefinementContract}`, ideaChatSchema, 3600);
+      const unresolvedChannel = unresolvedNamedChannelResponse(ideaRun);
+      if (unresolvedChannel) return unresolvedChannel;
       const result = ideaRun.output as { reply?: unknown; ideas?: unknown };
       const reply = cleanReply(result.reply, 420);
       if (!reply) throw new Error("Gemini returned an empty idea response");
@@ -2214,6 +2251,8 @@ FINAL_VIDEO_PACKAGE_END`)
     }
 
     const titleRun = await creativeJson(followUpPrompt, titleChatSchema, 1800);
+    const unresolvedChannel = unresolvedNamedChannelResponse(titleRun);
+    if (unresolvedChannel) return unresolvedChannel;
     const result = titleRun.output as { reply?: unknown; titles?: unknown };
     const reply = cleanReply(result.reply, 420);
     if (!reply) throw new Error("Gemini returned an empty title response");
