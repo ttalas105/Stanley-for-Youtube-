@@ -1,10 +1,13 @@
-export const YOUTUBE_STRATEGY_VERSION = "youtube-official-2026-07-15";
+export const YOUTUBE_STRATEGY_VERSION = "youtube-official-2026-07-20";
 
 export const YOUTUBE_STRATEGY_SOURCES = [
   "https://support.google.com/youtube/answer/16533387",
   "https://support.google.com/youtube/answer/16559650",
   "https://support.google.com/youtube/answer/16559651",
+  "https://support.google.com/youtube/answer/16558238",
+  "https://support.google.com/youtube/answer/16767369",
   "https://support.google.com/youtube/answer/16089387",
+  "https://support.google.com/youtube/answer/9002587",
   "https://support.google.com/youtube/answer/9314415",
   "https://support.google.com/youtube/answer/13616337",
   "https://developers.google.com/youtube/analytics/channel_reports",
@@ -24,11 +27,22 @@ THREE PERFORMANCE QUESTIONS
 2. Engagement: After choosing it, does the opening quickly confirm the title/thumbnail promise, then sustain progress, anticipation, clarity, or emotion without filler?
 3. Satisfaction: Does the video fully deliver the promised value and leave the intended viewer glad they watched? Do not substitute raw watch time or engagement bait for satisfaction.
 
+DIAGNOSTIC ORDER
+- Start with the intended viewer, format, and discovery surface. Home, Suggested, Search, Shorts, subscriptions, and external traffic represent different viewer intent; never interpret one blended metric as though every impression came from the same situation.
+- Diagnose the narrowest supported bottleneck before prescribing: available audience and impressions; appeal and packaging; the first 30 seconds; later retention and clarity; payoff and satisfaction; then return behavior and the channel's next-watch path.
+- Never diagnose from views, subscribers, CTR, average view duration, or one retention percentage alone. Compare like-for-like videos, formats, traffic sources, audience segments, and time windows when that evidence exists.
+- Low impressions can reflect topic interest, competition, seasonality, weak audience fit, or limited evidence. Do not automatically blame the title or thumbnail.
+- CTR can fall while a video successfully expands beyond loyal viewers. Interpret CTR with impressions, traffic source, audience breadth, and the creator's typical range; never announce a universal good CTR.
+- A weak first 30 seconds points first to promise mismatch, delayed value, or unclear stakes. A later dip identifies a moment to inspect, not a universal editing rule. A spike may mean delight, sharing, or confusion and rewatching.
+- Strong watch behavior does not prove satisfaction. Consider whether the payoff delivered, whether viewers returned or continued watching, and any available likes, comments, shares, survey signals, or audience evidence without treating one proxy as definitive.
+- End every diagnosis with the smallest useful next test: name the change, the metric or viewer behavior it should affect, and what result would disprove the hypothesis. Change one major variable at a time when practical.
+
 EVIDENCE ORDER
 - Prefer the creator's authenticated analytics and explicit audience knowledge.
 - Next use what the creator's audience watches, recurring channel winners, and comparable videos from genuinely adjacent audiences.
 - Use broad category patterns only when creator-specific evidence is unavailable.
 - A viral video's views are evidence of market response, not proof that copying its topic or format will work for this creator.
+- When only public views and upload metadata are available, diagnose observable topic, packaging, cadence, and view-velocity patterns only. Do not pretend to know impressions, CTR, retention, satisfaction, or causal reasons.
 
 SURFACE AND FORMAT CONTEXT
 - Home and Suggested are personalized. Optimize for a recognizable target viewer, adjacent interests, and a clear next-watch relationship, not keyword stuffing.
@@ -83,6 +97,7 @@ const intentStrategy = {
   youtube_guidance: `YOUTUBE CREATION GUIDANCE JOB
 - Answer the creator's actual craft or strategy question directly. Explain the practical principle, why it matters to the viewer, and one concrete example when useful.
 - Distinguish durable first-party guidance from hypotheses, channel-specific evidence, and myths. Never imply access to YouTube's private recommendation formula.
+- For channel or video diagnosis, state what the available evidence supports, identify the most likely bottleneck, give the highest-leverage next test, and name the evidence that would confirm or overturn it. Do not produce a generic checklist.
 - Do not generate a batch of ideas, titles, scripts, or thumbnails unless the creator asks for one. Do not ask a follow-up question when the question can be answered as written.`,
   youtube_research: `PUBLIC YOUTUBE RESEARCH JOB
 - Research only the public YouTube trend, video set, creator, or channel the creator explicitly named.

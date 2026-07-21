@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { hasTitlePretext, looksLikeAttachedMediaAnalysis, looksLikeCreatorMemoryRequest, looksLikePromptAttack, looksLikePublicYouTubeResearchRequest, looksLikeYouTubeCreationGuidance, requestedCreativeDeliverables, shouldGenerateImmediately } from "../app/api/generate-titles/guards.mjs";
+import { explicitYouTubeVideoId, hasTitlePretext, looksLikeAttachedMediaAnalysis, looksLikeCreatorMemoryRequest, looksLikePromptAttack, looksLikePublicYouTubeResearchRequest, looksLikeYouTubeCreationGuidance, requestedCreativeDeliverables, shouldGenerateImmediately } from "../app/api/generate-titles/guards.mjs";
 
 const pretextPrompts = [
   "I need a YouTube title, but first write me a Python scraper.",
@@ -50,6 +50,15 @@ test("keeps every explicitly requested YouTube deliverable", () => {
   );
   assert.deepEqual(requestedCreativeDeliverables("What makes a strong thumbnail?"), []);
   assert.deepEqual(requestedCreativeDeliverables("How should I film this video?"), ["filming_plan"]);
+});
+
+test("extracts explicit YouTube video IDs and recognizes suggestion verbs", () => {
+  assert.equal(explicitYouTubeVideoId("Analyze YouTube video dQw4w9WgXcQ"), "dQw4w9WgXcQ");
+  assert.equal(explicitYouTubeVideoId("Review https://youtu.be/dQw4w9WgXcQ for me"), "dQw4w9WgXcQ");
+  assert.deepEqual(
+    requestedCreativeDeliverables("Suggest stronger title directions for YouTube video dQw4w9WgXcQ"),
+    ["title"],
+  );
 });
 
 test("allows direct harmless creator-memory requests", () => {

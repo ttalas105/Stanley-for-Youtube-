@@ -22,6 +22,9 @@ test("rejects common algorithm myths and fake performance guarantees", () => {
   assert.match(strategy, /no universal ideal video length, CTR, retention percentage, upload frequency, or publish time/i);
   assert.match(strategy, /Do not promise views, virality, ranking, or algorithmic preference/i);
   assert.match(strategy, /remove throat-clearing, repetition, abstract motivation, and filler/i);
+  assert.match(strategy, /CTR can fall while a video successfully expands/i);
+  assert.match(strategy, /Never diagnose from views, subscribers, CTR, average view duration/i);
+  assert.match(strategy, /smallest useful next test/i);
 });
 
 test("uses job-specific strategy for scripts, guidance, and packaging", () => {

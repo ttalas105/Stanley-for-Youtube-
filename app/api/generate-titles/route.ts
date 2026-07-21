@@ -1,4 +1,4 @@
-import { looksLikeAttachedMediaAnalysis, looksLikeCreatorMemoryRequest, looksLikePromptAttack, looksLikePublicYouTubeResearchRequest, looksLikeYouTubeCreationGuidance, requestedCreativeDeliverables, shouldGenerateImmediately } from "./guards.mjs";
+import { explicitYouTubeVideoId, looksLikeAttachedMediaAnalysis, looksLikeCreatorMemoryRequest, looksLikePromptAttack, looksLikePublicYouTubeResearchRequest, looksLikeYouTubeCreationGuidance, requestedCreativeDeliverables, shouldGenerateImmediately } from "./guards.mjs";
 import { isSimpleScriptFollowUp, resolveSelectedIdea } from "./conversation-context.mjs";
 import { sanitizeChannelFit } from "./idea-grounding.mjs";
 import { emptySemanticMemory, formatSemanticMemory, normalizeMemoryKey, selectRelevantSemanticMemory } from "./semantic-memory.mjs";
@@ -804,6 +804,50 @@ async function classifyRequest(
       researchTopic: "",
     };
   }
+  const referencedVideoId = explicitYouTubeVideoId(currentMessage);
+  if (referencedVideoId) {
+    const requested = requestedCreativeDeliverables(currentMessage) as CreativeDeliverable[];
+    if (!requested.length && mode === "title") requested.push("title");
+    if (!requested.length && mode === "thumbnail") requested.push("thumbnail");
+    if (!requested.length && mode === "idea" && /\b(?:idea|concept|premise)\b/i.test(currentMessage)) requested.push("idea");
+    const intent: RequestIntent = requested.includes("script")
+      ? "script_work"
+      : requested.includes("title")
+        ? "title_work"
+        : requested.includes("thumbnail")
+          ? "thumbnail_work"
+          : requested.includes("idea")
+            ? "idea_work"
+            : "video_analysis";
+    return {
+      intent,
+      deliverables: requested,
+      readyForGeneration: true,
+      reason: "exact_youtube_video_evidence",
+      resolvedBrief: cleanText(currentMessage, 900),
+      researchTopic: referencedVideoId,
+    };
+  }
+  if (resolveResearchAccess(currentMessage).channelSnapshot) {
+    const requested = requestedCreativeDeliverables(currentMessage) as CreativeDeliverable[];
+    if (!requested.length && mode === "idea") requested.push("idea");
+    if (!requested.length && mode === "title") requested.push("title");
+    const intent: RequestIntent = requested.includes("script")
+      ? "script_work"
+      : requested.includes("idea")
+        ? "idea_work"
+        : requested.includes("title")
+          ? "title_work"
+          : "youtube_guidance";
+    return {
+      intent,
+      deliverables: requested,
+      readyForGeneration: true,
+      reason: "connected_channel_research",
+      resolvedBrief: cleanText(currentMessage, 900),
+      researchTopic: "",
+    };
+  }
   if (looksLikeYouTubeCreationGuidance(currentMessage)) {
     return {
       intent: "youtube_guidance",
@@ -1018,6 +1062,8 @@ async function generateResponse(request: Request, emitProgress?: ProgressEmitter
   }
 
   const currentMessage = messages?.at(-1)?.content || topic;
+  const referencedVideoId = explicitYouTubeVideoId(currentMessage);
+  const requiresExactTranscript = Boolean(referencedVideoId && /\b(?:exact\s+)?(?:transcript|captions?|spoken\s+(?:words|content)|what\s+(?:they|he|she)\s+said)\b/i.test(currentMessage));
   if (looksLikePromptAttack(currentMessage)) {
     return Response.json({ reply: blockedReply, titles: [], blocked: true, scope: "prompt_attack", model: MODEL });
   }
@@ -1240,6 +1286,16 @@ RUNTIME_CONTEXT_END`;
     durationMs: run.trace.durationMs,
     toolCalls: run.trace.toolCalls.map(({ name, status, memoHit, errorCode }) => ({ name, status, memoHit, ...(errorCode ? { errorCode } : {}) })),
   });
+  const combinedAgentMetadata = (...runs: Array<AgentResult | null | undefined>) => {
+    const available = runs.filter((run): run is AgentResult => Boolean(run));
+    const lead = available.at(-1);
+    return {
+      runId: lead?.trace.runId || crypto.randomUUID(),
+      modelRounds: available.reduce((total, run) => total + run.trace.modelRounds, 0),
+      durationMs: available.reduce((total, run) => total + run.trace.durationMs, 0),
+      toolCalls: available.flatMap((run) => agentMetadata(run).toolCalls),
+    };
+  };
   try {
     const transcript = conversation.length
       ? conversation.map((message, index) => `${index + 1}. ${message.role.toUpperCase()}: ${message.content}`).join("\n")
@@ -1247,11 +1303,37 @@ RUNTIME_CONTEXT_END`;
     const hasExistingArtifact = conversation.some((message) =>
       message.role === "assistant" && /(?:Title options|Idea options|Generated thumbnail):/.test(message.content),
     );
-    const useConnectedChannelResearch = Boolean(!demoCreator && researchAccess.channelSnapshot);
+    const useExactVideoResearch = Boolean(referencedVideoId);
+    const useConnectedChannelResearch = Boolean(!useExactVideoResearch && !demoCreator && researchAccess.channelSnapshot);
     const createResearchLayer = async (forArtifact: boolean) => {
-      let connectedSnapshot: Awaited<ReturnType<typeof toolRegistry.execute>> | null = null;
-      let connectedSnapshotDurationMs = 0;
-      if (useConnectedChannelResearch) {
+      let prefetchedEvidence: Awaited<ReturnType<typeof toolRegistry.execute>> | null = null;
+      let prefetchedEvidenceDurationMs = 0;
+      let prefetchedTool = "";
+      if (useExactVideoResearch) {
+        prefetchedTool = "youtube_get_video_evidence";
+        const evidenceStartedAt = Date.now();
+        await emitProgress?.({
+          id: "exact-video-evidence",
+          label: "Inspecting the reference video",
+          detail: requiresExactTranscript ? "Reading exact metadata and checking owner-authorized captions" : "Reading exact current metadata and public statistics",
+          status: "active",
+          kind: "tool",
+        });
+        prefetchedEvidence = await toolRegistry.execute(
+          prefetchedTool,
+          { videoId: referencedVideoId, includeTranscript: requiresExactTranscript },
+          request.signal,
+        );
+        prefetchedEvidenceDurationMs = Date.now() - evidenceStartedAt;
+        await emitProgress?.({
+          id: "exact-video-evidence",
+          label: "Inspecting the reference video",
+          detail: prefetchedEvidence.summary,
+          status: prefetchedEvidence.status === "complete" || prefetchedEvidence.status === "partial" ? "complete" : "limited",
+          kind: "tool",
+        });
+      } else if (useConnectedChannelResearch) {
+        prefetchedTool = "youtube_channel_snapshot";
         const snapshotStartedAt = Date.now();
         await emitProgress?.({
           id: "connected-channel-snapshot",
@@ -1260,27 +1342,74 @@ RUNTIME_CONTEXT_END`;
           status: "active",
           kind: "tool",
         });
-        connectedSnapshot = await toolRegistry.execute(
-          "youtube_channel_snapshot",
+        prefetchedEvidence = await toolRegistry.execute(
+          prefetchedTool,
           { scope: "connected_channel", maxVideos: 12 },
           request.signal,
         );
-        connectedSnapshotDurationMs = Date.now() - snapshotStartedAt;
+        prefetchedEvidenceDurationMs = Date.now() - snapshotStartedAt;
         await emitProgress?.({
           id: "connected-channel-snapshot",
           label: "Reading your YouTube channel",
-          detail: connectedSnapshot.summary,
-          status: connectedSnapshot.status === "complete" || connectedSnapshot.status === "partial" ? "complete" : "limited",
+          detail: prefetchedEvidence.summary,
+          status: prefetchedEvidence.status === "complete" || prefetchedEvidence.status === "partial" ? "complete" : "limited",
           kind: "tool",
         });
       }
-      const researchInstruction = useConnectedChannelResearch
+      if (useExactVideoResearch && prefetchedEvidence) {
+        const exactData = prefetchedEvidence.data && typeof prefetchedEvidence.data === "object"
+          ? prefetchedEvidence.data as { title?: string; views?: number; publishedAt?: string }
+          : {};
+        const verifiedTitle = cleanText(exactData.title, 180) || referencedVideoId;
+        const reply = prefetchedEvidence.ok
+          ? `Verified current metadata for "${verifiedTitle}". Use only the exact evidence below; no footage, cultural context, or audience reaction has been verified.`
+          : prefetchedEvidence.summary;
+        const evidence = JSON.stringify([{
+          summary: prefetchedEvidence.summary,
+          data: prefetchedEvidence.data,
+          warnings: prefetchedEvidence.warnings,
+        }]).slice(0, 16_000);
+        const run: AgentResult = {
+          output: { reply },
+          text: JSON.stringify({ reply }),
+          toolResults: [prefetchedEvidence],
+          trace: {
+            runId: crypto.randomUUID(),
+            provider: "youtube",
+            model: "youtube-data-api",
+            startedAt: new Date(Date.now() - prefetchedEvidenceDurationMs).toISOString(),
+            durationMs: prefetchedEvidenceDurationMs,
+            modelRounds: 0,
+            promptTokens: 0,
+            completionTokens: 0,
+            cachedTokens: 0,
+            toolCalls: [{
+              round: 0,
+              name: prefetchedTool,
+              durationMs: prefetchedEvidenceDurationMs,
+              status: prefetchedEvidence.status,
+              memoHit: false,
+              ...(prefetchedEvidence.error?.code ? { errorCode: prefetchedEvidence.error.code } : {}),
+            }],
+          },
+        };
+        return { run, reply, research: undefined, evidence, evidenceResult: prefetchedEvidence };
+      }
+      const researchInstruction = useExactVideoResearch
+        ? `The creator explicitly referenced one exact YouTube video. The exact evidence lookup has already run and appears below. Do not rely on memorized knowledge about this video and do not call another tool.
+
+Analyze only the returned metadata, statistics, and transcript status. Treat even a globally famous or recognizable video as unknown beyond this evidence; background knowledge, memes, cultural reputation, lyrics, and presumed audience response are not authorized facts. Never claim you watched footage unless creator-supplied media is actually attached. Never describe lyrics, dialogue, scenes, editing, retention, CTR, or audience reaction unless that evidence is explicitly present. ${forArtifact ? "Keep this evidence handoff under 140 words and focus on facts that constrain the requested artifact." : "State what is verifiable, what is unavailable, and the strongest useful conclusion supported by the evidence."}
+
+EXACT_VIDEO_EVIDENCE_START
+${JSON.stringify(prefetchedEvidence)}
+EXACT_VIDEO_EVIDENCE_END`
+        : useConnectedChannelResearch
         ? `The creator explicitly asked you to inspect their connected YouTube channel. Use youtube_channel_snapshot before answering.
 
 The channel snapshot has already been fetched and appears below. Do not call another tool. Analyze only that snapshot. Identify the few patterns that materially affect what they should improve next, distinguish observations from hypotheses, and never invent private metrics that the snapshot did not return. If it reports that no channel is connected, say so plainly instead of failing. ${forArtifact ? "Keep this research handoff under 140 words because a separate creation layer will use it next." : "Refer to specific returned uploads or metrics naturally when they support the advice."}
 
 CONNECTED_CHANNEL_SNAPSHOT_START
-${JSON.stringify(connectedSnapshot)}
+${JSON.stringify(prefetchedEvidence)}
 CONNECTED_CHANNEL_SNAPSHOT_END`
         : `The creator explicitly asked for public YouTube research. Use youtube_search_reference_videos before answering.
 
@@ -1294,40 +1423,86 @@ TRANSCRIPT_END
 `,
         youtubeResearchSchema,
         forArtifact ? 1200 : 2200,
-        !useConnectedChannelResearch,
+        !prefetchedEvidence,
         1,
       );
-      if (connectedSnapshot) {
-        run.toolResults.unshift(connectedSnapshot);
+      if (prefetchedEvidence) {
+        run.toolResults.unshift(prefetchedEvidence);
         run.trace.toolCalls.unshift({
           round: 0,
-          name: "youtube_channel_snapshot",
-          durationMs: connectedSnapshotDurationMs,
-          status: connectedSnapshot.status,
+          name: prefetchedTool,
+          durationMs: prefetchedEvidenceDurationMs,
+          status: prefetchedEvidence.status,
           memoHit: false,
-          ...(connectedSnapshot.error?.code ? { errorCode: connectedSnapshot.error.code } : {}),
+          ...(prefetchedEvidence.error?.code ? { errorCode: prefetchedEvidence.error.code } : {}),
         });
       }
       const result = run.output as { reply?: unknown };
       const reply = cleanReply(result.reply, forArtifact ? 1_500 : 3_200);
       if (!reply) throw new Error("Gemini returned an empty YouTube research response");
-      const requiredTool = useConnectedChannelResearch ? "youtube_channel_snapshot" : "youtube_search_reference_videos";
-      const evidenceResults = run.toolResults.filter((item) => item.tool === requiredTool && (useConnectedChannelResearch || item.ok));
+      const requiredTool = useExactVideoResearch
+        ? "youtube_get_video_evidence"
+        : useConnectedChannelResearch
+          ? "youtube_channel_snapshot"
+          : "youtube_search_reference_videos";
+      const evidenceResults = run.toolResults.filter((item) => item.tool === requiredTool && (useExactVideoResearch || useConnectedChannelResearch || item.ok));
       if (!evidenceResults.length) throw new Error(`The YouTube research layer did not run ${requiredTool}`);
       const evidence = JSON.stringify(evidenceResults.map(({ summary, data, warnings }) => ({ summary, data, warnings }))).slice(0, 16_000);
       return {
         run,
         reply,
-        research: useConnectedChannelResearch ? undefined : researchFromToolResults(run.toolResults),
+        research: useExactVideoResearch || useConnectedChannelResearch ? undefined : researchFromToolResults(run.toolResults),
         evidence,
+        evidenceResult: evidenceResults.at(-1),
       };
     };
     const researchLayer = (
-      scope.reason === "public_youtube_research"
+      scope.reason === "exact_youtube_video_evidence"
+      || scope.reason === "connected_channel_research"
+      || scope.reason === "public_youtube_research"
       || (scope.intent === "youtube_research" && (Boolean(demoCreator) || researchAccess.publicSearch))
     )
       ? await createResearchLayer(scope.intent !== "youtube_research")
       : null;
+    if (requiresExactTranscript && researchLayer?.evidenceResult) {
+      const evidenceData = researchLayer.evidenceResult.data && typeof researchLayer.evidenceResult.data === "object"
+        ? researchLayer.evidenceResult.data as { transcript?: { status?: string; reason?: string } }
+        : {};
+      if (evidenceData.transcript?.status !== "available") {
+        const reason = cleanText(evidenceData.transcript?.reason, 260) || "An exact caption track was not available.";
+        return Response.json({
+          reply: `I can verify the video's metadata, but I can't write from an exact transcript because ${reason.charAt(0).toLowerCase()}${reason.slice(1)} I won't invent what was said.`,
+          conversationTopic: resolvedBrief,
+          blocked: false,
+          conversational: true,
+          mode: "auto",
+          model: researchLayer.run.trace.model,
+          agent: agentMetadata(researchLayer.run),
+        });
+      }
+    }
+    const hasCreatorSuppliedVideoEvidence = inputAttachments.some((attachment) => attachment.kind === "youtube" || attachment.kind === "video");
+    if (
+      useExactVideoResearch
+      && researchLayer?.evidenceResult
+      && !requiresExactTranscript
+      && !hasCreatorSuppliedVideoEvidence
+      && (requestedDeliverables.size > 0 || /\b(?:packaging|thumbnail|footage|scenes?|editing)\b/i.test(currentMessage))
+    ) {
+      const exactData = researchLayer.evidenceResult.data && typeof researchLayer.evidenceResult.data === "object"
+        ? researchLayer.evidenceResult.data as { title?: string }
+        : {};
+      const verifiedTitle = cleanText(exactData.title, 180) || "that video";
+      return Response.json({
+        reply: `I verified the metadata for "${verifiedTitle}", but a pasted video ID doesn't give me reliable footage or a transcript. I won't invent why its packaging worked. Select the video in Stanley or give me the exact viewer promise, then I can critique it honestly.`,
+        conversationTopic: resolvedBrief,
+        blocked: false,
+        conversational: true,
+        mode: "auto",
+        model: researchLayer.run.trace.model,
+        agent: agentMetadata(researchLayer.run),
+      });
+    }
     const renderThumbnailArtifact = async (thumbnailBrief = resolvedBrief) => {
       const runId = crypto.randomUUID();
       await emitProgress?.({
@@ -1599,12 +1774,13 @@ ${scope.intent === "social"
         kind: "thinking",
       });
       const titleRun = await creativeJson(
-        `CREATOR_BRIEF_START\n${resolvedBrief}\nCREATOR_BRIEF_END\n\nWrite exactly 12 genuinely different title directions. Open with one plain sentence of no more than 22 words. Cover a deliberate mix of curiosity, stakes, transformation, specificity, contrarian framing, personal story, useful promise, and surprising tension. Optimize honest appeal for the most plausible target viewer. Every title must promise something the supplied idea, media, or proof can actually deliver, and no title may imply guaranteed performance. Decide whether current comparable-video evidence would materially improve this first package; retrieve it when useful, but do not search merely to satisfy a ritual.`,
+        `CREATOR_BRIEF_START\n${resolvedBrief}\nCREATOR_BRIEF_END${researchLayer ? `\n\nYOUTUBE_EVIDENCE_HANDOFF_START\n${researchLayer.reply}\n${researchLayer.evidence}\nYOUTUBE_EVIDENCE_HANDOFF_END\nUse this completed evidence handoff and do not research again.` : ""}\n\nWrite exactly 12 genuinely different title directions. Open with one plain sentence of no more than 22 words and never say you structured, designed, built, or generated the options. Cover a deliberate mix of curiosity, stakes, transformation, specificity, contrarian framing, personal story, useful promise, and surprising tension. Optimize honest appeal for the most plausible target viewer. Every title must promise something the supplied idea, media, or proof can actually deliver, and no title may imply guaranteed performance. ${researchLayer ? "Evidence is a hard vocabulary and claim boundary. Do not imply any fact, scene, quote, result, genre, chart history, geography, age, cultural reputation, or audience reaction absent from the evidence. A recognizable video title does not authorize background knowledge. Reject any candidate containing a number, proper noun, accolade, causal claim, historical claim, or descriptive adjective that the evidence does not directly support." : "Decide whether current comparable-video evidence would materially improve this first package; retrieve it when useful, but do not search merely to satisfy a ritual."}`,
         titleSchema,
         2400,
+        !researchLayer,
       );
       const titleResult = titleRun.output as { reply?: unknown; titles?: unknown };
-      const research = researchFromToolResults(titleRun.toolResults);
+      const research = researchLayer?.research || researchFromToolResults(titleRun.toolResults);
       const titles = normalizeTitles(titleResult.titles);
       if (titles.length !== 12) throw new Error(`Gemini returned ${titles.length} usable titles`);
       await emitProgress?.({
@@ -1618,7 +1794,7 @@ ${scope.intent === "social"
       const titleReply = cleanReply(titleResult.reply, 360) || "Here are the strongest title directions for this video.";
       if (requestedDeliverables.has("thumbnail")) {
         const thumbnailArtifact = await renderThumbnailArtifact(`${resolvedBrief}\n\nSELECTED_TITLE_FOR_THUMBNAIL: ${packagedTitles[0]?.title || resolvedBrief}`);
-        const titleAgent = agentMetadata(titleRun);
+        const titleAgent = combinedAgentMetadata(researchLayer?.run, titleRun);
         return Response.json({
           reply: `${titleReply} I used the strongest direction to render the thumbnail${hasThumbnailReference ? " from your image" : ""}.`,
           titles: packagedTitles,
@@ -1628,7 +1804,7 @@ ${scope.intent === "social"
           mode: "title",
           blocked: false,
           completedDeliverables: ["title", "thumbnail"],
-          model: `${titleRun.trace.model} + ${thumbnailArtifact.model}`,
+          model: [researchLayer?.run.trace.model, titleRun.trace.model, thumbnailArtifact.model].filter(Boolean).join(" + "),
           agent: {
             runId: titleAgent.runId,
             modelRounds: titleAgent.modelRounds + thumbnailArtifact.agent.modelRounds,
@@ -1645,8 +1821,8 @@ ${scope.intent === "social"
         conversationTopic: resolvedBrief,
         mode: "title",
         blocked: false,
-        model: MODEL,
-        agent: agentMetadata(titleRun),
+        model: [researchLayer?.run.trace.model, titleRun.trace.model].filter(Boolean).join(" + "),
+        agent: combinedAgentMetadata(researchLayer?.run, titleRun),
       });
     }
 
@@ -1659,13 +1835,15 @@ ${scope.intent === "social"
         kind: "thinking",
       });
       const ideaRun = await creativeJson(
-        `CREATOR_CONTEXT_START\n${resolvedBrief}\nCREATOR_CONTEXT_END\n\nThis is the creator's first idea batch. Use only the research tools exposed for this message. If youtube_channel_snapshot is exposed, call it before claiming channel fit. If youtube_search_reference_videos is exposed, call it once with one broad query that preserves the central subject; broaden once only when the first result is empty. When neither tool is exposed, build directly from the supplied brief without mentioning missing research.\n\nOpen with one plain sentence of no more than 22 words. Generate exactly 3 ranked, distinct, filmable video ideas. Put the strongest recommendation first and set recommended=true only for it. Make every premise specific enough to film, vary the formats, and do not merely rewrite researched titles. For each idea, provide one accurate suggestedTitle, a short format label, and an honest Easy, Moderate, or Ambitious difficulty estimate.\n\nFor every idea, silently apply the appeal, engagement, and satisfaction framework. In whyItCouldWork, name the intended viewer, the honest promise that earns attention, the mechanism that sustains interest, and the payoff that makes the watch worthwhile without fake numerical scores. In channelFit, use authenticated channel evidence only when the channel snapshot tool successfully returned it. Otherwise begin channelFit with 'Brief fit:' and refer only to facts the creator explicitly supplied; never call the subject established, recurring, or part of the channel history. Explain the actual comparable-video pattern in researchBasis when tool evidence exists. When close comparisons exist, cite one or two numbered search examples in sourceNumbers; when none exist, use an empty sourceNumbers array and describe the basis as a broad format principle. Then provide a practical scriptOutline whose word-for-word cold open immediately validates the promise, whose four or five ordered beats each add real progress, and whose word-for-word closing payoff fully resolves the core question. Do not invent the creator's results, experience, or proof.`,
+        `CREATOR_CONTEXT_START\n${resolvedBrief}\nCREATOR_CONTEXT_END${researchLayer ? `\n\nYOUTUBE_EVIDENCE_HANDOFF_START\n${researchLayer.reply}\n${researchLayer.evidence}\nYOUTUBE_EVIDENCE_HANDOFF_END` : ""}\n\nThis is the creator's first idea batch. ${researchLayer ? "Use the completed evidence handoff and do not research again." : "Use only the research tools exposed for this message. If youtube_channel_snapshot is exposed, call it before claiming channel fit. If youtube_search_reference_videos is exposed, call it once with one broad query that preserves the central subject; broaden once only when the first result is empty. When neither tool is exposed, build directly from the supplied brief without mentioning missing research."}\n\nOpen with one plain sentence of no more than 22 words. Generate exactly 3 ranked, distinct, filmable video ideas. Put the strongest recommendation first and set recommended=true only for it. Make every premise specific enough to film, vary the formats, and do not merely rewrite researched titles. For each idea, provide one accurate suggestedTitle, a short format label, and an honest Easy, Moderate, or Ambitious difficulty estimate.\n\nFor every idea, silently apply the appeal, engagement, and satisfaction framework. In whyItCouldWork, name the intended viewer, the honest promise that earns attention, the mechanism that sustains interest, and the payoff that makes the watch worthwhile without fake numerical scores. In channelFit, use authenticated channel evidence only when the channel snapshot tool successfully returned it. Otherwise begin channelFit with 'Brief fit:' and refer only to facts the creator explicitly supplied; never call the subject established, recurring, or part of the channel history. Explain the actual comparable-video pattern in researchBasis when tool evidence exists. When close comparisons exist, cite one or two numbered search examples in sourceNumbers; when none exist, use an empty sourceNumbers array and describe the basis as a broad format principle. Then provide a practical scriptOutline whose word-for-word cold open immediately validates the promise, whose four or five ordered beats each add real progress, and whose word-for-word closing payoff fully resolves the core question. Do not invent the creator's results, experience, or proof.`,
         ideaSchema,
         4000,
+        !researchLayer,
       );
       const ideaResult = ideaRun.output as { reply?: unknown; ideas?: unknown };
-      const research = researchFromToolResults(ideaRun.toolResults);
-      const usedChannelEvidence = ideaRun.toolResults.some((result) => result.tool === "youtube_channel_snapshot" && result.ok && result.status !== "empty");
+      const research = researchLayer?.research || researchFromToolResults(ideaRun.toolResults);
+      const usedChannelEvidence = [...(researchLayer?.run.toolResults || []), ...ideaRun.toolResults]
+        .some((result) => result.tool === "youtube_channel_snapshot" && result.ok && result.status !== "empty");
       const ideas = normalizeIdeas(ideaResult.ideas, 3, usedChannelEvidence);
       if (ideas.length !== 3) throw new Error(`Gemini returned ${ideas.length} usable ideas`);
       await emitProgress?.({
@@ -1680,7 +1858,7 @@ ${scope.intent === "social"
       if (requestedDeliverables.has("thumbnail")) {
         const leadIdea = packagedIdeas[0];
         const thumbnailArtifact = await renderThumbnailArtifact(`${resolvedBrief}\n\nSELECTED_IDEA_FOR_THUMBNAIL: ${leadIdea?.idea || resolvedBrief}\nWORKING_TITLE: ${leadIdea?.suggestedTitle || "Use the strongest honest title"}\nHOOK: ${leadIdea?.hook || "Use the core viewer promise"}`);
-        const ideaAgent = agentMetadata(ideaRun);
+        const ideaAgent = combinedAgentMetadata(researchLayer?.run, ideaRun);
         return Response.json({
           reply: `${ideaReply} I used the top-ranked direction to render the thumbnail${hasThumbnailReference ? " from your image" : ""}.`,
           ideas: packagedIdeas,
@@ -1690,7 +1868,7 @@ ${scope.intent === "social"
           mode: "idea",
           blocked: false,
           completedDeliverables: ["idea", "thumbnail"],
-          model: `${ideaRun.trace.model} + ${thumbnailArtifact.model}`,
+          model: [researchLayer?.run.trace.model, ideaRun.trace.model, thumbnailArtifact.model].filter(Boolean).join(" + "),
           agent: {
             runId: ideaAgent.runId,
             modelRounds: ideaAgent.modelRounds + thumbnailArtifact.agent.modelRounds,
@@ -1706,8 +1884,8 @@ ${scope.intent === "social"
         conversationTopic: resolvedBrief,
         mode: "idea",
         blocked: false,
-        model: MODEL,
-        agent: agentMetadata(ideaRun),
+        model: [researchLayer?.run.trace.model, ideaRun.trace.model].filter(Boolean).join(" + "),
+        agent: combinedAgentMetadata(researchLayer?.run, ideaRun),
       });
     }
 

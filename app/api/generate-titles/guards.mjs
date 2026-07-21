@@ -34,9 +34,9 @@ const mixedMediaTask = /\b(?:but\s+first|before\s+that|and\s+then|then|also)\s+(
 const youtubeGuidanceSubject = /\b(?:youtube\s+)?(?:video\s+)?(?:titles?|thumbnails?|scripts?|hooks?|openings?|ideas?|packaging|retention|audience\s+satisfaction)\b/i;
 const youtubeGuidanceQuestion = /\b(?:what\s+(?:goes\s+into|makes|matters|should)|how\s+(?:do\s+i|does|should|can\s+i)|why\s+(?:do|does|is|are)|explain|teach\s+me|tips\s+for|principles\s+(?:of|for)|best\s+practices\s+(?:for|of))\b/i;
 const mixedGuidanceRequest = /\b(?:but\s+first|before\s+that|and\s+then|then\s+also|also\s+(?:write|create|make|code|translate|search|browse|calculate))\b/i;
-const directCreativeVerb = /\b(?:generate|create|make|write|draft|give(?:\s+me)?|come\s+up\s+with|build|design|render|plan)\b/i;
+const directCreativeVerb = /\b(?:generate|create|make|write|draft|give(?:\s+me)?|suggest|improve|sharpen|rewrite|come\s+up\s+with|build|design|render|plan)\b/i;
 const publicYouTubeResearchAction = /\b(?:find|show|list|research|search|look\s+(?:up|at|into)|access|analy[sz]e|review|audit|break\s+down|compare)\b/i;
-const publicYouTubeResearchTarget = /\b(?:(?:youtube\s+)?(?:channel|creator)s?|you\s*tubers?|(?:youtube\s+)?videos?\s+(?:in|from|on)\s+(?:the\s+)?(?:last|past)\b|(?:most\s+popular|most[-\s]?viewed|top[-\s]?performing|trending|viral)\s+(?:youtube\s+)?videos?|videos?\s+(?:that\s+are\s+)?(?:trending|going\s+viral))\b/i;
+const publicYouTubeResearchTarget = /\b(?:(?:youtube\s+)?(?:channel|creator)s?|you\s*tubers?|(?:youtube\s+)?videos?\s+(?:in|from|on)\s+(?:the\s+)?(?:last|past)\b|(?:(?:current|recent)\s+)?(?:successful|high[-\s]?performing|most\s+popular|most[-\s]?viewed|top[-\s]?performing|trending|viral)\s+(?:youtube\s+)?videos?|videos?\s+(?:that\s+are\s+)?(?:successful|high[-\s]?performing|trending|going\s+viral))\b/i;
 
 export function hasTitlePretext(value) {
   const supportedAssets = typeof value === "string" ? value.match(creativeAssetMarker) || [] : [];
@@ -75,6 +75,15 @@ export function looksLikePublicYouTubeResearchRequest(value) {
   const message = typeof value === "string" ? value.trim() : "";
   if (!message || looksLikePromptAttack(message) || looksLikeCreatorMemoryRequest(message)) return false;
   return publicYouTubeResearchAction.test(message) && publicYouTubeResearchTarget.test(message);
+}
+
+export function explicitYouTubeVideoId(value) {
+  const message = typeof value === "string" ? value.trim() : "";
+  if (!message) return "";
+  const urlMatch = /(?:youtu\.be\/|youtube\.com\/watch\?[^\s]*v=)([A-Za-z0-9_-]{6,20})\b/i.exec(message);
+  if (urlMatch?.[1]) return urlMatch[1];
+  const labelMatch = /\b(?:youtube\s+)?video(?:\s+id)?\s+([A-Za-z0-9_-]{6,20})\b/i.exec(message);
+  return labelMatch?.[1] || "";
 }
 
 export function requestedCreativeDeliverables(value) {

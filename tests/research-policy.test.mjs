@@ -17,6 +17,20 @@ test("opens public search only for an explicit research request", () => {
   );
 });
 
+test("opens public search for explicitly requested current successful videos", () => {
+  assert.deepEqual(
+    resolveResearchAccess("Find current successful videos about first-time marathon training and give me ideas."),
+    { publicSearch: true, channelSnapshot: false, videoEvidence: true },
+  );
+});
+
+test("opens exact-video evidence for a supplied YouTube video ID", () => {
+  assert.deepEqual(
+    resolveResearchAccess("Analyze the packaging of YouTube video dQw4w9WgXcQ."),
+    { publicSearch: false, channelSnapshot: false, videoEvidence: true },
+  );
+});
+
 test("opens public search for explicit trend windows and named channel analysis", () => {
   for (const prompt of [
     "Find me the most popular videos in the last 24 hours, analyze them and create me a script.",
