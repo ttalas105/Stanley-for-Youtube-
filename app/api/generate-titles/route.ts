@@ -2,7 +2,7 @@ import { explicitYouTubeVideoId, looksLikeAttachedMediaAnalysis, looksLikeCreato
 import { isSimpleScriptFollowUp, resolveSelectedIdea } from "./conversation-context.mjs";
 import { sanitizeChannelFit } from "./idea-grounding.mjs";
 import { emptySemanticMemory, formatSemanticMemory, normalizeMemoryKey, selectRelevantSemanticMemory } from "./semantic-memory.mjs";
-import { requestedResearchWindowHours, requestsBroadPopularVideos, resolveResearchAccess } from "./research-policy.mjs";
+import { requestedResearchWindowHours, requestsBroadPopularVideos, requestsLatestConnectedVideo, resolveResearchAccess } from "./research-policy.mjs";
 import { storyboardSheetUrls } from "./youtube-storyboards.mjs";
 import { algorithmStrategyForIntent } from "./youtube-strategy.mjs";
 import { STANLEY_VOICE } from "./stanley-voice.mjs";
@@ -828,6 +828,16 @@ async function classifyRequest(
       researchTopic: referencedVideoId,
     };
   }
+  if (requestsLatestConnectedVideo(currentMessage)) {
+    return {
+      intent: "youtube_research",
+      deliverables: [],
+      readyForGeneration: true,
+      reason: "connected_latest_video_research",
+      resolvedBrief: cleanText(currentMessage, 900),
+      researchTopic: "",
+    };
+  }
   if (resolveResearchAccess(currentMessage).channelSnapshot) {
     const requested = requestedCreativeDeliverables(currentMessage) as CreativeDeliverable[];
     if (!requested.length && mode === "idea") requested.push("idea");
@@ -1305,6 +1315,103 @@ RUNTIME_CONTEXT_END`;
     );
     const useExactVideoResearch = Boolean(referencedVideoId);
     const useConnectedChannelResearch = Boolean(!useExactVideoResearch && !demoCreator && researchAccess.channelSnapshot);
+    const useLatestConnectedVideoResearch = Boolean(
+      !demoCreator && scope.reason === "connected_latest_video_research",
+    );
+    if (useLatestConnectedVideoResearch) {
+      const snapshotStartedAt = Date.now();
+      await emitProgress?.({
+        id: "latest-connected-upload",
+        label: "Finding your latest upload",
+        detail: "Reading the connected channel's upload list",
+        status: "active",
+        kind: "tool",
+      });
+      const snapshotResult = await toolRegistry.execute(
+        "youtube_channel_snapshot",
+        { scope: "connected_channel", maxVideos: 1 },
+        request.signal,
+      );
+      const snapshotDurationMs = Date.now() - snapshotStartedAt;
+      const snapshotData = snapshotResult.data && typeof snapshotResult.data === "object"
+        ? snapshotResult.data as { videos?: Array<{ id?: string; title?: string; url?: string; publishedAt?: string }> }
+        : {};
+      const latestVideo = Array.isArray(snapshotData.videos) ? snapshotData.videos[0] : undefined;
+      let exactResult: Awaited<ReturnType<typeof toolRegistry.execute>> | null = null;
+      let exactDurationMs = 0;
+      if (latestVideo?.id) {
+        const exactStartedAt = Date.now();
+        await emitProgress?.({
+          id: "latest-connected-upload",
+          label: "Reading your latest video",
+          detail: "Checking its metadata, description, and owner-authorized captions",
+          status: "active",
+          kind: "tool",
+        });
+        exactResult = await toolRegistry.execute(
+          "youtube_get_video_evidence",
+          { videoId: latestVideo.id, includeTranscript: true },
+          request.signal,
+        );
+        exactDurationMs = Date.now() - exactStartedAt;
+      }
+      await emitProgress?.({
+        id: "latest-connected-upload",
+        label: "Reading your latest video",
+        detail: exactResult?.summary || snapshotResult.summary,
+        status: latestVideo?.id ? "complete" : "limited",
+        kind: "tool",
+      });
+      const evidencePayload = {
+        channelSnapshot: snapshotResult,
+        latestVideoEvidence: exactResult,
+      };
+      const latestAnalysisRun = await creativeJson(
+        `The creator asked what their latest connected-channel upload was about. The evidence lookup is already complete.
+
+LATEST_CONNECTED_VIDEO_EVIDENCE_START
+${JSON.stringify(evidencePayload)}
+LATEST_CONNECTED_VIDEO_EVIDENCE_END
+
+Answer the creator's exact question directly. If the channel snapshot has no upload, say that plainly. Otherwise lead with the verified video title and summarize the premise in one or two concrete sentences. Use an available owner-authorized transcript as the strongest content evidence. If captions are unavailable, use only the exact title, description, tags, and metadata and briefly label that boundary; do not ask for a URL or file that Stanley has already resolved. Do not invent scenes, dialogue, results, or intent. Do not pad the answer with general YouTube advice unless the creator asked for it.`,
+        youtubeResearchSchema,
+        1000,
+        false,
+        1,
+      );
+      const toolResults = exactResult ? [snapshotResult, exactResult] : [snapshotResult];
+      latestAnalysisRun.toolResults.unshift(...toolResults);
+      latestAnalysisRun.trace.toolCalls.unshift(
+        {
+          round: 0,
+          name: "youtube_channel_snapshot",
+          durationMs: snapshotDurationMs,
+          status: snapshotResult.status,
+          memoHit: false,
+          ...(snapshotResult.error?.code ? { errorCode: snapshotResult.error.code } : {}),
+        },
+        ...(exactResult ? [{
+          round: 0,
+          name: "youtube_get_video_evidence",
+          durationMs: exactDurationMs,
+          status: exactResult.status,
+          memoHit: false,
+          ...(exactResult.error?.code ? { errorCode: exactResult.error.code } : {}),
+        }] : []),
+      );
+      const latestAnalysis = latestAnalysisRun.output as { reply?: unknown };
+      const latestReply = cleanReply(latestAnalysis.reply, 1_500);
+      if (!latestReply) throw new Error("Gemini returned an empty latest-video summary");
+      return Response.json({
+        reply: latestReply,
+        conversationTopic: resolvedBrief,
+        blocked: false,
+        conversational: true,
+        mode: "auto",
+        model: latestAnalysisRun.trace.model,
+        agent: agentMetadata(latestAnalysisRun),
+      });
+    }
     const createResearchLayer = async (forArtifact: boolean) => {
       let prefetchedEvidence: Awaited<ReturnType<typeof toolRegistry.execute>> | null = null;
       let prefetchedEvidenceDurationMs = 0;

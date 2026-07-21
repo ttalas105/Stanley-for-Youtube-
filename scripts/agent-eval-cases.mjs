@@ -20,6 +20,16 @@ export const agentEvalCases = [
     mode: "idea",
     expects: "ideas",
     requiredTools: ["youtube_channel_snapshot"],
+    requiredSuccessfulTools: ["youtube_channel_snapshot"],
+  },
+  {
+    id: "latest-connected-video-summary",
+    topic: "Hey Stanley, please look at my last YouTube video and tell me what it was about",
+    mode: "auto",
+    expects: "conversational",
+    requiredTools: ["youtube_channel_snapshot", "youtube_get_video_evidence"],
+    requiredSuccessfulTools: ["youtube_channel_snapshot", "youtube_get_video_evidence"],
+    forbiddenPatterns: ["haven't linked|provide(?:d)? the file|send (?:over )?(?:the )?url"],
   },
   {
     id: "data-backed-reference-ideas",

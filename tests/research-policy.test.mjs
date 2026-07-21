@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { requestedResearchWindowHours, requestsBroadPopularVideos, resolveResearchAccess } from "../app/api/generate-titles/research-policy.mjs";
+import { requestedResearchWindowHours, requestsBroadPopularVideos, requestsLatestConnectedVideo, resolveResearchAccess } from "../app/api/generate-titles/research-policy.mjs";
 
 test("does not treat a viral creative premise as permission to research", () => {
   assert.deepEqual(
@@ -43,6 +43,15 @@ test("opens public search for explicit trend windows and named channel analysis"
 test("keeps connected-channel analysis behind its own explicit request", () => {
   assert.deepEqual(
     resolveResearchAccess("Based on my channel, suggest my next video."),
+    { publicSearch: false, channelSnapshot: true, videoEvidence: true },
+  );
+});
+
+test("recognizes a request for the latest connected upload", () => {
+  const prompt = "Hey Stanley, please look at my last YouTube video and tell me what it was about.";
+  assert.equal(requestsLatestConnectedVideo(prompt), true);
+  assert.deepEqual(
+    resolveResearchAccess(prompt),
     { publicSearch: false, channelSnapshot: true, videoEvidence: true },
   );
 });

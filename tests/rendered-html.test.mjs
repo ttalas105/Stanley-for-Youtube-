@@ -49,6 +49,8 @@ test("keeps AI keys server-side and removes the disposable starter", async () =>
   assert.match(route, /process\.env\.YOUTUBE_API_KEY/);
   assert.match(route, /runAgent\(/);
   assert.match(route, /createYouTubeToolRegistry/);
+  assert.match(route, /connected_latest_video_research/);
+  assert.match(route, /youtube_channel_snapshot[\s\S]*youtube_get_video_evidence/);
   assert.doesNotMatch(route, /researchYouTube\(/);
   assert.match(youtubeTools, /youtube\/v3\/search/);
   assert.match(youtubeTools, /youtube_channel_snapshot/);

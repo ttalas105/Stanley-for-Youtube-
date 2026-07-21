@@ -7,6 +7,7 @@ if (process.env.RUN_LIVE_AGENT_EVALS !== "1") {
 
 const baseUrl = (process.env.STANLEY_BASE_URL || "http://localhost:3000").replace(/\/$/, "");
 const delayMs = Math.max(0, Number(process.env.STANLEY_EVAL_DELAY_MS || 5500));
+const evalCookie = (process.env.STANLEY_EVAL_COOKIE || "").trim();
 const results = [];
 
 for (const [scenarioIndex, scenario] of agentEvalCases.entries()) {
@@ -15,7 +16,10 @@ for (const [scenarioIndex, scenario] of agentEvalCases.entries()) {
   try {
     const response = await fetch(`${baseUrl}/api/generate-titles`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        ...(evalCookie ? { Cookie: evalCookie } : {}),
+      },
       body: JSON.stringify({
         topic: scenario.topic,
         mode: scenario.mode,
@@ -32,11 +36,15 @@ for (const [scenarioIndex, scenario] of agentEvalCases.entries()) {
       script: payload.script,
       filmingPlan: payload.filmingPlan,
     });
-    const toolCalls = Array.isArray(payload.agent?.toolCalls) ? payload.agent.toolCalls.map((call) => call.name) : [];
+    const toolCallRecords = Array.isArray(payload.agent?.toolCalls) ? payload.agent.toolCalls : [];
+    const toolCalls = toolCallRecords.map((call) => call.name);
     const requiredTools = scenario.requiredTools || [];
+    const requiredSuccessfulTools = scenario.requiredSuccessfulTools || [];
     const forbiddenTools = scenario.forbiddenTools || [];
     const failures = [
       ...requiredTools.filter((tool) => !toolCalls.includes(tool)).map((tool) => `missing ${tool}`),
+      ...requiredSuccessfulTools.filter((tool) => !toolCallRecords.some((call) => call.name === tool && ["complete", "partial"].includes(call.status)))
+        .map((tool) => `${tool} did not return connected evidence`),
       ...forbiddenTools.filter((tool) => toolCalls.includes(tool)).map((tool) => `unnecessary ${tool}`),
       ...(scenario.maxToolCalls !== undefined && toolCalls.length > scenario.maxToolCalls ? [`used ${toolCalls.length} tools; maximum ${scenario.maxToolCalls}`] : []),
       ...(!response.ok || !payload.reply ? [`HTTP ${response.status} or missing reply`] : []),

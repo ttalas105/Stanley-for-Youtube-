@@ -311,6 +311,58 @@ test("declares only the three minimal YouTube read tools", async () => {
   assert.equal(result.error?.code, "CHANNEL_NOT_CONNECTED");
 });
 
+test("resolves the latest connected upload before reading exact video evidence", async () => {
+  const originalFetch = globalThis.fetch;
+  const requestedUrls: string[] = [];
+  globalThis.fetch = async (input) => {
+    const url = new URL(String(input));
+    requestedUrls.push(url.toString());
+    if (url.pathname.endsWith("/channels")) {
+      return Response.json({ items: [{ contentDetails: { relatedPlaylists: { uploads: "UU_TEST" } } }] });
+    }
+    if (url.pathname.endsWith("/playlistItems")) {
+      return Response.json({ items: [{ contentDetails: { videoId: "latest123" }, snippet: { title: "My latest upload", publishedAt: "2026-07-20T12:00:00Z", thumbnails: {} } }] });
+    }
+    if (url.pathname.endsWith("/videos")) {
+      return Response.json({ items: [{
+        id: "latest123",
+        snippet: { title: "My latest upload", description: "I rebuilt a broken camera and tested it.", publishedAt: "2026-07-20T12:00:00Z", channelTitle: "Test creator", thumbnails: {} },
+        statistics: { viewCount: "1200", likeCount: "90", commentCount: "12" },
+        contentDetails: { duration: "PT8M12S", caption: "false" },
+        status: { privacyStatus: "public" },
+      }] });
+    }
+    return new Response("not found", { status: 404 });
+  };
+
+  try {
+    const registry = createYouTubeToolRegistry({
+      session: {
+        accessToken: "test-access-token",
+        expiresAt: Date.now() + 60_000,
+        scope: "https://www.googleapis.com/auth/youtube.readonly",
+        profile: { id: "channel1", title: "Test creator", thumbnailUrl: "", subscriberCount: 10, videoCount: 1, totalViews: 1200, analyzedAt: new Date().toISOString() },
+      },
+      allowPublicSearch: false,
+      allowChannelSnapshot: true,
+      allowVideoEvidence: true,
+    });
+    const snapshot = await registry.execute("youtube_channel_snapshot", { scope: "connected_channel", maxVideos: 1 }, new AbortController().signal);
+    const videos = (snapshot.data as { videos?: Array<{ id?: string }> })?.videos || [];
+    assert.equal(snapshot.status, "complete");
+    assert.equal(videos[0]?.id, "latest123");
+
+    const evidence = await registry.execute("youtube_get_video_evidence", { videoId: videos[0]?.id, includeTranscript: true }, new AbortController().signal);
+    assert.equal(evidence.status, "partial");
+    assert.equal((evidence.data as { title?: string })?.title, "My latest upload");
+    assert.match(String((evidence.data as { description?: string })?.description), /rebuilt a broken camera/);
+    assert.equal(requestedUrls.filter((url) => url.includes("/playlistItems")).length, 1);
+    assert.equal(requestedUrls.filter((url) => url.includes("/videos")).length, 2);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("exposes only the research layers approved for the current message", () => {
   const creativeOnly = createYouTubeToolRegistry({
     session: null,
