@@ -9,6 +9,18 @@ test("uses the exact ID from a selected YouTube attachment", () => {
   ]), "91Oy3we7Gv0");
   assert.equal(selectedYouTubeVideoId([{ kind: "image", videoId: "91Oy3we7Gv0" }]), "");
   assert.equal(selectedYouTubeVideoId([{ kind: "youtube", videoId: "not a valid id" }]), "");
+  assert.equal(
+    selectedYouTubeVideoId([{ kind: "youtube", videoId: "91Oy3we7Gv0" }], "What about this video? Selected YouTube reference: https://youtube.com/watch?v=91Oy3we7Gv0", true),
+    "91Oy3we7Gv0",
+  );
+  assert.equal(
+    selectedYouTubeVideoId([{ kind: "youtube", videoId: "91Oy3we7Gv0" }], "What else stands out about that same video?", true),
+    "91Oy3we7Gv0",
+  );
+  assert.equal(
+    selectedYouTubeVideoId([{ kind: "youtube", videoId: "91Oy3we7Gv0" }], "Okay perfect, let's build the idea", true),
+    "",
+  );
 });
 
 test("reuses a completed analysis when the same selected video remains attached", () => {

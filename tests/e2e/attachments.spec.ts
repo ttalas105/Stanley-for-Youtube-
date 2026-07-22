@@ -122,6 +122,10 @@ test("chooses a video from the connected YouTube channel", async ({ page }) => {
     title: "My 30 day creator experiment",
     thumbnailUrl: "https://i.ytimg.com/vi/video-abc123/mqdefault.jpg",
   });
+
+  await page.getByLabel("Message Stanley").fill("I have a new idea about building an AI tool in 7 days. Let's build the idea.");
+  await page.getByRole("button", { name: "Send message" }).click();
+  expect(submissions[2]?.attachments || []).toHaveLength(0);
 });
 
 test("keeps owner-visible private and unlisted uploads in the YouTube picker", async ({ page }) => {

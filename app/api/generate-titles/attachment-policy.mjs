@@ -17,12 +17,16 @@ export function hasPriorAssistantAnalysisForVideo(messages = [], video = {}) {
   );
 }
 
-export function selectedYouTubeVideoId(attachments = []) {
+export function selectedYouTubeVideoId(attachments = [], currentMessage = "", hasPriorConversation = false) {
   if (!Array.isArray(attachments)) return "";
   const selected = attachments.find((attachment) =>
     attachment?.kind === "youtube"
     && typeof attachment.videoId === "string"
     && /^[A-Za-z0-9_-]{6,20}$/.test(attachment.videoId.trim()),
   );
-  return selected?.videoId.trim() || "";
+  const videoId = selected?.videoId.trim() || "";
+  if (!videoId || !hasPriorConversation) return videoId;
+  const message = typeof currentMessage === "string" ? currentMessage : "";
+  const refersToSelectedVideo = /\b(?:this|that|the|same|selected|attached|previous)\s+(?:youtube\s+)?(?:video|short|upload|clip)\b/i.test(message);
+  return message.includes(videoId) || /Selected YouTube reference:/i.test(message) || refersToSelectedVideo ? videoId : "";
 }

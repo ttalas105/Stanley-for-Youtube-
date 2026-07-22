@@ -1,5 +1,5 @@
 import { explicitPublicYouTubeChannelName, explicitYouTubeVideoId, looksLikeAttachedMediaAnalysis, looksLikeCreatorMemoryRequest, looksLikePromptAttack, looksLikePublicYouTubeResearchRequest, looksLikeYouTubeCreationGuidance, requestedCreativeDeliverables, requestedTitleCount, resolveRequestedCreativeDeliverables, shouldGenerateImmediately } from "./guards.mjs";
-import { isSimpleScriptFollowUp, resolveSelectedIdea } from "./conversation-context.mjs";
+import { isSimpleScriptFollowUp, resolveLatestUserProposedIdea, resolveSelectedIdea } from "./conversation-context.mjs";
 import { sanitizeChannelFit } from "./idea-grounding.mjs";
 import { emptySemanticMemory, explicitConsentMemoryUpdate, formatSemanticMemory, normalizeMemoryKey, selectRelevantSemanticMemory, trustedSemanticMemory } from "./semantic-memory.mjs";
 import { requestedConnectedVideoCount, requestedResearchWindowHours, requestsBroadPopularVideos, requestsLatestConnectedVideo, resolveConversationPublicYouTubeChannel, resolveResearchAccess } from "./research-policy.mjs";
@@ -1064,7 +1064,7 @@ async function generateResponse(request: Request, emitProgress?: ProgressEmitter
   const demoCreator = publicDemoCreator(requestedCreatorProfile);
   const mode: RequestedMode = requestedMode === "idea" || requestedMode === "title" || requestedMode === "thumbnail" ? requestedMode : "auto";
   const messages = normalizeMessages(body.messages);
-  const inputAttachments = normalizeAttachments(body.attachments);
+  let inputAttachments = normalizeAttachments(body.attachments);
   if (!topic) return Response.json({ error: "A video idea is required." }, { status: 400 });
   if (requestedSessionId && !/^[a-zA-Z0-9_-]{8,80}$/.test(requestedSessionId)) {
     return Response.json({ error: "The video project is invalid. Start a new video." }, { status: 400 });
@@ -1086,7 +1086,11 @@ async function generateResponse(request: Request, emitProgress?: ProgressEmitter
   }
 
   const currentMessage = messages?.at(-1)?.content || topic;
-  const referencedVideoId = explicitYouTubeVideoId(currentMessage) || selectedYouTubeVideoId(inputAttachments);
+  const selectedAttachmentVideoId = selectedYouTubeVideoId(inputAttachments, currentMessage, Boolean(messages?.length));
+  if (messages?.length && !selectedAttachmentVideoId) {
+    inputAttachments = inputAttachments.filter((attachment) => attachment.kind !== "youtube");
+  }
+  const referencedVideoId = explicitYouTubeVideoId(currentMessage) || selectedAttachmentVideoId;
   const requiresExactTranscript = Boolean(referencedVideoId && /\b(?:exact\s+)?(?:transcript|captions?|spoken\s+(?:words|content)|what\s+(?:they|he|she)\s+said)\b/i.test(currentMessage));
   if (looksLikePromptAttack(currentMessage)) {
     return Response.json({ reply: blockedReply, titles: [], blocked: true, scope: "prompt_attack", model: MODEL });
@@ -1202,8 +1206,11 @@ async function generateResponse(request: Request, emitProgress?: ProgressEmitter
             ? "filming_work"
             : scope.intent;
   const selectedIdea = resolveSelectedIdea(conversation, currentMessage);
+  const proposedIdea = resolveLatestUserProposedIdea(conversation, currentMessage);
   const resolvedBrief = selectedIdea
     ? cleanText(`Selected idea ${selectedIdea.optionNumber}: ${selectedIdea.idea}\nRequested refinement: ${currentMessage}`, 4_000)
+    : proposedIdea
+      ? cleanText(`Creator's chosen idea: ${proposedIdea.idea}\nCurrent request: ${currentMessage}`, 4_000)
     : scope.resolvedBrief || currentMessage;
   const readyForGeneration = scope.readyForGeneration || shouldGenerateImmediately(
     currentMessage,

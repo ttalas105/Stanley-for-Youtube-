@@ -579,6 +579,10 @@ function namedPublicChannelFromPrompt(value: string) {
   return nameMatch?.[1]?.replace(/\s+/g, " ").replace(/["“”']+$/g, "").trim() || "";
 }
 
+function referencesPriorMedia(value: string) {
+  return /\b(?:this|that|the|same|selected|attached|previous)\s+(?:youtube\s+)?(?:video|short|upload|clip|image|photo|thumbnail)\b/i.test(value);
+}
+
 function normalizedResearchTarget(value: string) {
   return value.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 }
@@ -2947,10 +2951,11 @@ export default function Home({ initialView = "create" }: StanleyAppProps = {}) {
     const cachedUploadedVideo = retainedUploadedVideo ? uploadedVideoCache.get(retainedUploadedVideo.id) : undefined;
     const retainedGeneratedThumbnail = messages.filter((message) => message.role === "assistant" && message.thumbnailImage?.data).at(-1)?.thumbnailImage;
     const requestAttachments: ComposerAttachment[] = [...currentAttachments];
-    if (!requestAttachments.some((attachment) => attachment.kind === "youtube") && retainedYouTubeReference) {
+    const carryPriorMedia = referencesPriorMedia(cleanMessage);
+    if (carryPriorMedia && !requestAttachments.some((attachment) => attachment.kind === "youtube") && retainedYouTubeReference) {
       requestAttachments.push(retainedYouTubeReference);
     }
-    if (!requestAttachments.some((attachment) => attachment.kind === "video") && cachedUploadedVideo) {
+    if (carryPriorMedia && !requestAttachments.some((attachment) => attachment.kind === "video") && cachedUploadedVideo) {
       requestAttachments.push(cachedUploadedVideo);
     }
     if (mode === "thumbnail" && !requestAttachments.some((attachment) => attachment.kind === "image") && retainedGeneratedThumbnail?.data) {

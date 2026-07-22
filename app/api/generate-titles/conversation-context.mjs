@@ -46,3 +46,20 @@ export function resolveSelectedIdea(messages, currentMessage) {
   }
   return null;
 }
+
+const buildProposedIdeaFollowUp = /\b(?:build|develop|flesh\s+out|expand|shape)\b[^.!?]{0,45}\b(?:idea|concept|video)\b|\blet['’]?s\s+(?:build|develop|make|do)\s+(?:it|this|that|the\s+idea)\b/i;
+const userIdeaProposal = /\b(?:i['’]?m\s+thinking\s+of|i\s+am\s+thinking\s+of|my\s+idea\s+is|i\s+want\s+to\s+make|i['’]?m\s+planning\s+(?:a|to)|video\s+about)\b/i;
+
+export function resolveLatestUserProposedIdea(messages, currentMessage) {
+  const message = typeof currentMessage === "string" ? currentMessage.trim() : "";
+  if (!message || !buildProposedIdeaFollowUp.test(message) || !Array.isArray(messages)) return null;
+  if (messages.some((item) => item?.role === "assistant" && /Idea options:/i.test(item.content || ""))) return null;
+  const startsAt = messages.at(-1)?.content === message ? messages.length - 2 : messages.length - 1;
+  for (let index = startsAt; index >= 0; index -= 1) {
+    const item = messages[index];
+    if (item?.role !== "user" || typeof item.content !== "string") continue;
+    const proposal = item.content.trim();
+    if (proposal.length >= 24 && userIdeaProposal.test(proposal)) return { idea: proposal };
+  }
+  return null;
+}
