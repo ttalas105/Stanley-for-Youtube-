@@ -16,3 +16,13 @@ export function hasPriorAssistantAnalysisForVideo(messages = [], video = {}) {
     message?.role === "assistant" && typeof message.content === "string" && message.content.trim().length > 0,
   );
 }
+
+export function selectedYouTubeVideoId(attachments = []) {
+  if (!Array.isArray(attachments)) return "";
+  const selected = attachments.find((attachment) =>
+    attachment?.kind === "youtube"
+    && typeof attachment.videoId === "string"
+    && /^[A-Za-z0-9_-]{6,20}$/.test(attachment.videoId.trim()),
+  );
+  return selected?.videoId.trim() || "";
+}

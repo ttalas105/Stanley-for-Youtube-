@@ -1,7 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { hasPriorAssistantAnalysisForVideo } from "../app/api/generate-titles/attachment-policy.mjs";
+import { hasPriorAssistantAnalysisForVideo, selectedYouTubeVideoId } from "../app/api/generate-titles/attachment-policy.mjs";
+
+test("uses the exact ID from a selected YouTube attachment", () => {
+  assert.equal(selectedYouTubeVideoId([
+    { kind: "youtube", videoId: "91Oy3we7Gv0", title: "This is why 99% fail" },
+  ]), "91Oy3we7Gv0");
+  assert.equal(selectedYouTubeVideoId([{ kind: "image", videoId: "91Oy3we7Gv0" }]), "");
+  assert.equal(selectedYouTubeVideoId([{ kind: "youtube", videoId: "not a valid id" }]), "");
+});
 
 test("reuses a completed analysis when the same selected video remains attached", () => {
   const messages = [

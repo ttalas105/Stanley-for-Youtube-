@@ -7,7 +7,7 @@ import { storyboardSheetUrls } from "./youtube-storyboards.mjs";
 import { algorithmStrategyForIntent } from "./youtube-strategy.mjs";
 import { STANLEY_VOICE } from "./stanley-voice.mjs";
 import { generateThumbnailImage, inferThumbnailAspectRatio } from "./thumbnail-image.mjs";
-import { hasPriorAssistantAnalysisForVideo } from "./attachment-policy.mjs";
+import { hasPriorAssistantAnalysisForVideo, selectedYouTubeVideoId } from "./attachment-policy.mjs";
 import { channelContext, hasYouTubeCaptionAccess, readYouTubeSession } from "../youtube/oauth";
 import type { YouTubeSession } from "../youtube/oauth";
 import { resolveMemoryOwner } from "../memory/identity";
@@ -1086,7 +1086,7 @@ async function generateResponse(request: Request, emitProgress?: ProgressEmitter
   }
 
   const currentMessage = messages?.at(-1)?.content || topic;
-  const referencedVideoId = explicitYouTubeVideoId(currentMessage);
+  const referencedVideoId = explicitYouTubeVideoId(currentMessage) || selectedYouTubeVideoId(inputAttachments);
   const requiresExactTranscript = Boolean(referencedVideoId && /\b(?:exact\s+)?(?:transcript|captions?|spoken\s+(?:words|content)|what\s+(?:they|he|she)\s+said)\b/i.test(currentMessage));
   if (looksLikePromptAttack(currentMessage)) {
     return Response.json({ reply: blockedReply, titles: [], blocked: true, scope: "prompt_attack", model: MODEL });
