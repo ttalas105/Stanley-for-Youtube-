@@ -1,8 +1,10 @@
 import { expect, test } from "@playwright/test";
 import {
+  buildFilmingPayload,
   buildIdeaPayload,
   buildIdeas,
   buildPayload,
+  buildResearch,
   buildScript,
   buildScriptPayload,
   buildThumbnailPayload,
@@ -19,8 +21,8 @@ test("renders the unified ChatGPT-style Stanley composer", async ({ page }) => {
   await openApp(page);
 
   await expect(page).toHaveTitle("Stanley");
-  await expect(page.getByRole("heading", { name: "Where should we start?" })).toBeVisible();
-  await expect(page.getByText("Ideas, titles, scripts, and thumbnails in one conversation.")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "What should we make next?" })).toBeVisible();
+  await expect(page.getByText("Stanley can research the idea, write it, plan the shoot, and package the thumbnail with you.")).toBeVisible();
   await expect(page.getByLabel("Message Stanley")).toBeVisible();
   await expect(page.getByRole("button", { name: "Send message" })).toBeDisabled();
   await expect(page.locator(".generate-button .send-arrow")).toBeVisible();
@@ -42,9 +44,9 @@ test("shows one creation chat in the sidebar", async ({ page }) => {
   const navigation = page.getByRole("navigation", { name: "Stanley tools" });
   await expect(navigation.locator(".nav-item")).toHaveCount(3);
   await expect(navigation.getByText("Dashboard", { exact: true })).toBeVisible();
-  await expect(navigation.getByText("Outliers")).toBeVisible();
+  await expect(navigation.getByText("Creator Twin", { exact: true })).toBeVisible();
   await expect(navigation.getByText("Chrome extension")).toBeVisible();
-  await expect(page.getByRole("button", { name: "New chat", exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "New video", exact: true })).toBeVisible();
   await expect(navigation.locator(".nav-item.active")).toHaveCount(0);
   await expect(page.getByText("Idea generator")).toHaveCount(0);
   await expect(page.getByText("Title generator")).toHaveCount(0);
@@ -58,11 +60,11 @@ test("keeps creation-mode controls out of the composer", async ({ page }) => {
   await expect(page.getByLabel("Start with a YouTube task")).toBeVisible();
 });
 
-test("unfinished sidebar tools respond without pretending they exist", async ({ page }) => {
+test("opens the Chrome extension surface and returns to a new video", async ({ page }) => {
   await openApp(page);
-  await page.getByRole("button", { name: "Outliers" }).click();
-  await expect(page.getByRole("status")).toHaveText("Outliers is coming soon");
-  await page.getByRole("button", { name: "New chat", exact: true }).click();
+  await page.getByRole("link", { name: "Chrome extension" }).click();
+  await expect(page.getByRole("heading", { name: "Stanley, right inside YouTube." })).toBeVisible();
+  await page.getByRole("link", { name: "New video", exact: true }).click();
   await expect(page.getByLabel("Message Stanley")).toBeFocused();
 });
 
@@ -165,7 +167,8 @@ test("renders researched title directions", async ({ page }) => {
   const expected = buildTitles();
   await expect(page.locator(".assistant-option")).toHaveCount(12);
   await expect(page.locator(".assistant-option").first()).toContainText(expected[0].title);
-  await expect(page.getByRole("status")).toHaveText("12 options ready");
+  await expect(page.getByText("Want me to create the finished thumbnail next?", { exact: true })).toHaveCount(1);
+  await expect(page.getByRole("status")).toHaveText("12 results ready");
 });
 
 test("reveals a new Stanley reply progressively before showing its artifacts", async ({ page }) => {
@@ -225,6 +228,65 @@ test("keeps research sources below generated work", async ({ page }) => {
   await expect(page.locator(".research-sources a")).toHaveCount(6);
 });
 
+test("turns creator research into a typed idea follow-up with evidence preserved", async ({ page }) => {
+  let requestCount = 0;
+  let followUpBody: { messages?: Array<{ role: string; content: string }> } | undefined;
+  const research = buildResearch("Jynxzi");
+  await mockGeneration(page, {
+    handler: async (route) => {
+      requestCount += 1;
+      if (requestCount === 1) {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            reply: "Jynxzi's strongest repeatable pattern is a serialized challenge with a visible finish line.",
+            research,
+            blocked: false,
+            mode: "auto",
+          }),
+        });
+        return;
+      }
+      followUpBody = route.request().postDataJSON() as typeof followUpBody;
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(buildIdeaPayload()) });
+    },
+  });
+  await openApp(page);
+  await page.getByLabel("Message Stanley").fill("Research Jynxi and tell me why he performs well.");
+  await page.getByRole("button", { name: "Send message" }).click();
+
+  await expect(page.getByLabel("Stanley follow-up")).toHaveText("Want to make an idea like this?");
+  await page.getByLabel("Message Stanley").fill("yes");
+  await page.getByRole("button", { name: "Send message" }).click();
+  await expect(page.locator(".assistant-option")).toHaveCount(3);
+
+  const assistantContext = followUpBody?.messages?.findLast((message) => message.role === "assistant")?.content || "";
+  expect(followUpBody?.messages?.at(-1)?.content).toBe("yes");
+  expect(assistantContext).toContain("Verified YouTube research (Jynxzi)");
+  expect(assistantContext).toContain(research.examples[0].title);
+  expect(assistantContext).toContain("Want to make an idea like this?");
+});
+
+test("leads a completed connected-channel audit into the idea tool", async ({ page }) => {
+  await mockGeneration(page, { payload: {
+    reply: "Your clearest opportunity is a more specific video promise.",
+    blocked: false,
+    mode: "auto",
+    agent: {
+      runId: "channel-audit",
+      modelRounds: 1,
+      durationMs: 1200,
+      toolCalls: [{ name: "youtube_channel_snapshot", status: "complete", memoHit: false }],
+    },
+  } });
+  await openApp(page);
+  await page.getByLabel("Message Stanley").fill("Look at my channel and tell me what I should do better.");
+  await page.getByRole("button", { name: "Send message" }).click();
+
+  await expect(page.getByLabel("Stanley follow-up")).toHaveText("Want to make an idea like this?");
+});
+
 test("generates video ideas from the Ideas mode", async ({ page }) => {
   await mockGeneration(page, { payload: buildIdeaPayload() });
   await openApp(page);
@@ -235,7 +297,12 @@ test("generates video ideas from the Ideas mode", async ({ page }) => {
   await expect(page.locator(".assistant-option")).toHaveCount(3);
   await expect(page.locator(".assistant-option").first()).toContainText("Top pick");
   await expect(page.locator(".assistant-option").first()).toContainText(buildIdeas()[0].suggestedTitle);
-  await expect(page.getByText("What do you want to do next?", { exact: true })).toHaveCount(0);
+  await expect(page.getByLabel("Stanley follow-up")).toHaveText("Want me to turn the top idea into a complete script?");
+  expect(await page.evaluate(() => {
+    const artifact = document.querySelector(".idea-workspace");
+    const followUp = document.querySelector(".assistant-follow-up");
+    return Boolean(artifact && followUp && (artifact.compareDocumentPosition(followUp) & Node.DOCUMENT_POSITION_FOLLOWING));
+  })).toBe(true);
   await page.locator(".response-details summary").click();
   await expect(page.locator(".response-details")).toContainText(buildIdeas()[0].scriptOutline.opening);
   await expect(page.getByRole("button", { name: "Copy all ideas and script blueprints" })).toBeVisible();
@@ -253,12 +320,73 @@ test("expands a researched idea into a complete YouTube script", async ({ page }
   await page.getByRole("button", { name: "Video ideas" }).click();
   await page.getByLabel("Message Stanley").fill("Productivity experiments for remote workers");
   await page.getByRole("button", { name: "Send message" }).click();
-  await page.getByLabel("Message Stanley").fill("Write the complete script for the recommended idea.");
+  await expect(page.getByLabel("Stanley follow-up")).toHaveText("Want me to turn the top idea into a complete script?");
+  await page.getByLabel("Message Stanley").fill("yes");
   await page.getByRole("button", { name: "Send message" }).click();
 
   await expect(page.locator(".assistant-answer").last()).toContainText(buildScript().coldOpen);
   await expect(page.locator(".assistant-answer").last()).toContainText(buildScript().ending);
   await expect(page.getByRole("button", { name: "Copy full script" })).toBeVisible();
+  await expect(page.getByLabel("Stanley follow-up")).toHaveText("Want practical advice and a shot-by-shot plan for filming it?");
+});
+
+test("guides one typed conversation from idea through script, filming, and thumbnail", async ({ page }, testInfo) => {
+  const prompts: string[] = [];
+  const assistantContext: string[] = [];
+  let requestCount = 0;
+  await mockGeneration(page, {
+    handler: async (route) => {
+      const body = route.request().postDataJSON() as { messages?: Array<{ role: string; content: string }>; topic?: string };
+      prompts.push(body.messages?.at(-1)?.content || body.topic || "");
+      assistantContext.push(body.messages?.filter((message) => message.role === "assistant").at(-1)?.content || "");
+      requestCount += 1;
+      const payload = requestCount === 1
+        ? buildIdeaPayload()
+        : requestCount === 2
+          ? buildScriptPayload()
+          : requestCount === 3
+            ? buildFilmingPayload()
+            : buildThumbnailPayload();
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(payload) });
+    },
+  });
+  await openApp(page);
+  await page.getByLabel("Message Stanley").fill("Give me ideas for a measurable morning experiment.");
+  await page.getByRole("button", { name: "Send message" }).click();
+  const followUp = page.getByLabel("Stanley follow-up");
+  await expect(followUp).toHaveText("Want me to turn the top idea into a complete script?");
+  await followUp.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: testInfo.outputPath("idea-next-step.png") });
+
+  for (const expectedQuestion of [
+    "Want practical advice and a shot-by-shot plan for filming it?",
+    "Want me to create the finished thumbnail next?",
+    "Want me to review the full package and make its highest-leverage improvement?",
+  ]) {
+    await page.getByLabel("Message Stanley").fill("yes");
+    await page.getByRole("button", { name: "Send message" }).click();
+    await expect(followUp).toHaveText(expectedQuestion, { timeout: 15_000 });
+  }
+
+  await followUp.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: testInfo.outputPath("full-workflow.png") });
+  expect(prompts.slice(1)).toEqual(["yes", "yes", "yes"]);
+  expect(assistantContext[1]).toContain("Want me to turn the top idea into a complete script?");
+  expect(assistantContext[2]).toContain("Want practical advice and a shot-by-shot plan for filming it?");
+  expect(assistantContext[3]).toContain("Want me to create the finished thumbnail next?");
+});
+
+test("renders longer Stanley chat as concise point form", async ({ page }) => {
+  await mockGeneration(page, { payload: {
+    reply: "The evidence is limited, so I would not call this a proven pattern. The useful signal is the repeated visual contrast. Test that before changing the whole concept.",
+    blocked: false,
+  } });
+  await openApp(page);
+  await page.getByLabel("Message Stanley").fill("What do you think of this direction?");
+  await page.getByRole("button", { name: "Send message" }).click();
+
+  await expect(page.locator(".assistant-points li")).toHaveCount(3);
+  await expect(page.locator(".assistant-paragraph")).toHaveCount(0);
 });
 
 test("renders every numbered conversational point with consistent emphasis", async ({ page }) => {
@@ -280,10 +408,29 @@ test("renders every numbered conversational point with consistent emphasis", asy
     "Relevance:",
     "Satisfaction:",
   ]);
-  const fontWeights = await answer.locator(".assistant-option-title").evaluateAll((items) => items.map((item) => getComputedStyle(item).fontWeight));
-  const fontSizes = await answer.locator(".assistant-option-title").evaluateAll((items) => items.map((item) => getComputedStyle(item).fontSize));
-  expect(new Set(fontWeights).size).toBe(1);
-  expect(new Set(fontSizes)).toEqual(new Set(["16px"]));
+  await expect.poll(() => answer.locator(".assistant-option-title").evaluateAll((items) => new Set(items.map((item) => getComputedStyle(item).fontWeight)).size)).toBe(1);
+  await expect.poll(() => answer.locator(".assistant-option-title").evaluateAll((items) => Array.from(new Set(items.map((item) => getComputedStyle(item).fontSize))))).toEqual(["16px"]);
+});
+
+test("does not bold review advice or split quoted thumbnail copy at a colon", async ({ page }) => {
+  const reply = `The highest-leverage move for this package is to clarify the viewer's 'Why' in the thumbnail.
+
+1. Increase the visual weight of the '7-Day' text to frame it as a race.
+2. Position the subject's expression to reflect concern about the high-stakes demo, not just technical stress.
+
+3. Swap 'Warning: Hard' for a specific, clear outcome like 'The Final Demo' to better signal why the viewer should care about the result.`;
+  await mockGeneration(page, { payload: { reply, titles: [], mode: "idea", blocked: false, model: "test" } });
+  await openApp(page);
+  await page.getByLabel("Message Stanley").fill("Yes please!");
+  await page.getByRole("button", { name: "Send message" }).click();
+
+  const answer = page.locator(".assistant-answer").last();
+  await expect(answer.locator(".assistant-option")).toHaveCount(3);
+  await expect(answer.locator(".assistant-option-title strong")).toHaveCount(0);
+  await expect(answer.locator(".assistant-option-title").nth(2)).toContainText("Swap 'Warning: Hard'");
+  await expect.poll(() => answer.locator(".assistant-option-title").evaluateAll((items) =>
+    Array.from(new Set(items.map((item) => getComputedStyle(item).fontWeight)))
+  )).toEqual(["400"]);
 });
 
 test("keeps a submitted follow-up and its live work in view", async ({ page }) => {
@@ -385,9 +532,9 @@ test("generates visual thumbnail concepts from the Thumbnails mode", async ({ pa
   await expect(page.getByRole("button", { name: "Copy all thumbnail concepts" })).toBeVisible();
 });
 
-test("keeps a prominent new-chat control in the sidebar", async ({ page }) => {
+test("keeps a prominent new-video control in the sidebar", async ({ page }) => {
   await openApp(page);
-  await expect(page.getByRole("button", { name: "New chat", exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "New video", exact: true })).toBeVisible();
 });
 
 test("surfaces an API error and keeps the message intact", async ({ page }) => {

@@ -141,7 +141,9 @@ test("keeps AI keys server-side and removes the disposable starter", async () =>
   assert.match(stanleyVoice, /REFERENCE EXAMPLES/);
   assert.match(stanleyVoice, /Never open with canned approval/);
   assert.match(stanleyVoice, /Default to casual, short, and sweet/);
-  assert.match(stanleyVoice, /40-80 words/);
+  assert.match(stanleyVoice, /30-70 words/);
+  assert.match(stanleyVoice, /two to four short bullet points/);
+  assert.match(stanleyVoice, /Separate what the evidence shows from what you infer/);
   assert.match(route, /Never turn casual wording/);
   assert.match(youtubeStrategy, /Before drafting, silently define four things/);
   assert.match(route, /viewerPromise/);

@@ -1,4 +1,4 @@
-import { parseStructuredText } from "./provider";
+import { isRetryableTransportError, parseStructuredText } from "./provider";
 import { ToolRegistry } from "./tool-registry";
 import type {
   AgentResult,
@@ -24,6 +24,7 @@ type RunAgentInput = {
   deadlineMs?: number;
   toolTimeoutMs?: number;
   toolsEnabled?: boolean;
+  modelTransportRetries?: number;
   onEvent?: (event: AgentActivityEvent) => void | Promise<void>;
 };
 
@@ -100,6 +101,7 @@ export async function runAgent(input: RunAgentInput): Promise<AgentResult> {
   const memo = new Map<string, ToolResult>();
   const repeatCounts = new Map<string, number>();
   const toolResults: ToolResult[] = [];
+  const modelTransportRetries = Math.max(0, Math.min(2, input.modelTransportRetries ?? 1));
   const started = Date.now();
   let toolsEnabled = input.toolsEnabled !== false;
   let attemptedToolCalls = 0;
@@ -131,15 +133,34 @@ export async function runAgent(input: RunAgentInput): Promise<AgentResult> {
       toolsEnabled = false;
     }
 
-    const response = await input.provider.complete({
-      systemInstruction: input.systemInstruction,
-      contents,
-      tools: toolsEnabled ? input.registry.declarations() : [],
-      responseSchema: input.responseSchema,
-      maxOutputTokens: input.maxOutputTokens,
-      signal: input.signal,
-      deadlineAt,
-    });
+    let response;
+    for (let transportAttempt = 0; ; transportAttempt += 1) {
+      try {
+        response = await input.provider.complete({
+          systemInstruction: input.systemInstruction,
+          contents,
+          tools: toolsEnabled ? input.registry.declarations() : [],
+          responseSchema: input.responseSchema,
+          maxOutputTokens: input.maxOutputTokens,
+          signal: input.signal,
+          deadlineAt,
+        });
+        break;
+      } catch (error) {
+        const canRetry = transportAttempt < modelTransportRetries
+          && isRetryableTransportError(error)
+          && !input.signal.aborted
+          && Date.now() < deadlineAt;
+        if (!canRetry) throw error;
+        await emit({
+          id: "model-retry",
+          label: "Reconnecting to Stanley",
+          detail: "The model connection dropped, so Stanley is retrying your prompt",
+          status: "active",
+          kind: "thinking",
+        });
+      }
+    }
     trace.modelRounds += 1;
     trace.promptTokens += response.usage.promptTokens;
     trace.completionTokens += response.usage.completionTokens;

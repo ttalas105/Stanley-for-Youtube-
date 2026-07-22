@@ -207,11 +207,13 @@ export async function recordDebugConversationTurn(ownerId: string, projectId: st
     .bind(ownerId, projectId)
     .first<{ turns_json: string }>();
   const turns = [...parseDebugTurns(existing?.turns_json), turn].slice(-24);
-  await db.prepare(`INSERT INTO debug_conversations (owner_id, project_id, turns_json, updated_at)
-    VALUES (?, ?, ?, CURRENT_TIMESTAMP)
-    ON CONFLICT(owner_id, project_id) DO UPDATE SET turns_json = excluded.turns_json, updated_at = CURRENT_TIMESTAMP`)
-    .bind(ownerId, projectId, JSON.stringify(turns))
-    .run();
+  await db.batch([
+    db.prepare(`INSERT INTO debug_conversations (owner_id, project_id, turns_json, updated_at)
+      VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+      ON CONFLICT(owner_id, project_id) DO UPDATE SET turns_json = excluded.turns_json, updated_at = CURRENT_TIMESTAMP`)
+      .bind(ownerId, projectId, JSON.stringify(turns)),
+    db.prepare("DELETE FROM debug_conversations WHERE updated_at < datetime('now', '-14 days')"),
+  ]);
 }
 
 export async function updateSemanticMemory(ownerId: string, projectId: string, update: SemanticMemoryUpdate): Promise<SemanticMemory> {

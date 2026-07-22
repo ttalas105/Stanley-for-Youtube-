@@ -1581,6 +1581,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, summary:focus
 .app-shell .research-sources a { color: #dfe3ea; }
 .app-shell .research-sources a:hover { background: #161e29; }
 .app-shell .research-sources a small { color: #778295; }
+.app-shell .assistant-follow-up { margin-top: 24px; padding-top: 17px; border-top: 1px solid var(--app-border); }
+.app-shell .assistant-follow-up p { max-width: 65ch; margin: 0; color: #e0e4eb; font-size: 1rem; font-weight: 540; line-height: 1.6; }
 .app-shell .feedback-response, .app-shell .copy-response { color: #7f899a; }
 .app-shell .feedback-response:hover, .app-shell .feedback-response.selected, .app-shell .copy-response:hover { background: #171f2b; color: #e7eaf0; }
 .app-shell .assistant-thinking { padding-left: 0; }
@@ -1920,6 +1922,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, summary:focus
 /* GPT-like response flow with live, server-backed agent activity. */
 .app-shell .assistant-lead { margin-bottom: 0; }
 .assistant-answer { max-width: 72ch; color: #d8dde6; font-size: 1rem; line-height: 1.7; }
+.assistant-points { display: grid; gap: 8px; margin: 0 0 18px; padding-left: 1.2rem; }
+.assistant-points li { padding-left: 3px; color: #d8dde6; line-height: 1.55; }
 .assistant-paragraph { margin: 0 0 18px; }
 .app-shell .assistant-answer p { margin: 0; font-size: 1rem; line-height: 1.7; }
 .assistant-paragraph h2 { margin: 0 0 7px; color: #f1f3f6; font-size: 1rem; font-weight: 670; letter-spacing: -.01em; }

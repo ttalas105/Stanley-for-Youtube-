@@ -135,6 +135,25 @@ export function buildScriptPayload() {
   };
 }
 
+export function buildFilmingPayload() {
+  return {
+    reply: "I turned the script into a practical production plan.",
+    filmingPlan: {
+      format: "Single-camera creator documentary",
+      setup: "One locked talking-head setup, phone B-roll, and a screen recording for the tracked results.",
+      shotList: [
+        "Record the cold open directly to camera.",
+        "Capture the baseline and the rule as tight inserts.",
+        "Film one progress beat for each script section.",
+        "Record the final comparison and honest decision.",
+      ],
+      editNotes: "Open on the strongest result, keep setup under 30 seconds, and use the tracked evidence as visual punctuation.",
+    },
+    mode: "idea",
+    blocked: false,
+  };
+}
+
 export function buildThumbnails() {
   return Array.from({ length: 6 }, (_, index) => ({
     id: `thumbnail-${index + 1}`,
@@ -185,7 +204,10 @@ export async function waitForApp(page: Page) {
 }
 
 export async function openApp(page: Page) {
-  await page.addInitScript(() => window.localStorage.setItem("stanley-onboarding-v1", "skipped"));
+  await page.addInitScript(() => {
+    window.localStorage.setItem("stanley-onboarding-v1", "complete");
+    window.localStorage.setItem("stanley-preview-mode-v1", "true");
+  });
   await page.goto("/");
   await waitForApp(page);
   if (!await page.getByLabel("Message Stanley").isVisible()) {

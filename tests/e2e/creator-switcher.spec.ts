@@ -128,7 +128,7 @@ test("switches into the Will Tennyson demo workspace and sends that creator cont
   await expect(page.getByRole("heading", { name: "Will Tennyson" })).toBeVisible();
   await expect(page.locator("[data-dashboard-channel-header]")).toContainText("5.1M");
   await expect(page.locator("[data-dashboard-channel-header]")).toContainText("1.4B");
-  await expect(page.getByText("Demo analytics", { exact: true })).toBeVisible();
+  await expect(page.getByText("Demo workspace", { exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Performance over time" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Top videos" })).toBeVisible();
 
@@ -137,7 +137,7 @@ test("switches into the Will Tennyson demo workspace and sends that creator cont
   await expect(page).toHaveURL(/\/dashboard$/);
   await expect(page.getByRole("button", { name: /Switch creator profile/ })).toContainText("Will Tennyson");
 
-  await page.getByRole("link", { name: "New chat" }).click();
+  await page.getByRole("link", { name: "New video" }).click();
   await expect(page).toHaveURL(/\/chat$/);
   await expect(page.getByRole("button", { name: /Switch creator profile/ })).toContainText("Will Tennyson");
 

@@ -74,7 +74,8 @@ export function looksLikeYouTubeCreationGuidance(value) {
 export function looksLikePublicYouTubeResearchRequest(value) {
   const message = typeof value === "string" ? value.trim() : "";
   if (!message || looksLikePromptAttack(message) || looksLikeCreatorMemoryRequest(message)) return false;
-  return publicYouTubeResearchAction.test(message) && publicYouTubeResearchTarget.test(message);
+  return Boolean(explicitPublicYouTubeChannelName(message))
+    || (publicYouTubeResearchAction.test(message) && publicYouTubeResearchTarget.test(message));
 }
 
 export function explicitPublicYouTubeChannelName(value) {
@@ -83,12 +84,15 @@ export function explicitPublicYouTubeChannelName(value) {
   const channelUrl = /(?:https?:\/\/)?(?:www\.)?youtube\.com\/(?:channel\/(UC[A-Za-z0-9_-]{20,30})|@([A-Za-z0-9._-]{3,30}))\b/i.exec(message);
   if (channelUrl?.[1]) return channelUrl[1];
   if (channelUrl?.[2]) return `@${channelUrl[2]}`;
-  const match = /\b(?:go\s+to|visit|check\s+out|pull\s+up|look\s+(?:up|at)|take\s+a\s+look\s+at|access|analy[sz]e|review|audit|break\s+down|compare\s+(?:me\s+)?(?:to|with))\s+(?:the\s+)?["“”']?(.{2,80}?)["“”']?(?:['’]s?)?\s+(?:youtube\s+)?channel\b/i.exec(message);
-  const channelName = match?.[1]
+  const namedCreator = /\b(?:research|look\s+up|check\s+out|analy[sz]e|review|audit)\s+(?:on\s+)?(?:a|an|the)?\s*(?:youtube\s+)?(?:creator|youtuber|channel)\s+(?:named|called)\s+["“”']?([A-Za-z0-9][A-Za-z0-9&.'_-]*(?:\s+[A-Za-z0-9][A-Za-z0-9&.'_-]*){0,4})["“”']?(?=\s*(?:[.!?]|$|\band\s+(?:tell|give|show|analy[sz]e|compare|make|use)\b))/i.exec(message);
+  const channelMatch = /\b(?:go\s+to|visit|check\s+out|pull\s+up|look\s+(?:up|at)|take\s+a\s+look\s+at|access|analy[sz]e|review|audit|break\s+down|compare\s+(?:me\s+)?(?:to|with))\s+(?:the\s+)?["“”']?(.{2,80}?)["“”']?(?:['’]s?)?\s+(?:youtube\s+)?channel\b/i.exec(message);
+  const directLookup = /\b(?:look\s+up|check\s+out|research)\s+(?:the\s+)?(?:youtube\s+)?(?:creator\s+|youtuber\s+)?["“”']?([A-Za-z0-9][A-Za-z0-9&.'_-]*(?:\s+[A-Za-z0-9][A-Za-z0-9&.'_-]*){0,4})["“”']?(?:\s+(?:on\s+youtube|youtube\s+channel|channel|youtuber|creator))?(?=\s*(?:[.!?]|$|\band\s+(?:tell|give|show|analy[sz]e|compare|make|use)\b))/i.exec(message);
+  const channelName = (namedCreator?.[1] || channelMatch?.[1] || directLookup?.[1])
     ?.replace(/\s+/g, " ")
     .replace(/["“”']+$/g, "")
+    .replace(/[.,!?;:]+$/g, "")
     .trim();
-  if (!channelName || /^(?:my|our|your|their|the|this|that)$/i.test(channelName)) return "";
+  if (!channelName || /^(?:my|our|your|their|the|this|that|youtube|youtubers?|creators?|channels?|videos?|comparable\s+videos?|current\s+trends?)$/i.test(channelName)) return "";
   return channelName;
 }
 
@@ -103,14 +107,56 @@ export function explicitYouTubeVideoId(value) {
 
 export function requestedCreativeDeliverables(value) {
   const message = typeof value === "string" ? value.trim() : "";
-  if (!message || (!directCreativeVerb.test(message) && !directProductionRequest.test(message))) return [];
+  if (!message) return [];
+
+  const exclusiveMatch = /(?:\b(?:just|only)\s+(?:(?:give|create|make|write|generate)\s+(?:me\s+)?)?(?:(?:the|a|an|one|two|three|four|five|six|seven|eight|nine|ten|twelve|\d+)\s+)?(?:(?:stronger|shorter|better|new|alternate|alternative|improved)\s+)*(?:video\s+)?(ideas?|scripts?|titles?|thumbnails?)\b|\b(?:give|create|make|write|generate)\s+(?:me\s+)?(?:just|only)\s+(?:(?:the|a|an|one|two|three|four|five|six|seven|eight|nine|ten|twelve|\d+)\s+)?(?:(?:stronger|shorter|better|new|alternate|alternative|improved)\s+)*(?:video\s+)?(ideas?|scripts?|titles?|thumbnails?)\b|\b(?:video\s+)?(ideas?|scripts?|titles?|thumbnails?)\s+only\b)/i.exec(message);
+  if (exclusiveMatch) {
+    const asset = (exclusiveMatch[1] || exclusiveMatch[2] || exclusiveMatch[3]).toLowerCase().replace(/s$/, "");
+    return [asset];
+  }
+
+  if (!directCreativeVerb.test(message) && !directProductionRequest.test(message)) return [];
+  const referenceBoundary = /\b(?:using|based\s+on|drawing\s+on|informed\s+by)\b/i.exec(message);
+  const requestText = referenceBoundary && titleMarker.test(message.slice(0, referenceBoundary.index))
+    ? message.slice(0, referenceBoundary.index)
+    : message;
   const requested = [];
-  if (/\b(?:video\s+)?ideas?\b/i.test(message)) requested.push("idea");
-  if (/\b(?:video\s+)?scripts?\b/i.test(message)) requested.push("script");
-  if (/\b(?:video\s+)?titles?\b/i.test(message)) requested.push("title");
-  if (/\b(?:video\s+)?thumbnails?\b/i.test(message)) requested.push("thumbnail");
-  if (directProductionRequest.test(message)) requested.push("filming_plan");
+  if (/\b(?:video\s+)?ideas?\b/i.test(requestText)) requested.push("idea");
+  if (/\b(?:video\s+)?scripts?\b/i.test(requestText)) requested.push("script");
+  if (/\b(?:video\s+)?titles?\b/i.test(requestText)) requested.push("title");
+  if (/\b(?:video\s+)?thumbnails?\b/i.test(requestText)) requested.push("thumbnail");
+  if (directProductionRequest.test(requestText)) requested.push("filming_plan");
   return requested;
+}
+
+export function resolveRequestedCreativeDeliverables(modelDeliverables, explicitDeliverables, intentDeliverable = null) {
+  const supported = new Set(["idea", "script", "title", "thumbnail", "filming_plan"]);
+  const explicit = Array.isArray(explicitDeliverables)
+    ? explicitDeliverables.filter((item) => supported.has(item))
+    : [];
+  if (explicit.length) return Array.from(new Set(explicit));
+  const inferred = Array.isArray(modelDeliverables)
+    ? modelDeliverables.filter((item) => supported.has(item))
+    : [];
+  if (supported.has(intentDeliverable)) inferred.push(intentDeliverable);
+  return Array.from(new Set(inferred));
+}
+
+export function requestedTitleCount(value, fallback = 12) {
+  const message = typeof value === "string" ? value.trim() : "";
+  if (!message) return fallback;
+  const numberWords = {
+    a: 1, an: 1, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6,
+    seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12,
+  };
+  const match = /\b(\d{1,2}|a|an|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s+(?:(?:stronger|shorter|better|new|alternate|alternative|improved)\s+)*(?:youtube\s+|video\s+)?titles?\b/i.exec(message);
+  if (match) {
+    const parsed = /^\d+$/.test(match[1]) ? Number(match[1]) : numberWords[match[1].toLowerCase()];
+    return Math.max(1, Math.min(12, parsed || fallback));
+  }
+  if (/\b(?:youtube\s+|video\s+)?title\s+(?:options|directions|ideas|alternatives)\b/i.test(message)) return fallback;
+  if (/\b(?:youtube\s+|video\s+)?title\b(?!s)/i.test(message)) return 1;
+  return fallback;
 }
 
 const creativeIntents = new Set(["idea_work", "script_work", "title_work", "thumbnail_work", "filming_work"]);

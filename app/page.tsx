@@ -9,6 +9,7 @@ import dashboardStyles from "./dashboard.module.css";
 import { findDiscoveryGrowth } from "./dashboard-signals.mjs";
 import { type CreatorProfileId, WILL_TENNYSON_DEMO, isCreatorProfileId } from "./creator-profiles";
 import { PerformanceTimelinePanel } from "./PerformanceTimelinePanel";
+import { formatStanleyReply, workflowNextActions } from "./workflow-next-actions.mjs";
 
 type CreationMode = "auto" | "idea" | "title" | "thumbnail";
 type WorkspaceView = "dashboard" | "creatorTwin" | "extension" | "create";
@@ -98,6 +99,13 @@ type Research = {
   coverage?: "strong" | "limited" | "none";
 };
 
+type SuggestedAction = {
+  id: "idea" | "script" | "filming" | "thumbnail" | "review";
+  label: string;
+  prompt: string;
+  question: string;
+};
+
 type ChatMessage = {
   id: string;
   role: "user" | "assistant";
@@ -115,6 +123,7 @@ type ChatMessage = {
   blocked?: boolean;
   streaming?: boolean;
   attachments?: MessageAttachment[];
+  nextActions?: SuggestedAction[];
 };
 
 type AgentActivity = {
@@ -161,6 +170,7 @@ type ApiPayload = {
   conversationTopic?: string;
   blocked?: boolean;
   error?: string;
+  nextActions?: unknown;
 };
 
 type StreamEvent =
@@ -416,8 +426,52 @@ function compactSentences(value: string, maxLength = 280) {
   return `${excerpt.slice(0, sentenceEnd > 110 ? sentenceEnd + 1 : maxLength).trim()}…`;
 }
 
-function formatAssistantAnswer(payload: ApiPayload) {
-  const reply = payload.reply?.trim() || "";
+function normalizeSuggestedActions(value: unknown): SuggestedAction[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+    const candidate = item as Partial<SuggestedAction>;
+    if (
+      !["idea", "script", "filming", "thumbnail", "review"].includes(String(candidate.id))
+      || typeof candidate.label !== "string"
+      || typeof candidate.prompt !== "string"
+      || typeof candidate.question !== "string"
+    ) return [];
+    return [{
+      id: candidate.id as SuggestedAction["id"],
+      label: candidate.label.trim().slice(0, 80),
+      prompt: candidate.prompt.trim().slice(0, 600),
+      question: candidate.question.trim().slice(0, 180),
+    }];
+  }).filter((item) => item.label && item.prompt && item.question).slice(0, 2);
+}
+
+function suggestedActionsForPayload(payload: ApiPayload) {
+  const supplied = normalizeSuggestedActions(payload.nextActions);
+  if (supplied.length) return supplied;
+  const usedResearchTool = payload.agent?.toolCalls.some((call) => (
+    (call.name === "youtube_channel_snapshot" || call.name === "youtube_search_reference_videos")
+      && (call.status === "complete" || call.status === "partial")
+  ));
+  return normalizeSuggestedActions(workflowNextActions({
+    blocked: Boolean(payload.blocked),
+    hasIdeas: Boolean(payload.ideas?.length),
+    hasTitles: Boolean(payload.titles?.length),
+    hasScript: Boolean(payload.script),
+    hasFilmingPlan: Boolean(payload.filmingPlan),
+    hasThumbnailImage: Boolean(payload.thumbnailImage),
+    hasThumbnails: Boolean(payload.thumbnails?.length),
+    hasResearch: Boolean(usedResearchTool || payload.research?.examples?.length),
+  }));
+}
+
+function formatAssistantAnswer(payload: ApiPayload, nextActions = suggestedActionsForPayload(payload)) {
+  const question = nextActions[0]?.question.trim() || "";
+  const rawReply = payload.reply?.trim() || "";
+  const replyWithoutQuestion = question && rawReply.endsWith(question)
+    ? rawReply.slice(0, -question.length).trim()
+    : rawReply;
+  const reply = formatStanleyReply(replyWithoutQuestion);
   if (payload.ideas?.length || payload.script || payload.filmingPlan || payload.thumbnailImage) return reply;
   if (payload.titles?.length) return [reply, ...payload.titles.map((item, index) => `${index + 1}. ${item.title}`)].filter(Boolean).join("\n\n");
   if (payload.thumbnails?.length) {
@@ -438,11 +492,20 @@ function ConversationalAnswer({ text, streaming }: { text: string; streaming?: b
   return <div className="assistant-answer">{blocks.map((block, index) => {
     const lines = block.split("\n").filter(Boolean);
     if (!lines.length) return null;
+    const bulletLines = lines.filter((line) => /^[-*]\s+/.test(line));
+    if (bulletLines.length === lines.length) {
+      return <ul className="assistant-points" key={`${index}-${lines[0]}`}>
+        {bulletLines.map((line, lineIndex) => <li key={`${lineIndex}-${line}`}>{line.replace(/^[-*]\s+/, "")}</li>)}
+      </ul>;
+    }
     const numbered = lines[0].match(/^(\d+)\.\s+(.*)$/);
     if (numbered) {
-      const labeled = numbered[2].match(/^([^:\n]{2,48}:)\s+(.+)$/);
+      // Only emphasize a genuine short lead label (for example, "Clarity:").
+      // A loose colon match breaks quoted thumbnail copy such as
+      // "Swap 'Warning: Hard'..." and makes arbitrary advice look half-bold.
+      const labeled = numbered[2].match(/^([A-Za-z][A-Za-z0-9/& -]{1,32}:)\s+(.+)$/);
       return <section className="assistant-option" key={`${index}-${lines[0]}`}>
-      <p className="assistant-option-title"><span>{numbered[1]}.</span> {labeled ? <><strong>{labeled[1]}</strong> {labeled[2]}</> : <strong>{numbered[2]}</strong>}</p>
+      <p className="assistant-option-title"><span>{numbered[1]}.</span> {labeled ? <><strong>{labeled[1]}</strong> {labeled[2]}</> : numbered[2]}</p>
       {lines.slice(1).map((line, lineIndex) => {
         const label = line.match(/^(Why it works|Format|On-screen text):\s*(.*)$/);
         return <p key={`${lineIndex}-${line}`}>{label ? <><b>{label[1]}:</b> {label[2]}</> : line}</p>;
@@ -456,16 +519,24 @@ function ConversationalAnswer({ text, streaming }: { text: string; streaming?: b
   })}{streaming ? <span className="assistant-typing-cursor" aria-hidden="true" /> : null}</div>;
 }
 
+function withoutWorkflowQuestion(message: ChatMessage) {
+  const question = message.nextActions?.[0]?.question.trim() || "";
+  const content = message.content.trim();
+  if (!question || !content.endsWith(question)) return content;
+  return content.slice(0, -question.length).trim();
+}
+
 function structuredLeadText(message: ChatMessage) {
+  const content = withoutWorkflowQuestion(message);
   if (message.ideas?.length) {
-    const ideaListStart = message.content.search(/\n\n1\.\s/);
-    return ideaListStart >= 0 ? message.content.slice(0, ideaListStart).trim() : message.content;
+    const ideaListStart = content.search(/\n\n1\.\s/);
+    return ideaListStart >= 0 ? content.slice(0, ideaListStart).trim() : content;
   }
   if (message.script) {
-    const scriptStart = message.content.indexOf(`\n\n${message.script.title}\n`);
-    return scriptStart >= 0 ? message.content.slice(0, scriptStart).trim() : message.content;
+    const scriptStart = content.indexOf(`\n\n${message.script.title}\n`);
+    return scriptStart >= 0 ? content.slice(0, scriptStart).trim() : content;
   }
-  return message.content;
+  return content;
 }
 
 function ideaClipboardText(ideas: GeneratedIdea[]) {
@@ -689,8 +760,13 @@ function serializeMessage(message: ChatMessage) {
   if (message.filmingPlan) artifactSections.push(`Filming plan:\nFormat: ${message.filmingPlan.format}\nSetup: ${message.filmingPlan.setup}\nShot list: ${message.filmingPlan.shotList.join(" | ")}\nEdit: ${message.filmingPlan.editNotes}`);
   if (message.thumbnailImage) artifactSections.push(`Generated thumbnail: ${message.thumbnailImage.aspectRatio}, ${message.thumbnailImage.sourceUsed ? "edited from creator-supplied visual reference" : "created from the video brief"}.`);
   if (message.thumbnails?.length) artifactSections.push(`Thumbnail concepts:\n${message.thumbnails.map((item, index) => `${index + 1}. ${item.concept}: ${item.visual}`).join("\n")}`);
+  if (message.research?.examples?.length) artifactSections.push(`Verified YouTube research (${message.research.query}):\n${message.research.examples.map((item, index) => `${index + 1}. ${item.title} — ${item.channel}, ${item.views} views, ${item.url}`).join("\n")}`);
   const artifactLines = artifactSections.join("\n\n");
-  return { role: message.role, content: artifactLines ? `${message.content}\n${artifactLines}` : message.content };
+  const nextQuestion = message.nextActions?.[0]?.question.trim() || "";
+  return {
+    role: message.role,
+    content: [withoutWorkflowQuestion(message), artifactLines, nextQuestion].filter(Boolean).join("\n\n"),
+  };
 }
 
 function isAgentActivity(value: unknown): value is AgentActivity {
@@ -897,12 +973,12 @@ function OnboardingVisual({ step, profile }: { step: Exclude<OnboardingStep, "lo
             <div><strong>Stanley</strong><small><YouTubeIcon /> for YouTube</small></div>
           </div>
 
-          <div className="feature-chat-nav active"><SquarePen /><span>New chat</span></div>
+          <div className="feature-chat-nav active"><SquarePen /><span>New video</span></div>
           <div className="feature-chat-nav"><LayoutDashboard /><span>Dashboard</span></div>
           <div className="feature-chat-nav"><Puzzle /><span>Extension</span></div>
 
           <div className="feature-chat-history">
-            <span>Chats</span>
+            <span>Video projects</span>
             <i />
             <i />
           </div>
@@ -2260,7 +2336,7 @@ function ChannelDashboard({
               {expanded ? <div className={dashboardStyles.performanceFindingDetail} id={`report-finding-detail-${diagnostic.id}`} role="region" aria-labelledby={`report-finding-${diagnostic.id}`}>
                 <div><span>Evidence</span><p>{diagnostic.why}</p></div>
                 <div><span>Next move</span><p>{diagnostic.action}</p></div>
-                <button type="button" onClick={() => generateDiagnosticFollowUp(diagnostic)}>Generate follow-up <ArrowUpRight aria-hidden="true" /></button>
+                <button type="button" onClick={() => generateDiagnosticFollowUp(diagnostic)}>Generate follow-up video <ArrowUpRight aria-hidden="true" /></button>
               </div> : null}
             </article>;
           })}
@@ -2395,7 +2471,7 @@ function ChannelDashboard({
         </> : null}
         {drawerMode === "diagnostic" ? <div className={dashboardStyles.diagnosticDetail}><span className={`${dashboardStyles.severity} ${dashboardStyles[selectedDiagnostic.severity]}`}><i />{selectedDiagnostic.severity}</span><h3>{selectedDiagnostic.title}</h3><dl><div><dt>Where it happened</dt><dd>{selectedDiagnostic.where}</dd></div><div><dt>Evidence</dt><dd>{selectedDiagnostic.why}</dd></div><div><dt>Recommended action</dt><dd>{selectedDiagnostic.action}</dd></div></dl>{selectedDiagnostic.videoId && videoById.get(selectedDiagnostic.videoId) ? <button className={dashboardStyles.relatedVideoButton} type="button" onClick={() => selectVideo(selectedDiagnostic.videoId!)}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={videoById.get(selectedDiagnostic.videoId)!.thumbnailUrl} alt="" /><span><small>Affected video</small><strong>{videoById.get(selectedDiagnostic.videoId)!.title}</strong></span><ChevronRight aria-hidden="true" /></button> : null}<div className={dashboardStyles.drawerActions}><button type="button" onClick={() => onCreateFromPattern(patternPrompt, selectedDiagnostic.videoId ? videoById.get(selectedDiagnostic.videoId) : undefined)}>Generate follow-up idea <ArrowUpRight aria-hidden="true" /></button><button type="button" onClick={onCreate}>Plan next video</button></div></div> : null}
+          <img src={videoById.get(selectedDiagnostic.videoId)!.thumbnailUrl} alt="" /><span><small>Affected video</small><strong>{videoById.get(selectedDiagnostic.videoId)!.title}</strong></span><ChevronRight aria-hidden="true" /></button> : null}<div className={dashboardStyles.drawerActions}><button type="button" onClick={() => generateDiagnosticFollowUp(selectedDiagnostic)}>Generate follow-up video <ArrowUpRight aria-hidden="true" /></button><button type="button" onClick={onCreate}>Plan next video</button></div></div> : null}
         {drawerMode === "traffic" && selectedTraffic ? <div className={dashboardStyles.trafficDetail}><span className={dashboardStyles.sectionEyebrow}>Channel discovery source</span><h3>{dashboardTrafficLabel(selectedTraffic.source)}</h3><p>This is aggregate channel traffic for the selected period. The current API does not attribute it to an individual video.</p><dl><div><dt>Views</dt><dd>{formatDashboardCompact(selectedTraffic.views)}</dd></div><div><dt>Share of measured sources</dt><dd>{trafficTotal ? `${((selectedTraffic.views / trafficTotal) * 100).toFixed(1)}%` : "—"}</dd></div><div><dt>Watch time</dt><dd>{formatDashboardWatchTime(selectedTraffic.watchMinutes)}</dd></div></dl></div> : null}
         {drawerMode === "twin" ? <CreatorTwinPanel expanded={creatorTwinExpanded} loading={creatorTwinLoading} error={creatorTwinError} result={creatorTwin} onAnalyze={() => void analyzeCreatorTwin()} onRefresh={() => void analyzeCreatorTwin(true)} onClose={closeCreatorTwin} onCreate={onCreateFromPattern} onStudy={onUseVideo} /> : null}
       </div>
@@ -2861,7 +2937,7 @@ export default function Home({ initialView = "create" }: StanleyAppProps = {}) {
     const isFirstMessage = userTurns === 0;
     const rootTopic = isFirstMessage ? cleanMessage : originalTopic;
     // An empty thread is always a new conversation. Derive this from the
-    // rendered message state as well as sessionId so a rapid New chat -> Send
+    // rendered message state as well as sessionId so a rapid New video -> Send
     // sequence cannot reuse the previous id while React is under load.
     const activeSessionId = messages.length === 0 ? crypto.randomUUID() : sessionId || crypto.randomUUID();
     const currentAttachments = attachments;
@@ -2954,7 +3030,8 @@ export default function Home({ initialView = "create" }: StanleyAppProps = {}) {
       if (streamed.status >= 400 || !payload.reply) throw new Error(payload.error || "Stanley could not finish that response. Try again.");
 
       const responseMode = isCreationMode(payload.mode) && payload.mode !== "auto" ? payload.mode : undefined;
-      const presentedAnswer = formatAssistantAnswer(payload);
+      const nextActions = suggestedActionsForPayload(payload);
+      const presentedAnswer = formatAssistantAnswer(payload, nextActions);
       const assistantMessage: ChatMessage = {
         id: crypto.randomUUID(),
         role: "assistant",
@@ -2970,6 +3047,7 @@ export default function Home({ initialView = "create" }: StanleyAppProps = {}) {
         agent: payload.agent,
         activity: [...activityLog],
         blocked: payload.blocked,
+        nextActions,
       };
       const completedMessages = [...pendingMessages, assistantMessage];
       const completedTopic = payload.conversationTopic?.trim() || rootTopic;
@@ -2991,7 +3069,7 @@ export default function Home({ initialView = "create" }: StanleyAppProps = {}) {
       }
       if (replyRunRef.current !== runId) return;
       // Save the completed turn before rendering its artifacts. This prevents a
-      // very fast New chat click from racing the history write.
+      // very fast New video click from racing the history write.
       persistConversation(activeSessionId, completedTopic, completedMessages);
       setMessages(completedMessages);
       setActiveActivity([]);
@@ -3559,7 +3637,7 @@ export default function Home({ initialView = "create" }: StanleyAppProps = {}) {
           </a>
         </div>
 
-        <a className="sidebar-new-chat-button" href="/chat" onClick={(event) => { event.preventDefault(); startNewChat(); }} title={sidebarCollapsed ? "New chat" : undefined}><NewChatIcon /><span>New chat</span></a>
+        <a className="sidebar-new-chat-button" href="/chat" onClick={(event) => { event.preventDefault(); startNewChat(); }} title={sidebarCollapsed ? "New video" : undefined}><NewChatIcon /><span>New video</span></a>
 
         <nav aria-label="Stanley tools">
           {NAV_ITEMS.map((item) => {
@@ -3594,12 +3672,12 @@ export default function Home({ initialView = "create" }: StanleyAppProps = {}) {
         </button>
 
         <section className="title-history" aria-labelledby="history-heading">
-          <h2 id="history-heading">Chats</h2>
+          <h2 id="history-heading">Video projects</h2>
           {drafts.length > 0 ? drafts.slice(0, 6).map((draft) => (
             <button type="button" key={draft.id} onClick={() => openDraft(draft)} aria-current={draft.id === sessionId ? "true" : undefined}>
               <MessageCircle aria-hidden="true" /><span>{draft.topic}</span><small>{formatTime(draft.createdAt)}</small>
             </button>
-          )) : <p>Your creation chats will appear here.</p>}
+          )) : <p>Your video projects will appear here.</p>}
         </section>
 
         {youtubeStatus.connected && youtubeStatus.profile && <div className="sidebar-account">
@@ -3659,8 +3737,8 @@ export default function Home({ initialView = "create" }: StanleyAppProps = {}) {
           {!inConversation ? (
             <>
               <section className="welcome" aria-labelledby="welcome-title">
-                <h1 id="welcome-title">Where should we start?</h1>
-                <p>Ideas, titles, scripts, and thumbnails in one conversation.</p>
+                <h1 id="welcome-title">What should we make next?</h1>
+                <p>Stanley can research the idea, write it, plan the shoot, and package the thumbnail with you.</p>
               </section>
 
               {renderComposer(true)}
@@ -3715,6 +3793,10 @@ export default function Home({ initialView = "create" }: StanleyAppProps = {}) {
                     setTopic("Make this thumbnail ");
                     window.setTimeout(() => topicRef.current?.focus(), 0);
                   }} /> : null}
+
+                  {!message.streaming && message.id === latestAssistantMessageId && message.nextActions?.[0]?.question ? <section className="assistant-follow-up" aria-label="Stanley follow-up">
+                    <p>{message.nextActions[0].question}</p>
+                  </section> : null}
 
                   {!message.streaming && <div className="assistant-actions">
                     <button className={feedback[message.id] === "up" ? "feedback-response selected" : "feedback-response"} type="button" aria-label="Mark response as helpful" aria-pressed={feedback[message.id] === "up"} onClick={() => rateResponse(message.id, "up")}><FeedbackIcon /></button>

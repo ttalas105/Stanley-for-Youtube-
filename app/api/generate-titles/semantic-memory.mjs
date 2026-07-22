@@ -2,6 +2,12 @@ const CREATOR_CATEGORIES = new Set(["identity", "preference", "audience", "chann
 const PROJECT_CATEGORIES = new Set(["subject", "relationship", "format", "tone", "constraint", "decision", "proof"]);
 const SENSITIVE_KEY = /(?:password|passcode|secret|token|api[_-]?key|credential|credit[_-]?card|bank|routing|social[_-]?security|\bssn\b|\bsin\b|medical|health|diagnosis|exact[_-]?address|home[_-]?address|phone|email)/i;
 const SENSITIVE_VALUE = /(?:\bAIza[\w-]{20,}|\bsk-[\w-]{16,}|\bBearer\s+[\w.-]{12,}|\b\d{3}-\d{2}-\d{4}\b|\b(?:\d[ -]*?){13,19}\b|[\w.+-]+@[\w.-]+\.[A-Za-z]{2,})/i;
+const EXPLICIT_CONSENT_KEY = "stanley_memory_consent_v2";
+const EXPLICIT_CONSENT_FACT = {
+  key: EXPLICIT_CONSENT_KEY,
+  value: "The creator explicitly enabled durable memory.",
+  category: "identity",
+};
 
 function clean(value, maxLength) {
   return typeof value === "string"
@@ -49,6 +55,45 @@ export function emptySemanticMemory() {
   return {
     creator: { summary: "", facts: [] },
     project: { summary: "", facts: [] },
+  };
+}
+
+export function hasExplicitMemoryConsent(memory) {
+  return Array.isArray(memory?.creator?.facts)
+    && memory.creator.facts.some((fact) => normalizeMemoryKey(fact?.key) === EXPLICIT_CONSENT_KEY);
+}
+
+export function trustedSemanticMemory(memory) {
+  if (!hasExplicitMemoryConsent(memory)) return emptySemanticMemory();
+  return {
+    creator: {
+      summary: "",
+      facts: (Array.isArray(memory?.creator?.facts) ? memory.creator.facts : [])
+        .filter((fact) => normalizeMemoryKey(fact?.key) !== EXPLICIT_CONSENT_KEY),
+    },
+    project: { summary: "", facts: [] },
+  };
+}
+
+export function explicitConsentMemoryUpdate(update, storedMemory, forgetEverything = false) {
+  const existingFacts = Array.isArray(storedMemory?.creator?.facts) ? storedMemory.creator.facts : [];
+  const untrustedKeys = hasExplicitMemoryConsent(storedMemory)
+    ? []
+    : existingFacts.map((fact) => normalizeMemoryKey(fact?.key)).filter(Boolean);
+  const forgetKeys = forgetEverything
+    ? existingFacts.map((fact) => normalizeMemoryKey(fact?.key)).filter(Boolean)
+    : [];
+  return {
+    creatorSummary: typeof update?.creatorSummary === "string" ? update.creatorSummary : undefined,
+    creatorFacts: [
+      ...(Array.isArray(update?.creatorFacts) ? update.creatorFacts : []),
+      EXPLICIT_CONSENT_FACT,
+    ],
+    removeCreatorKeys: Array.from(new Set([
+      ...(Array.isArray(update?.removeCreatorKeys) ? update.removeCreatorKeys : []),
+      ...untrustedKeys,
+      ...forgetKeys,
+    ])),
   };
 }
 

@@ -1,8 +1,8 @@
-import { explicitPublicYouTubeChannelName, explicitYouTubeVideoId, looksLikeAttachedMediaAnalysis, looksLikeCreatorMemoryRequest, looksLikePromptAttack, looksLikePublicYouTubeResearchRequest, looksLikeYouTubeCreationGuidance, requestedCreativeDeliverables, shouldGenerateImmediately } from "./guards.mjs";
+import { explicitPublicYouTubeChannelName, explicitYouTubeVideoId, looksLikeAttachedMediaAnalysis, looksLikeCreatorMemoryRequest, looksLikePromptAttack, looksLikePublicYouTubeResearchRequest, looksLikeYouTubeCreationGuidance, requestedCreativeDeliverables, requestedTitleCount, resolveRequestedCreativeDeliverables, shouldGenerateImmediately } from "./guards.mjs";
 import { isSimpleScriptFollowUp, resolveSelectedIdea } from "./conversation-context.mjs";
 import { sanitizeChannelFit } from "./idea-grounding.mjs";
-import { emptySemanticMemory, formatSemanticMemory, normalizeMemoryKey, selectRelevantSemanticMemory } from "./semantic-memory.mjs";
-import { requestedConnectedVideoCount, requestedResearchWindowHours, requestsBroadPopularVideos, requestsLatestConnectedVideo, resolveResearchAccess } from "./research-policy.mjs";
+import { emptySemanticMemory, explicitConsentMemoryUpdate, formatSemanticMemory, normalizeMemoryKey, selectRelevantSemanticMemory, trustedSemanticMemory } from "./semantic-memory.mjs";
+import { requestedConnectedVideoCount, requestedResearchWindowHours, requestsBroadPopularVideos, requestsLatestConnectedVideo, resolveConversationPublicYouTubeChannel, resolveResearchAccess } from "./research-policy.mjs";
 import { storyboardSheetUrls } from "./youtube-storyboards.mjs";
 import { algorithmStrategyForIntent } from "./youtube-strategy.mjs";
 import { STANLEY_VOICE } from "./stanley-voice.mjs";
@@ -15,10 +15,11 @@ import { readSemanticMemory, recordDebugConversationTurn, updateSemanticMemory }
 import type { SemanticMemory, SemanticMemoryUpdate } from "@/db/memory";
 import { runAgent } from "./agent/kernel";
 import type { AgentActivityEvent } from "./agent/kernel";
-import { GeminiProviderAdapter, generateStructured } from "./agent/provider";
+import { GeminiProviderAdapter, generateStructured, isRetryableTransportError } from "./agent/provider";
 import { createYouTubeToolRegistry, researchFromToolResults } from "./agent/youtube-tools";
 import type { AgentResult, ModelContent } from "./agent/types";
 import { publicDemoCreator } from "../../creator-profiles";
+import { addWorkflowGuidance, workflowContinuationForReply } from "../../workflow-next-actions.mjs";
 
 type GenerateRequest = {
   topic?: unknown;
@@ -150,6 +151,20 @@ const titleSchema = {
   },
   required: ["reply", "titles"],
 } as const;
+
+function titleSchemaFor(count: number) {
+  return {
+    ...titleSchema,
+    properties: {
+      ...titleSchema.properties,
+      titles: {
+        ...titleSchema.properties.titles,
+        minItems: count,
+        maxItems: count,
+      },
+    },
+  };
+}
 
 const titleChatSchema = {
   type: "object",
@@ -935,11 +950,11 @@ For researchTopic, return the shortest concrete central subject of the current v
       : intent.endsWith("_work")
         ? intent.replace("_work", "") as CreativeDeliverable
         : null;
-    const deliverables = Array.from(new Set<CreativeDeliverable>([
-      ...modelDeliverables,
-      ...explicitDeliverables,
-      ...(intentDeliverable && supportedDeliverables.includes(intentDeliverable) ? [intentDeliverable] : []),
-    ]));
+    const deliverables = resolveRequestedCreativeDeliverables(
+      modelDeliverables,
+      explicitDeliverables,
+      intentDeliverable,
+    ) as CreativeDeliverable[];
     const fallbackBrief = cleanText(topic === currentMessage ? currentMessage : `${topic}. ${currentMessage}`, 900);
     return {
       intent,
@@ -1052,10 +1067,10 @@ async function generateResponse(request: Request, emitProgress?: ProgressEmitter
   const inputAttachments = normalizeAttachments(body.attachments);
   if (!topic) return Response.json({ error: "A video idea is required." }, { status: 400 });
   if (requestedSessionId && !/^[a-zA-Z0-9_-]{8,80}$/.test(requestedSessionId)) {
-    return Response.json({ error: "The chat session is invalid. Start a new chat." }, { status: 400 });
+    return Response.json({ error: "The video project is invalid. Start a new video." }, { status: 400 });
   }
   if (messages === null || (messages.length > 0 && messages.at(-1)?.role !== "user")) {
-    return Response.json({ error: "The conversation format is invalid. Start a new title chat." }, { status: 400 });
+    return Response.json({ error: "The conversation format is invalid. Start a new video." }, { status: 400 });
   }
   if (inputAttachments === null) {
     return Response.json({ error: "One of the attachments is too large or is not supported." }, { status: 400 });
@@ -1077,8 +1092,13 @@ async function generateResponse(request: Request, emitProgress?: ProgressEmitter
     return Response.json({ reply: blockedReply, titles: [], blocked: true, scope: "prompt_attack", model: MODEL });
   }
   const conversation = messages || [];
-  const researchAccess = resolveResearchAccess(currentMessage, inputAttachments.some((attachment) => attachment.kind === "youtube"));
-  const namedPublicChannel = !researchAccess.channelSnapshot ? explicitPublicYouTubeChannelName(currentMessage) : "";
+  const directPublicChannel = explicitPublicYouTubeChannelName(currentMessage);
+  const conversationPublicChannel = resolveConversationPublicYouTubeChannel(conversation, currentMessage);
+  const researchGateMessage = conversationPublicChannel && !directPublicChannel
+    ? `${currentMessage}\nAnalyze ${conversationPublicChannel}'s YouTube channel.`
+    : currentMessage;
+  const researchAccess = resolveResearchAccess(researchGateMessage, inputAttachments.some((attachment) => attachment.kind === "youtube"));
+  const namedPublicChannel = !researchAccess.channelSnapshot ? conversationPublicChannel : "";
   const connectedVideoLimit = requestedConnectedVideoCount(currentMessage) || 12;
   const researchWindowHours = requestedResearchWindowHours(currentMessage);
   const forceMostPopularChart = requestsBroadPopularVideos(currentMessage);
@@ -1097,23 +1117,39 @@ async function generateResponse(request: Request, emitProgress?: ProgressEmitter
     ? `Selected public demo creator: ${demoCreator.title} (${demoCreator.handle}). Channel niche: ${demoCreator.niche}. Use public channel evidence only. This is a simulation, not an authenticated session and not access to the creator's private analytics.`
     : channelContext(youtubeSession?.profile);
   let ownerId = requestContext?.ownerId || "";
+  let storedSemanticMemory = emptySemanticMemory() as SemanticMemory;
   let semanticMemory = emptySemanticMemory() as SemanticMemory;
   try {
     if (!ownerId) ownerId = await resolveMemoryOwner(request.url, youtubeSession);
-    if (!demoCreator) semanticMemory = await readSemanticMemory(ownerId, projectId);
+    if (!demoCreator) {
+      storedSemanticMemory = await readSemanticMemory(ownerId, projectId);
+      semanticMemory = trustedSemanticMemory(storedSemanticMemory) as SemanticMemory;
+    }
   } catch (error) {
     console.warn("Semantic memory was unavailable; continuing without it.", error);
   }
   const initialMemoryContext = formatSemanticMemory(semanticMemory);
   const fastScriptFollowUp = isSimpleScriptFollowUp(conversation, currentMessage);
+  const workflowContinuation = workflowContinuationForReply(currentMessage, conversation);
   const fastScriptScope: ScopeResult = {
     intent: "script_work",
     deliverables: ["script"],
     readyForGeneration: true,
     reason: "simple_script_follow_up",
-    resolvedBrief: cleanText(semanticMemory.project.summary || topic, 900),
+    resolvedBrief: cleanText(topic, 900),
     researchTopic: "",
   };
+  const workflowContinuationScope: ScopeResult | null = workflowContinuation?.id === "idea"
+    ? { intent: "idea_work", deliverables: ["idea"], readyForGeneration: true, reason: "affirmed_research_idea_step", resolvedBrief: cleanText(topic, 900), researchTopic: "" }
+    : workflowContinuation?.id === "script"
+    ? { intent: "script_work", deliverables: ["script"], readyForGeneration: true, reason: "affirmed_script_step", resolvedBrief: cleanText(topic, 900), researchTopic: "" }
+    : workflowContinuation?.id === "filming"
+      ? { intent: "filming_work", deliverables: ["filming_plan"], readyForGeneration: true, reason: "affirmed_filming_step", resolvedBrief: cleanText(topic, 900), researchTopic: "" }
+      : workflowContinuation?.id === "thumbnail"
+        ? { intent: "thumbnail_work", deliverables: ["thumbnail"], readyForGeneration: true, reason: "affirmed_thumbnail_step", resolvedBrief: cleanText(topic, 900), researchTopic: "" }
+        : workflowContinuation?.id === "review"
+          ? { intent: "youtube_guidance", deliverables: [], readyForGeneration: true, reason: "affirmed_review_step", resolvedBrief: cleanText(topic, 900), researchTopic: "" }
+          : null;
   await emitProgress?.({
     id: "intent",
     label: "Understanding your request",
@@ -1122,15 +1158,15 @@ async function generateResponse(request: Request, emitProgress?: ProgressEmitter
     kind: "thinking",
   });
   const [scope, memoryUpdate, memorySelection] = await Promise.all([
-    fastScriptFollowUp
+    workflowContinuationScope
+      ? Promise.resolve(workflowContinuationScope)
+      : fastScriptFollowUp
       ? Promise.resolve(fastScriptScope)
       : classifyRequest(geminiKey, topic, conversation, classifierMessage, mode, selectedChannelContext, inputAttachments.length > 0, request.signal),
-    fastScriptFollowUp
+    workflowContinuationScope || fastScriptFollowUp || demoCreator || !/^(?:please\s+)?(?:remember|save|note|forget|remove|delete)\b/i.test(currentMessage)
       ? Promise.resolve({} as SemanticMemoryUpdate)
-      : demoCreator
-        ? Promise.resolve({} as SemanticMemoryUpdate)
-        : extractSemanticMemory(geminiKey, conversation, currentMessage, semanticMemory, request.signal),
-    fastScriptFollowUp
+      : extractSemanticMemory(geminiKey, conversation, currentMessage, semanticMemory, request.signal),
+    workflowContinuationScope || fastScriptFollowUp
       ? Promise.resolve({ relevantCreatorKeys: [] as string[], relevantProjectKeys: [] as string[] })
       : demoCreator
         ? Promise.resolve({ relevantCreatorKeys: [] as string[], relevantProjectKeys: [] as string[] })
@@ -1172,11 +1208,16 @@ async function generateResponse(request: Request, emitProgress?: ProgressEmitter
     resolvedBrief,
     Boolean(activeYouTubeSession || demoCreator),
   );
-  if (ownerId && !demoCreator && scope.intent !== "social" && !fastScriptFollowUp) {
+  const mutatesDurableMemory = scope.intent === "memory"
+    && /^(?:please\s+)?(?:remember|save|note|forget|remove|delete)\b/i.test(currentMessage);
+  if (ownerId && !demoCreator && mutatesDurableMemory) {
     try {
-      semanticMemory = await updateSemanticMemory(ownerId, projectId, scope.intent === "memory"
-        ? memoryUpdate
-        : { ...memoryUpdate, projectSummary: resolvedBrief });
+      storedSemanticMemory = await updateSemanticMemory(ownerId, projectId, explicitConsentMemoryUpdate(
+        memoryUpdate,
+        storedSemanticMemory,
+        /^(?:please\s+)?(?:forget|remove|delete)\b[^.!?]{0,100}\beverything\b/i.test(currentMessage),
+      ));
+      semanticMemory = trustedSemanticMemory(storedSemanticMemory) as SemanticMemory;
     } catch (error) {
       console.warn("Semantic memory update failed; continuing with the current conversation.", error);
     }
@@ -1185,7 +1226,7 @@ async function generateResponse(request: Request, emitProgress?: ProgressEmitter
   const relevantMemory = selectRelevantSemanticMemory(
     semanticMemory,
     memorySelection.relevantCreatorKeys,
-    memorySelection.relevantProjectKeys,
+    [],
     currentMessage,
   );
   const memoryContext = formatSemanticMemory(relevantMemory);
@@ -1236,7 +1277,7 @@ async function generateResponse(request: Request, emitProgress?: ProgressEmitter
     apiKey: youtubeKey,
     session: activeYouTubeSession,
     researchTopic,
-    researchContext: currentMessage,
+    researchContext: researchGateMessage,
     requestedPublishedWithinHours: researchWindowHours,
     forceMostPopularChart,
     allowPublicSearch: demoCreator ? true : researchAccess.publicSearch || allowSemanticPublicResearch,
@@ -1512,8 +1553,14 @@ Answer the creator's exact question directly. If the channel snapshot has no upl
           kind: "tool",
         });
       }
-      if (namedPublicChannel && prefetchedTool === "youtube_search_reference_videos" && prefetchedEvidence?.status === "empty") {
-        const reply = `I searched YouTube for ${namedPublicChannel}, but I couldn't verify one unique channel owned by them. Multiple or lookalike channels can use the same display name, so I won't treat fan uploads or interview clips as their channel. Send me the exact YouTube channel URL and I'll analyze that channel; otherwise, I can research specific ${namedPublicChannel} interviews and appearances instead.`;
+      const namedChannelData = prefetchedEvidence?.data && typeof prefetchedEvidence.data === "object"
+        ? prefetchedEvidence.data as { videos?: unknown[] }
+        : {};
+      const hasNamedChannelEvidence = Boolean(prefetchedEvidence?.ok && Array.isArray(namedChannelData.videos) && namedChannelData.videos.length > 0);
+      if (namedPublicChannel && prefetchedTool === "youtube_search_reference_videos" && !hasNamedChannelEvidence) {
+        const reply = prefetchedEvidence?.ok
+          ? `I searched YouTube for ${namedPublicChannel}, but I couldn't verify one unique channel owned by them. Multiple or lookalike channels can use the same display name, so I won't treat fan uploads or interview clips as their channel. Send me the exact YouTube channel URL and I'll analyze that channel; otherwise, I can research specific ${namedPublicChannel} interviews and appearances instead.`
+          : `I couldn't complete the YouTube lookup for ${namedPublicChannel}, so I don't have verified channel evidence to analyze yet. I won't fill that gap with memory or assumptions. Try again, or send the exact YouTube channel URL.`;
         const run: AgentResult = {
           output: { reply },
           text: JSON.stringify({ reply }),
@@ -1652,6 +1699,7 @@ TRANSCRIPT_END
       || scope.reason === "connected_channel_research"
       || scope.reason === "public_youtube_research"
       || scope.intent === "youtube_research"
+      || Boolean(namedPublicChannel && researchAccess.publicSearch)
     )
       ? await createResearchLayer(scope.intent !== "youtube_research")
       : null;
@@ -1972,6 +2020,7 @@ ${scope.intent === "social"
     }
 
     if (!hasExistingArtifact && workflowIntent === "title_work") {
+      const titleCount = requestedTitleCount(currentMessage, 12);
       await emitProgress?.({
         id: "title-package",
         label: "Building title directions",
@@ -1980,8 +2029,8 @@ ${scope.intent === "social"
         kind: "thinking",
       });
       const titleRun = await creativeJson(
-        `CREATOR_BRIEF_START\n${resolvedBrief}\nCREATOR_BRIEF_END${researchLayer ? `\n\nYOUTUBE_EVIDENCE_HANDOFF_START\n${researchLayer.reply}\n${researchLayer.evidence}\nYOUTUBE_EVIDENCE_HANDOFF_END\nUse this completed evidence handoff and do not research again.` : ""}\n\nWrite exactly 12 genuinely different title directions. Open with one plain sentence of no more than 22 words and never say you structured, designed, built, or generated the options. Cover a deliberate mix of curiosity, stakes, transformation, specificity, contrarian framing, personal story, useful promise, and surprising tension. Optimize honest appeal for the most plausible target viewer. Every title must promise something the supplied idea, media, or proof can actually deliver, and no title may imply guaranteed performance. ${researchLayer ? "Evidence is a hard vocabulary and claim boundary. Do not imply any fact, scene, quote, result, genre, chart history, geography, age, cultural reputation, or audience reaction absent from the evidence. A recognizable video title does not authorize background knowledge. Reject any candidate containing a number, proper noun, accolade, causal claim, historical claim, or descriptive adjective that the evidence does not directly support." : "Decide whether current comparable-video evidence would materially improve this first package; retrieve it when useful, but do not search merely to satisfy a ritual."}`,
-        titleSchema,
+        `CREATOR_BRIEF_START\n${resolvedBrief}\nCREATOR_BRIEF_END${researchLayer ? `\n\nYOUTUBE_EVIDENCE_HANDOFF_START\n${researchLayer.reply}\n${researchLayer.evidence}\nYOUTUBE_EVIDENCE_HANDOFF_END\nUse this completed evidence handoff and do not research again.` : ""}\n\nWrite exactly ${titleCount} genuinely different title ${titleCount === 1 ? "direction" : "directions"}. Open with one plain sentence of no more than 22 words and never say you structured, designed, built, or generated the options. Cover a deliberate mix of curiosity, stakes, transformation, specificity, contrarian framing, personal story, useful promise, and surprising tension when the requested count allows it. Optimize honest appeal for the most plausible target viewer. Every title must promise something the supplied idea, media, or proof can actually deliver, and no title may imply guaranteed performance. ${researchLayer ? "Evidence is a hard vocabulary and claim boundary. Do not imply any fact, scene, quote, result, genre, chart history, geography, age, cultural reputation, or audience reaction absent from the evidence. A recognizable video title does not authorize background knowledge. Reject any candidate containing a number, proper noun, accolade, causal claim, historical claim, or descriptive adjective that the evidence does not directly support." : "Decide whether current comparable-video evidence would materially improve this first package; retrieve it when useful, but do not search merely to satisfy a ritual."}`,
+        titleSchemaFor(titleCount),
         2400,
         !researchLayer,
       );
@@ -1989,8 +2038,8 @@ ${scope.intent === "social"
       if (unresolvedChannel) return unresolvedChannel;
       const titleResult = titleRun.output as { reply?: unknown; titles?: unknown };
       const research = researchLayer?.research || researchFromToolResults(titleRun.toolResults);
-      const titles = normalizeTitles(titleResult.titles);
-      if (titles.length !== 12) throw new Error(`Gemini returned ${titles.length} usable titles`);
+      const titles = normalizeTitles(titleResult.titles, titleCount);
+      if (titles.length !== titleCount) throw new Error(`Gemini returned ${titles.length} usable titles`);
       await emitProgress?.({
         id: "title-package",
         label: "Building title directions",
@@ -2256,7 +2305,7 @@ FINAL_VIDEO_PACKAGE_END`)
     const result = titleRun.output as { reply?: unknown; titles?: unknown };
     const reply = cleanReply(result.reply, 420);
     if (!reply) throw new Error("Gemini returned an empty title response");
-    const titles = normalizeTitles(result.titles).map((item) => ({ ...item, id: crypto.randomUUID(), characterCount: Array.from(item.title).length }));
+    const titles = normalizeTitles(result.titles, requestedTitleCount(currentMessage, 12)).map((item) => ({ ...item, id: crypto.randomUUID(), characterCount: Array.from(item.title).length }));
     if (requestedDeliverables.has("thumbnail")) {
       const thumbnailArtifact = await renderThumbnailArtifact(`${resolvedBrief}\n\nSELECTED_TITLE_FOR_THUMBNAIL: ${titles[0]?.title || resolvedBrief}`);
       const titleAgent = agentMetadata(titleRun);
@@ -2286,6 +2335,11 @@ FINAL_VIDEO_PACKAGE_END`)
     });
   } catch (error) {
     console.error("YouTube creation conversation failed:", error);
+    if (isRetryableTransportError(error)) {
+      return Response.json({
+        error: "Stanley understood the prompt, but the model connection dropped after retrying. Send it again.",
+      }, { status: 503 });
+    }
     if (error instanceof Error && /Gemini image 429:/.test(error.message)) {
       return Response.json({
         error: "Thumbnail generation is connected, but this Gemini API project needs paid billing. Image generation has no free-tier quota.",
@@ -2309,7 +2363,11 @@ FINAL_VIDEO_PACKAGE_END`)
 
 export async function POST(request: Request) {
   const wantsActivityStream = request.headers.get("accept")?.includes("application/x-ndjson");
-  if (!wantsActivityStream) return generateResponse(request);
+  if (!wantsActivityStream) {
+    const response = await generateResponse(request);
+    if (!response.ok) return response;
+    return Response.json(addWorkflowGuidance(await response.json()), { status: response.status });
+  }
 
   // Buffer the small JSON envelope before returning the streaming response.
   // Some runtimes close the original inbound body as soon as POST returns.
@@ -2345,13 +2403,14 @@ export async function POST(request: Request) {
               activity: { id: "answer", label: "Writing the answer", detail: "Ready", status: "complete", kind: "answer" },
             });
           }
-          const payload = await response.json();
+          const rawPayload = await response.json();
+          const payload = response.ok ? addWorkflowGuidance(rawPayload) : rawPayload;
           try {
             const debugRequest = JSON.parse(requestBody) as Record<string, unknown>;
             const projectId = typeof debugRequest.sessionId === "string" && /^[a-zA-Z0-9_-]{8,80}$/.test(debugRequest.sessionId)
               ? debugRequest.sessionId
               : "";
-            if (projectId) {
+            if (process.env.STANLEY_DEBUG_CONVERSATIONS !== "false" && projectId) {
               const rawAttachments = Array.isArray(debugRequest.attachments) ? debugRequest.attachments : [];
               const attachments = rawAttachments.slice(0, MAX_ATTACHMENTS).map((attachment) => {
                 if (!attachment || typeof attachment !== "object") return {};

@@ -72,7 +72,7 @@ const twin = {
 
 test("expands Creator Twin, restores the dashboard, and reuses Create", async ({ page }) => {
   const analyticsRanges: string[] = [];
-  await page.addInitScript(() => localStorage.setItem("stanley-onboarding-v1", "skipped"));
+  await page.addInitScript(() => localStorage.setItem("stanley-onboarding-v1", "complete"));
   await page.route("**/api/youtube/status", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ configured: true, connected: true, profile }) }));
   await page.route("**/api/youtube/videos", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ videos: [video] }) }));
   await page.route("**/api/youtube/analytics?**", async (route) => {
@@ -92,48 +92,37 @@ test("expands Creator Twin, restores the dashboard, and reuses Create", async ({
 
   await page.goto("/");
   await waitForApp(page);
-  await page.getByRole("button", { name: "Dashboard", exact: true }).click();
+  await page.getByRole("link", { name: "Dashboard", exact: true }).click();
 
-  await expect(page.getByLabel("Show results from")).toHaveValue("30");
-  const viewsMetric = page.locator(".dashboard-metrics article").first().locator(".dashboard-metric-value strong");
+  await expect(page.getByRole("button", { name: "30D" })).toHaveAttribute("aria-pressed", "true");
+  const viewsMetric = page.locator('[data-dashboard-signal-metric="views"] > strong');
   await expect(viewsMetric).toHaveText("84K");
-  await page.getByLabel("Show results from").selectOption("180");
-  await expect(page.getByLabel("Show results from")).toHaveValue("180");
+  await page.getByRole("button", { name: "6M" }).click();
+  await expect(page.getByRole("button", { name: "6M" })).toHaveAttribute("aria-pressed", "true");
   await expect(viewsMetric).toHaveText("84K");
   await expect.poll(() => analyticsRanges.at(-1)).toBe("180");
   await expect(viewsMetric).toHaveText("168K");
   await expect(page.getByRole("heading", { name: "Top videos" })).toBeVisible();
+  const analyticsRequestsBeforeTwin = analyticsRanges.length;
+  await page.getByRole("link", { name: "Creator Twin", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Find your creative twin." })).toBeVisible();
   await page.getByRole("button", { name: "Find my Creator Twin" }).click();
-  await expect(page.getByText("Finding your Creator Twin")).toBeVisible();
-  await expect(page.getByText("Understanding your niche")).toBeVisible();
-  await expect(page.getByText("Choosing the useful match")).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Top videos" })).toBeHidden();
-  await expect(page.getByRole("heading", { name: "Future Creator" })).toBeVisible({ timeout: 3_500 });
-  await expect(page.getByText("87%similar")).toBeVisible();
-  await expect(page.getByText("Why Stanley chose this creator")).toBeVisible();
-  await expect(page.getByText("What works better for them")).toBeHidden();
-  await expect(page.getByText("Connect with them")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Future Creator", exact: true })).toBeVisible({ timeout: 7_000 });
+  await expect(page.getByLabel("87% pattern match")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Why Stanley chose Future Creator" })).toBeVisible();
   await expect(page.locator('a[href="https://instagram.com/futurecreator"]')).toHaveAttribute("target", "_blank");
   await expect(page.locator('a[href="https://x.com/futurecreator"]')).toHaveAttribute("target", "_blank");
-  await expect(page.locator('.dashboard-twin-connect a[href="https://www.youtube.com/@futurecreator"]')).toHaveCount(0);
-  await page.getByRole("tab", { name: "Differences" }).click();
-  await expect(page.getByText("What works better for them")).toBeVisible();
-  await page.getByRole("tab", { name: "Videos (1)" }).click();
-  await expect(page.getByText("Videos you can learn from")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Learn from this video" })).toBeVisible();
-
-  await page.getByRole("button", { name: "Close Creator Twin" }).click();
-  await expect(page.getByRole("heading", { name: "Top videos" })).toBeVisible();
-  await page.getByRole("button", { name: "Find my Creator Twin" }).click();
-  await expect(page.getByRole("heading", { name: "Future Creator" })).toBeVisible({ timeout: 3_500 });
-  await page.getByRole("button", { name: "Make a new idea inspired by this creator" }).click();
+  await page.getByRole("tab", { name: "Key differences" }).click();
+  await expect(page.getByRole("table", { name: "Differences between Future Creator and your channel" })).toBeVisible();
+  await page.getByRole("tab", { name: "Top videos (1)" }).click();
+  await expect(page.getByRole("button", { name: "Study video" })).toBeVisible();
+  await page.getByRole("button", { name: "Build from this pattern" }).click();
 
   await expect(page.getByLabel("Message Stanley")).toHaveValue(/Title pattern: number-led titles/);
   await expect(page.getByText("I Tried the 5AM Habit for 30 Days")).toBeVisible();
 
-  const analyticsRequestsBeforeReturn = analyticsRanges.length;
-  await page.getByRole("button", { name: "Dashboard", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Future Creator" })).toBeVisible();
-  await expect(page.getByText("Finding your Creator Twin")).toBeHidden();
-  await expect.poll(() => analyticsRanges.length).toBe(analyticsRequestsBeforeReturn);
+  await page.getByRole("link", { name: "Creator Twin", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Future Creator", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Find a fresh match" })).toBeVisible();
+  await expect.poll(() => analyticsRanges.length).toBe(analyticsRequestsBeforeTwin);
 });

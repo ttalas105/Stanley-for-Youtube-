@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { explicitPublicYouTubeChannelName, explicitYouTubeVideoId, hasTitlePretext, looksLikeAttachedMediaAnalysis, looksLikeCreatorMemoryRequest, looksLikePromptAttack, looksLikePublicYouTubeResearchRequest, looksLikeYouTubeCreationGuidance, requestedCreativeDeliverables, shouldGenerateImmediately } from "../app/api/generate-titles/guards.mjs";
+import { explicitPublicYouTubeChannelName, explicitYouTubeVideoId, hasTitlePretext, looksLikeAttachedMediaAnalysis, looksLikeCreatorMemoryRequest, looksLikePromptAttack, looksLikePublicYouTubeResearchRequest, looksLikeYouTubeCreationGuidance, requestedCreativeDeliverables, requestedTitleCount, resolveRequestedCreativeDeliverables, shouldGenerateImmediately } from "../app/api/generate-titles/guards.mjs";
 
 test("extracts an explicitly named public YouTube channel", () => {
   assert.equal(explicitPublicYouTubeChannelName("Can you go to David Goggins' YouTube channel and analyze it?"), "David Goggins");
@@ -9,6 +9,7 @@ test("extracts an explicitly named public YouTube channel", () => {
   assert.equal(explicitPublicYouTubeChannelName("Use https://www.youtube.com/@example.creator for this"), "@example.creator");
   assert.equal(explicitPublicYouTubeChannelName("Analyze youtube.com/channel/UC1234567890123456789012"), "UC1234567890123456789012");
   assert.equal(explicitPublicYouTubeChannelName("Look at my YouTube channel"), "");
+  assert.equal(explicitPublicYouTubeChannelName("Do some research on a YouTuber named Jynxi and tell me why he does so well."), "Jynxi");
 });
 
 const pretextPrompts = [
@@ -58,6 +59,29 @@ test("keeps every explicitly requested YouTube deliverable", () => {
   );
   assert.deepEqual(requestedCreativeDeliverables("What makes a strong thumbnail?"), []);
   assert.deepEqual(requestedCreativeDeliverables("How should I film this video?"), ["filming_plan"]);
+});
+
+test("does not regenerate referenced artifacts when only one new deliverable is requested", () => {
+  assert.deepEqual(
+    requestedCreativeDeliverables("Create the thumbnail using the idea, title, script, and filming plan we developed."),
+    ["thumbnail"],
+  );
+  assert.deepEqual(requestedCreativeDeliverables("Only give me the title."), ["title"]);
+  assert.deepEqual(requestedCreativeDeliverables("Only give me three stronger titles for this video."), ["title"]);
+  assert.deepEqual(requestedCreativeDeliverables("Give me only 3 titles, not another idea or script."), ["title"]);
+  assert.deepEqual(requestedCreativeDeliverables("Thumbnail only."), ["thumbnail"]);
+  assert.deepEqual(
+    resolveRequestedCreativeDeliverables(["idea", "script", "title", "thumbnail"], ["title"], "title"),
+    ["title"],
+  );
+});
+
+test("honors an explicitly requested title count", () => {
+  assert.equal(requestedTitleCount("Give me three stronger titles for this video."), 3);
+  assert.equal(requestedTitleCount("Write one YouTube title about sourdough."), 1);
+  assert.equal(requestedTitleCount("Give me 20 titles."), 12);
+  assert.equal(requestedTitleCount("Give me title options."), 12);
+  assert.equal(requestedTitleCount("Make these shorter."), 12);
 });
 
 test("extracts explicit YouTube video IDs and recognizes suggestion verbs", () => {

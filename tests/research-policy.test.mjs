@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { requestedConnectedVideoCount, requestedResearchWindowHours, requestsBroadPopularVideos, requestsLatestConnectedVideo, resolveResearchAccess } from "../app/api/generate-titles/research-policy.mjs";
+import { explicitPublicYouTubeChannelName, looksLikePublicYouTubeResearchRequest } from "../app/api/generate-titles/guards.mjs";
+import { requestedConnectedVideoCount, requestedResearchWindowHours, requestsBroadPopularVideos, requestsLatestConnectedVideo, resolveConversationPublicYouTubeChannel, resolveResearchAccess } from "../app/api/generate-titles/research-policy.mjs";
 
 test("does not treat a viral creative premise as permission to research", () => {
   assert.deepEqual(
@@ -55,6 +56,28 @@ test("keeps connected-channel analysis behind its own explicit request", () => {
     resolveResearchAccess("Review my recent metrics."),
     { publicSearch: false, channelSnapshot: true, videoEvidence: true },
   );
+});
+
+test("recognizes a natural named-creator lookup without requiring the word channel", () => {
+  assert.equal(explicitPublicYouTubeChannelName("Look up Will Tennyson"), "Will Tennyson");
+  assert.equal(explicitPublicYouTubeChannelName("Research the YouTuber Colin and Samir."), "Colin and Samir");
+  assert.equal(explicitPublicYouTubeChannelName("Do some research on a YouTuber named Jynxi and tell me why he does so well."), "Jynxi");
+  assert.equal(explicitPublicYouTubeChannelName("Research a creator called Jynxzi."), "Jynxzi");
+  assert.equal(looksLikePublicYouTubeResearchRequest("Look up Will Tennyson"), true);
+  assert.deepEqual(
+    resolveResearchAccess("Look up Will Tennyson"),
+    { publicSearch: true, channelSnapshot: false, videoEvidence: true },
+  );
+});
+
+test("keeps a named public creator across a relational follow-up", () => {
+  const messages = [
+    { role: "user", content: "Look up Will Tennyson" },
+    { role: "assistant", content: "I verified the channel." },
+    { role: "user", content: "What should I make based on him?" },
+  ];
+  assert.equal(resolveConversationPublicYouTubeChannel(messages, messages.at(-1).content), "Will Tennyson");
+  assert.equal(resolveConversationPublicYouTubeChannel(messages, "Give me an unrelated title about gardening."), "");
 });
 
 test("recognizes bounded recent videos on the connected channel", () => {

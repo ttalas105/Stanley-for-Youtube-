@@ -3,10 +3,13 @@ import test from "node:test";
 
 import {
   emptySemanticMemory,
+  explicitConsentMemoryUpdate,
   formatSemanticMemory,
+  hasExplicitMemoryConsent,
   mergeMemoryFacts,
   normalizeMemoryFact,
   selectRelevantSemanticMemory,
+  trustedSemanticMemory,
 } from "../app/api/generate-titles/semantic-memory.mjs";
 
 test("preserves named creator relationships as reusable memory", () => {
@@ -111,4 +114,36 @@ test("does not turn a broad niche match into a named-pet assumption", () => {
 
   assert.deepEqual(selectRelevantSemanticMemory(memory, ["pet_rudy"], [], "Give me dog-training video ideas.").creator.facts, []);
   assert.equal(selectRelevantSemanticMemory(memory, ["pet_rudy"], [], "Write a video about my dog.").creator.facts[0]?.key, "pet_rudy");
+});
+
+test("ignores legacy auto-captured memory until the creator explicitly opts in", () => {
+  const legacy = {
+    creator: { summary: "Assumed profile", facts: [{ key: "favorite_pet", value: "cats", category: "preference" }] },
+    project: { summary: "Stale video", facts: [{ key: "subject", value: "old idea", category: "subject" }] },
+  };
+  assert.equal(hasExplicitMemoryConsent(legacy), false);
+  assert.deepEqual(trustedSemanticMemory(legacy), emptySemanticMemory());
+
+  const update = explicitConsentMemoryUpdate({
+    creatorFacts: [{ key: "favorite_food", value: "tacos", category: "preference" }],
+  }, legacy);
+  assert.deepEqual(update.removeCreatorKeys, ["favorite_pet"]);
+  assert.equal(update.creatorFacts.some((fact) => fact.key === "stanley_memory_consent_v2"), true);
+});
+
+test("trusted memory exposes only opted-in creator facts and never project cache", () => {
+  const trusted = trustedSemanticMemory({
+    creator: {
+      summary: "Do not inject summaries",
+      facts: [
+        { key: "stanley_memory_consent_v2", value: "enabled", category: "identity" },
+        { key: "usual_tone", value: "dry and concise", category: "preference" },
+      ],
+    },
+    project: { summary: "Random old brief", facts: [{ key: "subject", value: "old launch", category: "subject" }] },
+  });
+  assert.deepEqual(trusted, {
+    creator: { summary: "", facts: [{ key: "usual_tone", value: "dry and concise", category: "preference" }] },
+    project: { summary: "", facts: [] },
+  });
 });

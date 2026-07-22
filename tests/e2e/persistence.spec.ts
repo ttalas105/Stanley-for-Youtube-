@@ -200,7 +200,7 @@ test("stores chat history and restores it after reload", async ({ page }) => {
   await expect(page.locator(".title-history button").filter({ hasText: topics.primary })).toBeVisible();
   await page.reload();
   await waitForApp(page);
-  await expect(page.getByRole("heading", { name: "Chats" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Video projects" })).toBeVisible();
   await expect(page.locator(".title-history button").filter({ hasText: topics.primary })).toBeVisible();
 });
 
@@ -209,10 +209,10 @@ test("starts a new unified chat without deleting history", async ({ page }) => {
   await openApp(page);
   await generate(page);
 
-  await page.getByRole("button", { name: "New chat", exact: true }).click();
+  await page.getByRole("link", { name: "New video", exact: true }).click();
   await expect(page.getByLabel("Message Stanley")).toHaveValue("");
   await expect(page.getByLabel("Message Stanley")).toBeFocused();
-  await expect(page.getByRole("heading", { name: "Where should we start?" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "What should we make next?" })).toBeVisible();
   await expect(page.getByLabel("Start with a YouTube task")).toBeVisible();
   await expect(page.locator(".title-history button").filter({ hasText: topics.primary })).toBeVisible();
 });
@@ -227,7 +227,7 @@ test("reopens an earlier result set from chat history", async ({ page }) => {
   });
   await openApp(page);
   await generate(page, topics.primary);
-  await page.getByRole("button", { name: "New chat", exact: true }).click();
+  await page.getByRole("link", { name: "New video", exact: true }).click();
   await expect(page.getByRole("button", { name: "Copy session ID" })).toHaveCount(0);
   await page.getByLabel("Message Stanley").fill(topics.secondary);
   await page.getByRole("button", { name: "Send message" }).click();
@@ -245,7 +245,7 @@ test("caps stored chat history at eight sessions and shows the latest six", asyn
 
   for (let index = 1; index <= 9; index += 1) {
     if (index > 1) {
-      await page.getByRole("button", { name: "New chat", exact: true }).click();
+      await page.getByRole("link", { name: "New video", exact: true }).click();
       await expect(page.getByRole("button", { name: "Copy session ID" })).toHaveCount(0);
     }
     const topic = `A sufficiently detailed creator test topic number ${index}`;

@@ -6,7 +6,7 @@ test("keeps the mobile unified chat inside the viewport", async ({ page }) => {
   await mockGeneration(page);
   await openApp(page);
 
-  await expect(page.getByRole("heading", { name: "Where should we start?" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "What should we make next?" })).toBeVisible();
   await expect(page.getByLabel("Creation mode")).toHaveCount(0);
   await generate(page);
   await expect(page.locator(".assistant-option")).toHaveCount(12);
@@ -18,11 +18,11 @@ test("keeps primary controls keyboard reachable with visible focus", async ({ pa
   await page.keyboard.press("Tab");
   await expect(page.getByRole("link", { name: "Stanley home" })).toBeFocused();
   await page.keyboard.press("Tab");
-  await expect(page.getByRole("button", { name: "New chat", exact: true })).toBeFocused();
+  await expect(page.getByRole("link", { name: "New video", exact: true })).toBeFocused();
   await page.keyboard.press("Tab");
-  await expect(page.getByRole("button", { name: "Dashboard" })).toBeFocused();
+  await expect(page.getByRole("link", { name: "Dashboard" })).toBeFocused();
   await page.keyboard.press("Tab");
-  await expect(page.getByRole("button", { name: "Outliers" })).toBeFocused();
+  await expect(page.getByRole("link", { name: "Creator Twin" })).toBeFocused();
 
   await page.getByLabel("Message Stanley").focus();
   await expect(page.getByLabel("Message Stanley")).toBeFocused();

@@ -98,7 +98,7 @@ test("turns a successful OAuth callback into a personalized first chat", async (
   await expect(page.getByText(/You’re connected to Thomas Creates/)).toBeVisible({ timeout: 4_000 });
   await expect(page.getByText(/I Let AI Plan My Week/)).toBeVisible();
   await expect(page.locator(".channel-connection").getByText("Thomas Creates", { exact: true })).toBeVisible();
-  await expect(page.getByText("YouTube connected", { exact: true })).toBeVisible();
+  await expect(page.getByText("Your channel", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: /Switch creator profile/ }).click();
   await expect(page.getByRole("menuitemradio")).toHaveCount(2);
   await expect(page.getByRole("menuitem", { name: "Disconnect YouTube" })).toHaveCount(0);
@@ -121,7 +121,7 @@ test("loads connected channel avatars through the local image proxy", async ({ p
 
   await page.goto("/?youtube=connected");
   await waitForApp(page);
-  await expect(page.getByText("YouTube connected", { exact: true })).toBeVisible({ timeout: 4_000 });
+  await expect(page.getByText("Your channel", { exact: true })).toBeVisible({ timeout: 4_000 });
   expect(await page.locator('img[src^="/api/youtube/avatar"]').count()).toBeGreaterThanOrEqual(2);
   expect(avatarRequests).toBeGreaterThan(0);
   await expect(page.locator(".youtube-avatar-fallback")).toHaveCount(0);

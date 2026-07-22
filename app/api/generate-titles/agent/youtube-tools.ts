@@ -39,7 +39,7 @@ type YouTubeToolOptions = {
 };
 
 type SearchResponse = {
-  items?: Array<{ id?: { videoId?: string; channelId?: string }; snippet?: { channelId?: string; title?: string } }>;
+  items?: Array<{ id?: { videoId?: string; channelId?: string }; snippet?: { channelId?: string; channelTitle?: string; title?: string } }>;
   nextPageToken?: string;
   pageInfo?: { totalResults?: number };
   error?: { message?: string };
@@ -104,6 +104,14 @@ function channelCandidates(response: SearchResponse) {
   return (response.items || []).flatMap((item) => {
     const id = item.id?.channelId || item.snippet?.channelId || "";
     const title = item.snippet?.title?.trim() || "";
+    return id && title ? [{ id, title }] : [];
+  });
+}
+
+function videoChannelCandidates(response: SearchResponse) {
+  return (response.items || []).flatMap((item) => {
+    const id = item.snippet?.channelId || "";
+    const title = item.snippet?.channelTitle?.trim() || "";
     return id && title ? [{ id, title }] : [];
   });
 }
@@ -422,6 +430,29 @@ function searchReferenceVideosTool(options: YouTubeToolOptions): ToolDefinition 
               exactMatches = [mixedQueryMatch];
               correctedChannelName = true;
               channelResolution = "context";
+            }
+          }
+          if (!exactMatches.length) {
+            const videoLookupUrl = new URL("https://www.googleapis.com/youtube/v3/search");
+            videoLookupUrl.search = new URLSearchParams({
+              part: "snippet",
+              type: "video",
+              maxResults: "10",
+              order: "relevance",
+              q: channelName,
+            }).toString();
+            const videoLookup = await youtubeRequest<SearchResponse>(videoLookupUrl, options, context.signal);
+            const uploadChannels = videoChannelCandidates(videoLookup);
+            const exactUploadChannels = Array.from(new Map(uploadChannels
+              .filter((candidate) => normalizedChannelName(candidate.title) === requestedName)
+              .map((candidate) => [candidate.id, candidate])).values());
+            const uploadMatch = exactUploadChannels.length === 1
+              ? exactUploadChannels[0]
+              : uniqueNearChannelMatch(channelName, uploadChannels);
+            if (uploadMatch && !LOOKALIKE_CHANNEL_WORDS.test(normalizedChannelName(uploadMatch.title))) {
+              exactMatches = [uploadMatch];
+              correctedChannelName = normalizedChannelName(uploadMatch.title) !== requestedName;
+              channelResolution = correctedChannelName ? "typo" : "exact";
             }
           }
         }

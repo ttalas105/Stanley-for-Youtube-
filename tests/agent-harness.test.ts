@@ -454,6 +454,22 @@ test("searches videos only after resolving one exact channel display name", asyn
   }
 });
 
+test("retries one dropped model connection without losing the prompt", async () => {
+  const dropped = Object.assign(new Error("Network connection lost."), { remote: true, retryable: true });
+  const provider = new MockProvider([
+    () => { throw dropped; },
+    finalReply("The prompt completed after reconnecting."),
+  ]);
+  const events: Array<{ id: string; status: string }> = [];
+  const result = await run(provider, new ToolRegistry([readTool()]), {
+    onEvent: (event) => { events.push(event); },
+  });
+
+  assert.deepEqual(result.output, { reply: "The prompt completed after reconnecting." });
+  assert.equal(provider.requests.length, 2);
+  assert.ok(events.some((event) => event.id === "model-retry" && event.status === "active"));
+});
+
 test("recovers one-character creator misspellings without selecting clip channels", async () => {
   const originalFetch = globalThis.fetch;
   const requestedUrls: string[] = [];
@@ -481,6 +497,47 @@ test("recovers one-character creator misspellings without selecting clip channel
     assert.equal(result.status, "partial");
     assert.equal(new URL(requestedUrls[1] || "http://invalid").searchParams.get("channelId"), "jynxzi-main");
     assert.match(result.warnings.join(" "), /resolved.+Jynxi.+Jynxzi/i);
+    assert.deepEqual((result.data as { resolvedChannel?: unknown }).resolvedChannel, {
+      requestedName: "Jynxi",
+      title: "Jynxzi",
+      corrected: true,
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("uses matching upload channels when channel search misses a one-character creator typo", async () => {
+  const originalFetch = globalThis.fetch;
+  const requestedUrls: string[] = [];
+  globalThis.fetch = async (input) => {
+    const url = new URL(String(input));
+    requestedUrls.push(url.toString());
+    if (url.pathname.endsWith("/search") && url.searchParams.get("type") === "channel") {
+      return Response.json({ items: [
+        { id: { channelId: "unrelated" }, snippet: { channelId: "unrelated", title: "Jynxi Clips Archive" } },
+      ] });
+    }
+    if (url.pathname.endsWith("/search") && !url.searchParams.get("channelId")) {
+      return Response.json({ items: [
+        { id: { videoId: "discovery123" }, snippet: { channelId: "jynxzi-main", channelTitle: "Jynxzi", title: "A Jynxzi upload" } },
+      ] });
+    }
+    if (url.pathname.endsWith("/search")) {
+      return Response.json({ items: [{ id: { videoId: "video123" } }] });
+    }
+    return Response.json({ items: [{
+      id: "video123",
+      snippet: { title: "A real upload", channelTitle: "Jynxzi", publishedAt: new Date(Date.now() - 86_400_000).toISOString(), thumbnails: {} },
+      statistics: { viewCount: "12000" },
+      contentDetails: { duration: "PT8M" },
+    }] });
+  };
+  try {
+    const registry = createYouTubeToolRegistry({ apiKey: "test-key", session: null, allowPublicSearch: true, allowChannelSnapshot: false, allowVideoEvidence: false });
+    const result = await registry.execute("youtube_search_reference_videos", { channelName: "Jynxi", maxResults: 4 }, new AbortController().signal);
+    assert.equal(result.status, "partial");
+    assert.equal(new URL(requestedUrls[2] || "http://invalid").searchParams.get("channelId"), "jynxzi-main");
     assert.deepEqual((result.data as { resolvedChannel?: unknown }).resolvedChannel, {
       requestedName: "Jynxi",
       title: "Jynxzi",
