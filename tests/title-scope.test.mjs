@@ -10,6 +10,8 @@ test("extracts an explicitly named public YouTube channel", () => {
   assert.equal(explicitPublicYouTubeChannelName("Analyze youtube.com/channel/UC1234567890123456789012"), "UC1234567890123456789012");
   assert.equal(explicitPublicYouTubeChannelName("Look at my YouTube channel"), "");
   assert.equal(explicitPublicYouTubeChannelName("Do some research on a YouTuber named Jynxi and tell me why he does so well."), "Jynxi");
+  assert.equal(explicitPublicYouTubeChannelName("I love the youtuber Jynxi. Can you tell me how I can make my channel more like his?"), "Jynxi");
+  assert.equal(explicitPublicYouTubeChannelName("I forgot the YouTuber who reviews cameras."), "");
 });
 
 const pretextPrompts = [
@@ -159,6 +161,7 @@ test("recognizes explicit public YouTube trend and channel research", () => {
     "Can you access Casey Neistat's channel and analyze it?",
     "Can you go to David Goggins' YouTube channel and make this idea similar to his?",
     "Do some research on a YouTuber named Jynxi and tell me why he does so well.",
+    "I love the youtuber Jynxi. Can you tell me how I can make my channel more like his?",
     "Show me the top-performing YouTube videos from the past week.",
   ];
   for (const prompt of supported) assert.equal(looksLikePublicYouTubeResearchRequest(prompt), true, prompt);

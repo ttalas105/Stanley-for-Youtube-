@@ -63,10 +63,18 @@ test("recognizes a natural named-creator lookup without requiring the word chann
   assert.equal(explicitPublicYouTubeChannelName("Research the YouTuber Colin and Samir."), "Colin and Samir");
   assert.equal(explicitPublicYouTubeChannelName("Do some research on a YouTuber named Jynxi and tell me why he does so well."), "Jynxi");
   assert.equal(explicitPublicYouTubeChannelName("Research a creator called Jynxzi."), "Jynxzi");
+  assert.equal(
+    explicitPublicYouTubeChannelName("I love the youtuber Jynxi. Can you tell me how I can make my channel more like his?"),
+    "Jynxi",
+  );
   assert.equal(looksLikePublicYouTubeResearchRequest("Look up Will Tennyson"), true);
   assert.deepEqual(
     resolveResearchAccess("Look up Will Tennyson"),
     { publicSearch: true, channelSnapshot: false, videoEvidence: true },
+  );
+  assert.deepEqual(
+    resolveResearchAccess("I love the youtuber Jynxi. Can you tell me how I can make my channel more like his?"),
+    { publicSearch: true, channelSnapshot: true, videoEvidence: true },
   );
 });
 

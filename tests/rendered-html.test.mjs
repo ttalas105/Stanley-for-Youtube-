@@ -86,7 +86,9 @@ test("keeps AI keys server-side and removes the disposable starter", async () =>
   assert.match(route, /youtube_research/);
   assert.match(route, /public_youtube_research/);
   assert.match(route, /\|\| scope\.intent === "youtube_research"/);
-  assert.match(route, /useConnectedChannelResearch = Boolean\(!useExactVideoResearch && !demoCreator && researchAccess\.channelSnapshot\)/);
+  assert.match(route, /compareConnectedChannelToNamedCreator = Boolean/);
+  assert.match(route, /researchAccess\.channelSnapshot && !namedPublicChannel/);
+  assert.match(route, /connected-channel-comparison/);
   assert.match(route, /Use youtube_channel_snapshot before answering/);
   assert.match(route, /requiredTool = useExactVideoResearch/);
   assert.match(route, /\? "youtube_get_video_evidence"/);

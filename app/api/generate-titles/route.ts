@@ -1098,7 +1098,10 @@ async function generateResponse(request: Request, emitProgress?: ProgressEmitter
     ? `${currentMessage}\nAnalyze ${conversationPublicChannel}'s YouTube channel.`
     : currentMessage;
   const researchAccess = resolveResearchAccess(researchGateMessage, inputAttachments.some((attachment) => attachment.kind === "youtube"));
-  const namedPublicChannel = !researchAccess.channelSnapshot ? conversationPublicChannel : "";
+  // A request can name another creator and ask for a comparison with the
+  // connected channel. Never discard the public creator merely because the
+  // same sentence also says "my channel".
+  const namedPublicChannel = conversationPublicChannel;
   const connectedVideoLimit = requestedConnectedVideoCount(currentMessage) || 12;
   const researchWindowHours = requestedResearchWindowHours(currentMessage);
   const forceMostPopularChart = requestsBroadPopularVideos(currentMessage);
@@ -1381,7 +1384,12 @@ RUNTIME_CONTEXT_END`;
       message.role === "assistant" && /(?:Title options|Idea options|Generated thumbnail):/.test(message.content),
     );
     const useExactVideoResearch = Boolean(referencedVideoId);
-    const useConnectedChannelResearch = Boolean(!useExactVideoResearch && !demoCreator && researchAccess.channelSnapshot);
+    const compareConnectedChannelToNamedCreator = Boolean(
+      !useExactVideoResearch && !demoCreator && namedPublicChannel && researchAccess.channelSnapshot,
+    );
+    const useConnectedChannelResearch = Boolean(
+      !useExactVideoResearch && !demoCreator && researchAccess.channelSnapshot && !namedPublicChannel,
+    );
     const useLatestConnectedVideoResearch = Boolean(
       !demoCreator && scope.reason === "connected_latest_video_research",
     );
@@ -1483,6 +1491,8 @@ Answer the creator's exact question directly. If the channel snapshot has no upl
       let prefetchedEvidence: Awaited<ReturnType<typeof toolRegistry.execute>> | null = null;
       let prefetchedEvidenceDurationMs = 0;
       let prefetchedTool = "";
+      let connectedComparisonEvidence: Awaited<ReturnType<typeof toolRegistry.execute>> | null = null;
+      let connectedComparisonDurationMs = 0;
       if (useExactVideoResearch) {
         prefetchedTool = "youtube_get_video_evidence";
         const evidenceStartedAt = Date.now();
@@ -1580,6 +1590,29 @@ Answer the creator's exact question directly. If the channel snapshot has no upl
         };
         return { run, reply, research: undefined, evidence: JSON.stringify(prefetchedEvidence), evidenceResult: prefetchedEvidence };
       }
+      if (compareConnectedChannelToNamedCreator && prefetchedTool === "youtube_search_reference_videos") {
+        const snapshotStartedAt = Date.now();
+        await emitProgress?.({
+          id: "connected-channel-comparison",
+          label: "Comparing with your channel",
+          detail: "Reading your connected channel before making the comparison",
+          status: "active",
+          kind: "tool",
+        });
+        connectedComparisonEvidence = await toolRegistry.execute(
+          "youtube_channel_snapshot",
+          { scope: "connected_channel", maxVideos: connectedVideoLimit },
+          request.signal,
+        );
+        connectedComparisonDurationMs = Date.now() - snapshotStartedAt;
+        await emitProgress?.({
+          id: "connected-channel-comparison",
+          label: "Comparing with your channel",
+          detail: connectedComparisonEvidence.summary,
+          status: connectedComparisonEvidence.status === "complete" || connectedComparisonEvidence.status === "partial" ? "complete" : "limited",
+          kind: "tool",
+        });
+      }
       if (useExactVideoResearch && prefetchedEvidence) {
         const exactData = prefetchedEvidence.data && typeof prefetchedEvidence.data === "object"
           ? prefetchedEvidence.data as { title?: string; views?: number; publishedAt?: string }
@@ -1638,9 +1671,15 @@ CONNECTED_CHANNEL_SNAPSHOT_END`
         : namedPublicChannel && prefetchedEvidence
         ? `The creator explicitly named the public YouTube channel “${namedPublicChannel}”. The exact-channel lookup has already run and appears below. Do not call another tool, broaden the query, or substitute third-party uploads. Analyze only videos returned from the resolved channel. ${forArtifact ? "Keep this research handoff under 140 words because a separate creation layer will use it next." : "Refer to specific returned videos naturally and distinguish observed packaging from creative inference."}
 
+${connectedComparisonEvidence ? "The connected-channel snapshot also appears below. Compare only evidence present in these two results; do not fill either side with remembered claims." : ""}
+
 NAMED_CHANNEL_EVIDENCE_START
 ${JSON.stringify(prefetchedEvidence)}
-NAMED_CHANNEL_EVIDENCE_END`
+NAMED_CHANNEL_EVIDENCE_END${connectedComparisonEvidence ? `
+
+CONNECTED_CHANNEL_COMPARISON_START
+${JSON.stringify(connectedComparisonEvidence)}
+CONNECTED_CHANNEL_COMPARISON_END` : ""}`
         : `The creator explicitly asked for public YouTube research. Use youtube_search_reference_videos before answering.
 
 If they named a public creator or channel, search that exact channel with channelName. If they specified a period such as the last 24 hours, set publishedWithinHours to that exact window and do not add an invented topic query. Otherwise use one focused topic query. Analyze only the returned public metadata and statistics; never claim you watched footage or read a transcript. Give the useful pattern: what the examples have in common, what seems transferable, and what the sample cannot prove. ${forArtifact ? "Keep this research handoff under 140 words because a separate creation layer will use it next." : "Refer to specific returned examples naturally so the source list is useful."}`;
@@ -1667,6 +1706,17 @@ TRANSCRIPT_END
           ...(prefetchedEvidence.error?.code ? { errorCode: prefetchedEvidence.error.code } : {}),
         });
       }
+      if (connectedComparisonEvidence) {
+        run.toolResults.unshift(connectedComparisonEvidence);
+        run.trace.toolCalls.unshift({
+          round: 0,
+          name: "youtube_channel_snapshot",
+          durationMs: connectedComparisonDurationMs,
+          status: connectedComparisonEvidence.status,
+          memoHit: false,
+          ...(connectedComparisonEvidence.error?.code ? { errorCode: connectedComparisonEvidence.error.code } : {}),
+        });
+      }
       const result = run.output as { reply?: unknown };
       let reply = cleanReply(result.reply, forArtifact ? 1_500 : 3_200);
       if (!reply) throw new Error("Gemini returned an empty YouTube research response");
@@ -1675,11 +1725,14 @@ TRANSCRIPT_END
         : useConnectedChannelResearch
           ? "youtube_channel_snapshot"
           : "youtube_search_reference_videos";
-      const evidenceResults = run.toolResults.filter((item) => item.tool === requiredTool && (useExactVideoResearch || useConnectedChannelResearch || item.ok));
-      if (!evidenceResults.length) throw new Error(`The YouTube research layer did not run ${requiredTool}`);
+      const requiredEvidenceResults = run.toolResults.filter((item) => item.tool === requiredTool && (useExactVideoResearch || useConnectedChannelResearch || item.ok));
+      if (!requiredEvidenceResults.length) throw new Error(`The YouTube research layer did not run ${requiredTool}`);
+      const evidenceResults = run.toolResults.filter((item) =>
+        item.tool === requiredTool || (compareConnectedChannelToNamedCreator && item.tool === "youtube_channel_snapshot"),
+      );
       const evidence = JSON.stringify(evidenceResults.map(({ summary, data, warnings }) => ({ summary, data, warnings }))).slice(0, 16_000);
-      const evidenceResult = evidenceResults.at(-1);
-      if (requiredTool === "youtube_search_reference_videos" && !evidenceResults.some((item) => item.status === "complete" || item.status === "partial")) {
+      const evidenceResult = requiredEvidenceResults.at(-1);
+      if (requiredTool === "youtube_search_reference_videos" && !requiredEvidenceResults.some((item) => item.status === "complete" || item.status === "partial")) {
         const evidenceData = evidenceResult?.data && typeof evidenceResult.data === "object"
           ? evidenceResult.data as { query?: unknown }
           : {};

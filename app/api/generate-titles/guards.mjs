@@ -85,14 +85,15 @@ export function explicitPublicYouTubeChannelName(value) {
   if (channelUrl?.[1]) return channelUrl[1];
   if (channelUrl?.[2]) return `@${channelUrl[2]}`;
   const namedCreator = /\b(?:research|look\s+up|check\s+out|analy[sz]e|review|audit)\s+(?:on\s+)?(?:a|an|the)?\s*(?:youtube\s+)?(?:creator|youtuber|channel)\s+(?:named|called)\s+["“”']?([A-Za-z0-9][A-Za-z0-9&.'_-]*(?:\s+[A-Za-z0-9][A-Za-z0-9&.'_-]*){0,4})["“”']?(?=\s*(?:[.!?]|$|\band\s+(?:tell|give|show|analy[sz]e|compare|make|use)\b))/i.exec(message);
+  const identifiedCreator = /\bthe\s+(?:youtube\s+)?(?:creator|youtuber)\s+["“”']?(?!(?:who|that|i|you|we|they)\b)([A-Za-z0-9][A-Za-z0-9&.'_-]*(?:\s+(?:and\s+)?[A-Za-z0-9][A-Za-z0-9&.'_-]*){0,3})["“”']?(?=\s*(?:[.!?]|$|\band\s+(?:tell|give|show|analy[sz]e|compare|make|use)\b))/i.exec(message);
   const channelMatch = /\b(?:go\s+to|visit|check\s+out|pull\s+up|look\s+(?:up|at)|take\s+a\s+look\s+at|access|analy[sz]e|review|audit|break\s+down|compare\s+(?:me\s+)?(?:to|with))\s+(?:the\s+)?["“”']?(.{2,80}?)["“”']?(?:['’]s?)?\s+(?:youtube\s+)?channel\b/i.exec(message);
   const directLookup = /\b(?:look\s+up|check\s+out|research)\s+(?:the\s+)?(?:youtube\s+)?(?:creator\s+|youtuber\s+)?["“”']?([A-Za-z0-9][A-Za-z0-9&.'_-]*(?:\s+[A-Za-z0-9][A-Za-z0-9&.'_-]*){0,4})["“”']?(?:\s+(?:on\s+youtube|youtube\s+channel|channel|youtuber|creator))?(?=\s*(?:[.!?]|$|\band\s+(?:tell|give|show|analy[sz]e|compare|make|use)\b))/i.exec(message);
-  const channelName = (namedCreator?.[1] || channelMatch?.[1] || directLookup?.[1])
+  const channelName = (namedCreator?.[1] || identifiedCreator?.[1] || channelMatch?.[1] || directLookup?.[1])
     ?.replace(/\s+/g, " ")
     .replace(/["“”']+$/g, "")
     .replace(/[.,!?;:]+$/g, "")
     .trim();
-  if (!channelName || /^(?:my|our|your|their|the|this|that|youtube|youtubers?|creators?|channels?|videos?|comparable\s+videos?|current\s+trends?)$/i.test(channelName)) return "";
+  if (!channelName || /^(?:my|our|your|their|the|this|that|who|youtube|youtubers?|creators?|channels?|videos?|comparable\s+videos?|current\s+trends?)$/i.test(channelName)) return "";
   return channelName;
 }
 
